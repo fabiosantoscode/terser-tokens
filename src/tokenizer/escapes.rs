@@ -147,7 +147,7 @@ pub fn read_escaped_char_inner(input: &str, strict_hex: bool) -> IResult<&str, O
     }
 }
 
-fn read_octal_escape_sequence(input: &str, strict_hex: bool) -> IResult<&str, char> {
+fn read_octal_escape_sequence(input: &str, _strict_hex: bool) -> IResult<&str, char> {
     map(
         alt((
             // A digit below 4, followed by 2 digits (max 377, 255 in decimal)

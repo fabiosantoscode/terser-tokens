@@ -103,15 +103,6 @@ impl JsToken {
         }
     }
 
-    pub fn may_contain_newline(&self, raw: &str) -> bool {
-        match self {
-            JsToken::String(_) => true,
-            JsToken::Comment(_) => true,
-            JsToken::TemplateString(_, _, _) => true,
-            _ => false,
-        }
-    }
-
     pub fn to_wasm_bindgen_jsvalue(&self) -> JsValue {
         match self {
             /*JsToken::Punc(_) | JsToken::Operator(_)  | JsToken::Keyword(_)  | JsToken::Atom(_) | JsToken::Arrow | JsToken::Expand | JsToken::Name(_) => {

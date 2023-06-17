@@ -20,11 +20,15 @@ unicode-ident = "1.0.6"
 lalrpop-util = "0.19.7"
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.4"
+lazy_static = "1.4.0"
+fix_fn = "1.0.2"
+domtree = "0.2.0"
 
-swc_core = {version = "0.69", features = ["ecma_parser"] }
-swc_ecma_codegen = "0.135.7"
-swc_ecma_parser = "0.130.6"
-swc_common = "0.29.37"
+swc_core = {version = "0.78.3", features = ["ecma_parser", "ecma_ast"] }
+swc_ecma_codegen = "0.141.2"
+swc_ecma_parser = "0.136.0"
+swc_ecma_ast = "0.106.0"
+swc_common = "0.31.12"
 
 
 [dev-dependencies]

@@ -11,7 +11,7 @@ pub(crate) fn own_error(
             code: e.code,
         }),
         nom::Err::Incomplete(e) => {
-            unreachable!("nom::Err::Incomplete found")
+            unreachable!("nom::Err::Incomplete({:?}) found", e)
         }
     }
 }
