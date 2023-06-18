@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct BasicBlock {
     pub body: Vec<(usize, BasicBlockInstruction)>,
     pub exit: BasicBlockExit,
@@ -25,7 +25,7 @@ impl BasicBlock {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum BasicBlockExit {
     Jump(usize),
     Cond(usize, usize, usize),
@@ -54,12 +54,12 @@ impl Default for BasicBlockExit {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ExitType {
     Return,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum BasicBlockInstruction {
     LitNumber(f64),
     Ref(usize),

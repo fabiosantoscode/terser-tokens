@@ -1,7 +1,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use domtree::dfs::DFSGraph;
+
+use crate::basic_blocks::basic_block::BasicBlock;
 use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
+use crate::basic_blocks::basic_block_group::BasicBlockGroup;
+use crate::basic_blocks::dominator_tree;
 
 pub fn normalize_basic_blocks(
     exits: &Vec<BasicBlockExit>,
@@ -26,11 +31,30 @@ pub fn normalize_basic_blocks(
     let out_exits: Vec<BasicBlockExit> = vec![];
     let out_basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>> = vec![];
 
+    let reachable_blocks = {
+        let func = BasicBlockGroup::from_asts(
+            exits.iter().zip(basic_blocks.iter()).map(
+                |(exit, block)| {
+                    BasicBlock::new(block.clone(), exit.clone())
+                },
+            ).collect()
+        );
+        let g = func.get_dom_graph();
+
+        HashSet::<usize>::from_iter(g.post_order_sequence(0).into_iter())
+    };
+
     let (mut out_exits, out_basic_blocks) = exits.iter().zip(basic_blocks.iter()).enumerate().fold(
         (out_exits, out_basic_blocks),
         |(mut out_exits, mut out_basic_blocks), (i, (exit, block))| {
-            let can_eliminate = match out_exits.last() {
-                Some(BasicBlockExit::Jump(j)) if *j == i => {
+            if !reachable_blocks.contains(&i) {
+                eliminated_count += 1;
+                return (out_exits, out_basic_blocks);
+            }
+
+            let do_merge = match (out_exits.last(), out_basic_blocks.last()) {
+                prevvy if prevvy == (Some(exit), Some(block)) => true,
+                (Some(BasicBlockExit::Jump(j)), _) if *j == i => {
                     !jumped_to.contains(j)
                         && !jumped_to.contains(&(*j + 1))
                         && !jumped_to.contains(&i)
@@ -38,11 +62,7 @@ pub fn normalize_basic_blocks(
                 _ => false,
             };
 
-            match (
-                can_eliminate,
-                out_exits.last_mut(),
-                out_basic_blocks.last_mut(),
-            ) {
+            match (do_merge, out_exits.last_mut(), out_basic_blocks.last_mut()) {
                 (true, Some(prev_exit), Some(prev_block)) => {
                     *prev_exit = exit.clone();
                     prev_block.extend(block.clone());
@@ -56,7 +76,6 @@ pub fn normalize_basic_blocks(
             };
 
             swapped_labels.insert(i, i - eliminated_count);
-
             (out_exits, out_basic_blocks)
         },
     );
@@ -65,19 +84,13 @@ pub fn normalize_basic_blocks(
     for exit in out_exits.iter_mut() {
         match exit {
             BasicBlockExit::Jump(j) => {
-                if let Some(new_j) = swapped_labels.get(j) {
-                    *j = *new_j;
-                }
+                *j = *swapped_labels.get(j).unwrap();
             }
             BasicBlockExit::Cond(_, c, a) => {
-                if let Some(new_c) = swapped_labels.get(c) {
-                    *c = *new_c;
-                }
-                if let Some(new_a) = swapped_labels.get(a) {
-                    *a = *new_a;
-                }
+                *c = *swapped_labels.get(c).unwrap();
+                *a = *swapped_labels.get(a).unwrap();
             }
-            _ => {}
+            BasicBlockExit::ExitFn(_, _) => { /* nothing */ }
         }
     }
 

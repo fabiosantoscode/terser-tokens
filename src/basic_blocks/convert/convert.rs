@@ -203,6 +203,7 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
             }
             Stmt::While(whil) => {
                 let blockidx_start = current_block_index();
+                push_label(NestedIntoStatement::Unlabelled);
 
                 let test = expr_to_basic_blocks(&whil.test);
 
@@ -227,6 +228,16 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                         blockidx_after_body,
                     ));
                 }
+
+                let jumpers_towards_me = pop_label();
+                if jumpers_towards_me.len() > 0 {
+                    for jumper in jumpers_towards_me {
+                        let mut exits = exits.borrow_mut();
+                        exits[jumper] = Some(BasicBlockExit::Jump(current_block_index()));
+                    }
+                }
+
+                wrap_up_block();
             }
             Stmt::If(IfStmt {
                 test, cons, alt, ..
@@ -278,18 +289,9 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                 }
             }
             Stmt::Block(block) => {
-                push_label(NestedIntoStatement::Unlabelled);
                 for stat in &block.stmts {
                     stat_to_basic_blocks(stat);
                     wrap_up_block();
-                }
-                let jumpers_towards_me = pop_label();
-                if jumpers_towards_me.len() > 0 {
-                    wrap_up_block();
-                    for jumper in jumpers_towards_me {
-                        let mut exits = exits.borrow_mut();
-                        exits[jumper] = Some(BasicBlockExit::Jump(current_block_index()));
-                    }
                 }
             }
             Stmt::Break(br) => match br.label {
@@ -589,18 +591,15 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            exit = cond $0 ? jump @2 : jump @5
+            exit = cond $0 ? jump @2 : jump @4
         }
         @2: {
             exit = jump @4
         }
         @3: {
-            exit = jump @4
-        }
-        @4: {
             exit = jump @0
         }
-        @5: {
+        @4: {
             $1 = undefined
             exit = return $1
         }
