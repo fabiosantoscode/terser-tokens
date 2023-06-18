@@ -1,13 +1,13 @@
-use std::{fmt::{Debug, Formatter}};
+use std::fmt::{Debug, Formatter};
 
 #[derive(Clone, Default)]
 pub struct BasicBlock {
-    pub body: Vec<(usize, SsaAstNode)>,
-    pub exit: SsaExit,
+    pub body: Vec<(usize, BasicBlockInstruction)>,
+    pub exit: BasicBlockExit,
 }
 
 impl BasicBlock {
-    pub fn new(body: Vec<(usize, SsaAstNode)>, exit: SsaExit) -> Self {
+    pub fn new(body: Vec<(usize, BasicBlockInstruction)>, exit: BasicBlockExit) -> Self {
         Self { body, exit }
     }
 
@@ -16,43 +16,41 @@ impl BasicBlock {
         self.exit = other.exit;
     }
 
-    pub fn outgoing_edges(&self) -> Vec<usize>{
+    pub fn outgoing_edges(&self) -> Vec<usize> {
         match self.exit {
-            SsaExit::Jump(target) => vec![target],
-            SsaExit::Cond(_, true_target, false_target) => vec![true_target, false_target],
-            SsaExit::ExitFn(_, _) => vec![],
+            BasicBlockExit::Jump(target) => vec![target],
+            BasicBlockExit::Cond(_, true_target, false_target) => vec![true_target, false_target],
+            BasicBlockExit::ExitFn(_, _) => vec![],
         }
     }
 }
 
 #[derive(Clone)]
-pub enum SsaExit {
+pub enum BasicBlockExit {
     Jump(usize),
     Cond(usize, usize, usize),
     ExitFn(ExitType, usize),
 }
 
-impl SsaExit {
-    pub(crate) fn subtract_labels(&self, eliminated_count: usize) -> SsaExit {
+impl BasicBlockExit {
+    pub(crate) fn subtract_labels(&self, eliminated_count: usize) -> BasicBlockExit {
         match self {
-            SsaExit::Jump(target) => SsaExit::Jump(*target - eliminated_count),
-            SsaExit::Cond(cond, true_target, false_target) => {
-                SsaExit::Cond(
-                    *cond,
-                    *true_target - eliminated_count,
-                    *false_target - eliminated_count,
-                )
-            }
-            SsaExit::ExitFn(exit_type, target) => {
-                SsaExit::ExitFn(exit_type.clone(), *target - eliminated_count)
+            BasicBlockExit::Jump(target) => BasicBlockExit::Jump(*target - eliminated_count),
+            BasicBlockExit::Cond(cond, true_target, false_target) => BasicBlockExit::Cond(
+                *cond,
+                *true_target - eliminated_count,
+                *false_target - eliminated_count,
+            ),
+            BasicBlockExit::ExitFn(exit_type, target) => {
+                BasicBlockExit::ExitFn(exit_type.clone(), *target - eliminated_count)
             }
         }
     }
 }
 
-impl Default for SsaExit {
+impl Default for BasicBlockExit {
     fn default() -> Self {
-        SsaExit::Jump(0)
+        BasicBlockExit::Jump(0)
     }
 }
 
@@ -62,7 +60,7 @@ pub enum ExitType {
 }
 
 #[derive(Clone)]
-pub enum SsaAstNode {
+pub enum BasicBlockInstruction {
     LitNumber(f64),
     Ref(usize),
     BinOp(String, usize, usize),
@@ -70,14 +68,14 @@ pub enum SsaAstNode {
     Undefined,
 }
 
-impl SsaAstNode {
+impl BasicBlockInstruction {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
-            SsaAstNode::LitNumber(_) => vec![],
-            SsaAstNode::Ref(id) => vec![*id],
-            SsaAstNode::BinOp(_, l, r) => vec![*l, *r],
-            SsaAstNode::Phi(vars) => vars.clone(),
-            SsaAstNode::Undefined => vec![],
+            BasicBlockInstruction::LitNumber(_) => vec![],
+            BasicBlockInstruction::Ref(id) => vec![*id],
+            BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
+            BasicBlockInstruction::Phi(vars) => vars.clone(),
+            BasicBlockInstruction::Undefined => vec![],
         }
     }
 }
@@ -93,16 +91,16 @@ impl Debug for BasicBlock {
     }
 }
 
-impl Debug for SsaAstNode {
+impl Debug for BasicBlockInstruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SsaAstNode::LitNumber(num) => {
+            BasicBlockInstruction::LitNumber(num) => {
                 write!(f, "{}", num)
             }
-            SsaAstNode::BinOp(op, l, r) => {
+            BasicBlockInstruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }
-            SsaAstNode::Phi(vars) => {
+            BasicBlockInstruction::Phi(vars) => {
                 write!(
                     f,
                     "either({})",
@@ -112,26 +110,26 @@ impl Debug for SsaAstNode {
                         .join(", ")
                 )
             }
-            SsaAstNode::Ref(id) => {
+            BasicBlockInstruction::Ref(id) => {
                 write!(f, "${}", id)
             }
-            SsaAstNode::Undefined => {
+            BasicBlockInstruction::Undefined => {
                 write!(f, "undefined")
             }
         }
     }
 }
 
-impl Debug for SsaExit {
+impl Debug for BasicBlockExit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SsaExit::Cond(cond, cons, alt) => {
+            BasicBlockExit::Cond(cond, cons, alt) => {
                 write!(f, "cond ${} ? jump @{} : jump @{}", cond, cons, alt)
             }
-            SsaExit::Jump(to) => {
+            BasicBlockExit::Jump(to) => {
                 write!(f, "jump @{}", to)
             }
-            SsaExit::ExitFn(exit_type, val) => match exit_type {
+            BasicBlockExit::ExitFn(exit_type, val) => match exit_type {
                 ExitType::Return => {
                     write!(f, "return ${}", val)
                 }

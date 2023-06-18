@@ -1,11 +1,7 @@
-use super::dominator_tree::Graph;
-use super::basic_block::{ExitType, SsaAstNode, SsaExit};
+use super::basic_block::{BasicBlockExit, ExitType};
 use super::basic_block_group::BasicBlockGroup;
-use domtree::frontier::DominanceFrontier;
-use domtree::DomTree;
-use std::collections::{HashMap, HashSet};
+use super::dominator_tree::Graph;
 use std::fmt::{Debug, Formatter};
-use swc_ecma_ast::{Expr, Ident, ReturnStmt, Stmt};
 
 impl BasicBlockGroup {
     pub fn to_js_ast(&self) -> () {
@@ -13,7 +9,7 @@ impl BasicBlockGroup {
     }
 }
 
-#[derive( Default, Clone)]
+#[derive(Default, Clone)]
 enum StructuredFlow {
     #[default]
     Nop,
@@ -27,8 +23,8 @@ enum StructuredFlow {
     Loop(Vec<StructuredFlow>),
     Block(Vec<StructuredFlow>),
     Return(ExitType),
-    SsaBlock(usize),
-    SsaRef(usize)
+    BasicBlock(usize),
+    VarRef(usize),
 }
 
 impl StructuredFlow {
@@ -41,8 +37,8 @@ impl StructuredFlow {
             StructuredFlow::Loop(_) => "Loop".to_string(),
             StructuredFlow::Block(_) => "Block".to_string(),
             StructuredFlow::Return(_) => "Return".to_string(),
-            StructuredFlow::SsaBlock(_) => "SsaBlock".to_string(),
-            StructuredFlow::SsaRef(_) => "SsaRef".to_string(),
+            StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
+            StructuredFlow::VarRef(_) => "VarRef".to_string(),
         }
     }
     fn children(&self) -> Vec<Vec<StructuredFlow>> {
@@ -54,8 +50,8 @@ impl StructuredFlow {
             StructuredFlow::Loop(x) => vec![x.clone()],
             StructuredFlow::Block(x) => vec![x.clone()],
             StructuredFlow::Return(_) => vec![],
-            StructuredFlow::SsaBlock(_) => vec![],
-            StructuredFlow::SsaRef(_) => vec![],
+            StructuredFlow::BasicBlock(_) => vec![],
+            StructuredFlow::VarRef(_) => vec![],
         }
     }
     fn index(&self) -> Option<usize> {
@@ -67,19 +63,19 @@ impl StructuredFlow {
             StructuredFlow::Loop(_) => None,
             StructuredFlow::Block(_) => None,
             StructuredFlow::Return(_) => None,
-            StructuredFlow::SsaBlock(x) => Some(*x),
-            StructuredFlow::SsaRef(x) => Some(*x),
+            StructuredFlow::BasicBlock(x) => Some(*x),
+            StructuredFlow::VarRef(x) => Some(*x),
         }
     }
 }
 
 impl Debug for StructuredFlow {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-                let indent_str_lines = |s: &str| {
-                    let lines = s.lines();
-                    let indented_lines = lines.map(|line| format!("    {}", line));
-                    indented_lines.collect::<Vec<String>>().join("\n")
-                };
+        let indent_str_lines = |s: &str| {
+            let lines = s.lines();
+            let indented_lines = lines.map(|line| format!("    {}", line));
+            indented_lines.collect::<Vec<String>>().join("\n")
+        };
 
         if let Some(index) = self.index() {
             write!(f, "{}({})", self.str_head(), index)
@@ -127,7 +123,7 @@ enum ContainingSyntax {
 
 // https://dl.acm.org/doi/pdf/10.1145/3547621
 //
-fn do_tree(func: &BasicBlockGroup)  -> StructuredFlow{
+fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
     let dom = func.get_dom_graph();
 
     do_tree_inner(&dom, 0, Default::default())
@@ -164,9 +160,9 @@ fn node_within(graph: &Graph, node: usize, ys: Vec<&usize>, context: Ctx) -> Str
     match ys.split_first() {
         None => {
             let mut block_contents: Vec<StructuredFlow> = tx_block(graph, node, context.clone());
-            block_contents.push(match &graph.nodes[node].ssa.exit {
-                SsaExit::Jump(to) => do_branch(graph, node, *to, context),
-                SsaExit::Cond(e, t, f) => {
+            block_contents.push(match &graph.nodes[node].basic_block.exit {
+                BasicBlockExit::Jump(to) => do_branch(graph, node, *to, context),
+                BasicBlockExit::Cond(e, t, f) => {
                     let inner_context = {
                         let mut inner_context = context.clone();
                         inner_context
@@ -180,7 +176,7 @@ fn node_within(graph: &Graph, node: usize, ys: Vec<&usize>, context: Ctx) -> Str
                         vec![do_branch(graph, node, *f, inner_context.clone())],
                     )
                 }
-                SsaExit::ExitFn(exit, ret) => StructuredFlow::Return(exit.clone()),
+                BasicBlockExit::ExitFn(exit, ret) => StructuredFlow::Return(exit.clone()),
             });
             StructuredFlow::Block(block_contents)
         }
@@ -201,11 +197,11 @@ fn node_within(graph: &Graph, node: usize, ys: Vec<&usize>, context: Ctx) -> Str
 }
 
 fn tx_block(graph: &Graph, node: usize, context: Ctx) -> Vec<StructuredFlow> {
-    vec![StructuredFlow::SsaBlock(node)]
+    vec![StructuredFlow::BasicBlock(node)]
 }
 
 fn tx_expr(graph: &Graph, var_index: usize) -> Vec<StructuredFlow> {
-    vec![StructuredFlow::SsaRef(var_index)]
+    vec![StructuredFlow::VarRef(var_index)]
 }
 
 fn do_branch(graph: &Graph, source: usize, target: usize, context: Ctx) -> StructuredFlow {
@@ -255,35 +251,37 @@ fn is_merge_node(graph: &Graph, child: usize, root: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::basic_blocks::{
-        testutils::test_ssa_block,
+        testutils::test_basic_blocks,
         to_ast::{do_tree, reverse_postorder},
     };
 
     #[test]
     fn mk_stats() {
-        let func = test_ssa_block("123; 123; 123 ? 456 : 789");
+        let func = test_basic_blocks("123; 123; 123; 123; 123 ? 456 : 789");
         insta::assert_debug_snapshot!(func, @r###"
         @0: {
             $0 = 123
             $1 = 123
+            $2 = 123
+            $3 = 123
             exit = jump @1
         }
         @1: {
-            $2 = 123
-            exit = cond $2 ? jump @2 : jump @3
+            $4 = 123
+            exit = cond $4 ? jump @2 : jump @3
         }
         @2: {
-            $3 = 456
+            $5 = 456
             exit = jump @4
         }
         @3: {
-            $4 = 789
+            $6 = 789
             exit = jump @4
         }
         @4: {
-            $5 = either($3, $4)
-            $6 = undefined
-            exit = return $6
+            $7 = either($5, $6)
+            $8 = undefined
+            exit = return $8
         }
         "###);
 
@@ -294,11 +292,11 @@ mod tests {
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [SsaBlock(0), Block(
-                [SsaBlock(1), Branch(
-                    [SsaRef(2)]
-                    [Block([SsaBlock(2), Break(0)])]
-                    [Block([SsaBlock(3), Break(0)])]
+            [BasicBlockRef(0), Block(
+                [BasicBlockRef(1), Branch(
+                    [VarRef(4)]
+                    [Block([BasicBlockRef(2), Break(0)])]
+                    [Block([BasicBlockRef(3), Break(0)])]
                 )]
             )]
         )
@@ -307,7 +305,7 @@ mod tests {
 
     #[test]
     fn mk_stats_2() {
-        let func = test_ssa_block("123 ? (456 ? 7 : 8) : 9");
+        let func = test_basic_blocks("123 ? (456 ? 7 : 8) : 9");
         insta::assert_debug_snapshot!(func, @r###"
         @0: {
             $0 = 123
@@ -350,16 +348,16 @@ mod tests {
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [SsaBlock(0), Branch(
-                [SsaRef(0)]
+            [BasicBlockRef(0), Branch(
+                [VarRef(0)]
                 [Block(
-                    [SsaBlock(1), Branch(
-                        [SsaRef(1)]
-                        [Block([SsaBlock(2), Break(3)])]
-                        [Block([SsaBlock(3), Break(3)])]
+                    [BasicBlockRef(1), Branch(
+                        [VarRef(1)]
+                        [Block([BasicBlockRef(2), Break(3)])]
+                        [Block([BasicBlockRef(3), Break(3)])]
                     )]
                 )]
-                [Block([SsaBlock(6), Break(0)])]
+                [Block([BasicBlockRef(6), Break(0)])]
             )]
         )
         "###);
@@ -367,13 +365,15 @@ mod tests {
 
     #[test]
     fn mk_stats_3() {
-        let func = test_ssa_block("
+        let func = test_basic_blocks(
+            "
             while (777) {
                 if (888) {
                     break;
                 }
             }
-        ");
+        ",
+        );
         insta::assert_debug_snapshot!(func, @r###"
         @0: {
             $0 = 777
@@ -417,19 +417,19 @@ mod tests {
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [SsaBlock(0), Block(
-                [SsaBlock(1), Branch(
-                    [SsaRef(0)]
+            [BasicBlockRef(0), Block(
+                [BasicBlockRef(1), Branch(
+                    [VarRef(0)]
                     [Block(
-                        [SsaBlock(2), Block(
-                            [SsaBlock(3), Branch(
-                                [SsaRef(1)]
-                                [Block([SsaBlock(4), Break(3)])]
+                        [BasicBlockRef(2), Block(
+                            [BasicBlockRef(3), Branch(
+                                [VarRef(1)]
+                                [Block([BasicBlockRef(4), Break(3)])]
                                 [Break(2)]
                             )]
                         )]
                     )]
-                    [Block([SsaBlock(9), Return])]
+                    [Block([BasicBlockRef(9), Return])]
                 )]
             )]
         )

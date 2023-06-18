@@ -141,10 +141,7 @@ fn leading_trailing_dot() {
         handle_number(".123\n").unwrap(),
         ("\n", JsToken::Num(0.123))
     );
-    assert_eq!(
-        handle_number("0.\n").unwrap(),
-        ("\n", JsToken::Num(0.0))
-    );
+    assert_eq!(handle_number("0.\n").unwrap(), ("\n", JsToken::Num(0.0)));
 }
 
 #[test]
@@ -162,10 +159,7 @@ fn test_e() {
 
 #[test]
 fn test_main() {
-    assert_eq!(
-        handle_number("0!").unwrap(),
-        ("!", JsToken::Num(0.0))
-    );
+    assert_eq!(handle_number("0!").unwrap(), ("!", JsToken::Num(0.0)));
     assert_eq!(handle_number("0x10").unwrap(), ("", JsToken::Num(16.0)));
     assert_eq!(handle_number("010x").unwrap(), ("x", JsToken::Num(8.0)));
     assert_eq!(handle_number("10.35x").unwrap(), ("x", JsToken::Num(10.35)));

@@ -1,3 +1,4 @@
+use crate::tokenizer::tokens::Comment;
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until, take_while},
@@ -5,8 +6,6 @@ use nom::{
     sequence::{delimited, preceded},
     IResult,
 };
-use crate::tokenizer::tokens::{Comment};
-
 
 fn till_eol(input: &str) -> IResult<&str, &str> {
     take_while(|c: char| c != '\n')(input)
@@ -34,7 +33,7 @@ pub(crate) fn handle_shebang(input: &str) -> IResult<&str, Comment> {
 
 #[test]
 fn test_comment() {
-    use crate::tokenizer::tokens::{CommentKind};
+    use crate::tokenizer::tokens::CommentKind;
 
     assert_eq!(
         handle_comment("// hello world", true).unwrap(),

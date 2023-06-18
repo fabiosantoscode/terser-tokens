@@ -2,42 +2,27 @@
 use fix_fn::fix_fn;
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
 
+use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
 use crate::scope::scope::Scope;
-use crate::basic_blocks::basic_block::{SsaAstNode, SsaExit};
-use swc_ecma_ast::{CondExpr, Decl, Expr, IfStmt, Lit, Module, ModuleItem, Pat, PatOrExpr, Stmt};
+use swc_ecma_ast::{CondExpr, Decl, Expr, IfStmt, Lit, Pat, PatOrExpr, Stmt};
 
-use super::normalize::normalize_basic_blocks;
-use super::basic_block::ExitType;
-use super::{basic_block::BasicBlock, basic_block_group::BasicBlockGroup};
-
-pub fn module_to_basic_blocks(m: &Module) -> BasicBlockGroup {
-    let mut statements = Vec::new();
-
-    for stmt in &m.body {
-        match &stmt {
-            ModuleItem::ModuleDecl(_) => {
-                todo!("module_to_ssa: module decls not implemented");
-            }
-            ModuleItem::Stmt(stmt) => statements.push(stmt),
-        }
-    }
-
-    statements_to_ssa(&statements)
-}
+use super::super::basic_block::ExitType;
+use super::super::normalize::normalize_basic_blocks;
+use super::super::{basic_block::BasicBlock, basic_block_group::BasicBlockGroup};
 
 enum NestedIntoStatement {
     Labelled(String),
     Unlabelled,
 }
 
-pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
+pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
     let basic_blocks = RefCell::new(vec![vec![]]);
     let exits = RefCell::new(vec![None]);
     // We'll be incrementing these unique varnames as we go
     let var_index = RefCell::new(0_usize);
     let conditionals: RefCell<Option<HashMap<String, Vec<usize>>>> = RefCell::new(None);
     let scope: RefCell<Scope> = RefCell::new(Scope::new(false));
-    let current_ssa_push = |node: SsaAstNode| {
+    let push_instruction = |node: BasicBlockInstruction| {
         let id = var_index.borrow().clone();
         *var_index.borrow_mut() += 1;
         basic_blocks
@@ -47,13 +32,13 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
             .push((id, node));
         id
     };
-    let nth_ssa_push = |node: SsaAstNode, n: usize| {
+    let push_instruction_to_nth_block = |node: BasicBlockInstruction, n: usize| {
         let id = var_index.borrow().clone();
         *var_index.borrow_mut() += 1;
         basic_blocks.borrow_mut()[n].push((id, node));
         id
     };
-    let current_ssa_index = || basic_blocks.borrow().len() - 1;
+    let current_block_index = || basic_blocks.borrow().len() - 1;
     let assign_maybe_conditionally = |name: &str, value: usize| {
         let mut conditionals = conditionals.borrow_mut();
         println!("assign_maybe_conditionally: {} = {}", name, value);
@@ -82,8 +67,8 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
         if to_phi.len() > 0 {
             to_phi.sort_by_key(|(name, _)| *name);
             for (varname, phies) in to_phi {
-                let phi = SsaAstNode::Phi(phies.clone());
-                let phi_idx = current_ssa_push(phi);
+                let phi = BasicBlockInstruction::Phi(phies.clone());
+                let phi_idx = push_instruction(phi);
                 scope.borrow_mut().insert(varname.clone(), phi_idx);
             }
         }
@@ -92,31 +77,31 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
     let wrap_up_block = || {
         basic_blocks.borrow_mut().push(vec![]);
         exits.borrow_mut().push(None);
-        basic_blocks.borrow().len() - 1
+        current_block_index()
     };
 
-    let expr_to_ssa = fix_fn!(|expr_to_ssa, exp: &Expr| -> usize {
+    let expr_to_basic_blocks = fix_fn!(|expr_to_basic_blocks, exp: &Expr| -> usize {
         let create_gapped_block = |expr: &Expr| {
-            let before = basic_blocks.borrow().len() - 1;
-            let expr = expr_to_ssa(&expr);
-            let after = basic_blocks.borrow().len() - 1;
+            let before = current_block_index();
+            let expr = expr_to_basic_blocks(&expr);
+            let after = current_block_index();
             wrap_up_block();
 
             (before, expr, after)
         };
 
         let node = match exp {
-            Expr::Lit(Lit::Num(num)) => SsaAstNode::LitNumber(num.value),
+            Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
             Expr::Bin(bin) => {
-                let l = expr_to_ssa(&bin.left);
-                let r = expr_to_ssa(&bin.right);
+                let l = expr_to_basic_blocks(&bin.left);
+                let r = expr_to_basic_blocks(&bin.right);
 
-                SsaAstNode::BinOp("+".into(), l, r)
+                BasicBlockInstruction::BinOp("+".into(), l, r)
             }
             Expr::Ident(ident) => {
                 let Some(var_idx) = scope.borrow().get(&ident.sym.to_string()) else {todo!()};
 
-                SsaAstNode::Ref(var_idx)
+                BasicBlockInstruction::Ref(var_idx)
             }
             Expr::Assign(assign) => match &assign.left {
                 PatOrExpr::Pat(e) => match e.borrow() {
@@ -124,7 +109,7 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
                         let sym = ident.sym.to_string();
                         let Some(_old_idx) = scope.borrow().get(&sym) else {todo!()};
 
-                        let expr_idx = expr_to_ssa(&assign.right);
+                        let expr_idx = expr_to_basic_blocks(&assign.right);
                         assign_maybe_conditionally(&sym, expr_idx);
 
                         return expr_idx;
@@ -133,11 +118,11 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
                 },
                 _ => todo!(),
             },
-            Expr::Paren(paren) => return expr_to_ssa(&paren.expr),
+            Expr::Paren(paren) => return expr_to_basic_blocks(&paren.expr),
             Expr::Seq(seq) => {
                 let mut last = 0;
                 for expr in &seq.exprs {
-                    last = expr_to_ssa(expr);
+                    last = expr_to_basic_blocks(expr);
                 }
                 return last;
             }
@@ -151,20 +136,21 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
                 let (blockidx_consequent_before, cons, blockidx_consequent_after) =
                     create_gapped_block(&cons);
 
-                let blockidx_alternate_before = basic_blocks.borrow().len() - 1;
-                let alt = expr_to_ssa(&alt);
+                let blockidx_alternate_before = current_block_index();
+                let alt = expr_to_basic_blocks(&alt);
                 wrap_up_block();
-                let blockidx_after = basic_blocks.borrow().len() - 1;
+                let blockidx_after = current_block_index();
 
                 // block before gets a Cond node added
-                exits.borrow_mut()[blockidx_before] = Some(SsaExit::Cond(
+                exits.borrow_mut()[blockidx_before] = Some(BasicBlockExit::Cond(
                     test,
                     blockidx_consequent_before,
                     blockidx_alternate_before,
                 ));
 
                 // block starting with cons gets a Jump node added, to the current block
-                exits.borrow_mut()[blockidx_consequent_after] = Some(SsaExit::Jump(blockidx_after));
+                exits.borrow_mut()[blockidx_consequent_after] =
+                    Some(BasicBlockExit::Jump(blockidx_after));
 
                 let conditionally_assigned = conditionals.replace(old_conditionals);
 
@@ -172,14 +158,14 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
                 wrap_up_block();
 
                 // the retval of our ternary is a phi node
-                SsaAstNode::Phi(vec![cons, alt])
+                BasicBlockInstruction::Phi(vec![cons, alt])
             }
             _ => {
                 todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
             }
         };
 
-        current_ssa_push(node)
+        push_instruction(node)
     });
 
     // First item is downward propagated (contains where we are), the second is upward propagated (the jump target of a break)
@@ -193,48 +179,49 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
         target
     };
 
-    let stat_to_ssa = fix_fn!(|stat_to_ssa, stat: &Stmt| -> () {
+    let stat_to_basic_blocks = fix_fn!(|stat_to_basic_blocks, stat: &Stmt| -> () {
         match stat {
             Stmt::Expr(expr) => {
-                let _exprid = expr_to_ssa(&expr.expr);
+                let _exprid = expr_to_basic_blocks(&expr.expr);
             }
             Stmt::Decl(Decl::Var(var)) => {
                 for decl in &var.decls {
                     let Pat::Ident(ident) = &decl.name else {todo!()};
-                    let expr = expr_to_ssa(decl.init.as_ref().unwrap().borrow());
+                    let expr = expr_to_basic_blocks(decl.init.as_ref().unwrap().borrow());
                     assign_maybe_conditionally(&ident.sym.to_string(), expr);
                 }
             }
             Stmt::Return(ret) => {
-                let expr = expr_to_ssa(ret.arg.as_ref().unwrap());
+                let expr = expr_to_basic_blocks(ret.arg.as_ref().unwrap());
                 {
                     let mut exits = exits.borrow_mut();
-                    *exits.last_mut().unwrap() = Some(SsaExit::ExitFn(ExitType::Return, expr));
+                    *exits.last_mut().unwrap() =
+                        Some(BasicBlockExit::ExitFn(ExitType::Return, expr));
                 }
 
                 wrap_up_block();
             }
             Stmt::While(whil) => {
-                let blockidx_start = basic_blocks.borrow().len() - 1;
+                let blockidx_start = current_block_index();
 
-                let test = expr_to_ssa(&whil.test);
+                let test = expr_to_basic_blocks(&whil.test);
 
                 let test_after_idx = wrap_up_block();
 
                 let blockidx_before_body = wrap_up_block();
-                stat_to_ssa(&whil.body);
+                stat_to_basic_blocks(&whil.body);
 
                 // loop back to start
                 {
                     let mut exits = exits.borrow_mut();
-                    *exits.last_mut().unwrap() = Some(SsaExit::Jump(blockidx_start));
+                    *exits.last_mut().unwrap() = Some(BasicBlockExit::Jump(blockidx_start));
                 }
 
                 let blockidx_after_body = wrap_up_block();
 
                 {
                     let mut exits = exits.borrow_mut();
-                    exits[test_after_idx] = Some(SsaExit::Cond(
+                    exits[test_after_idx] = Some(BasicBlockExit::Cond(
                         test,
                         blockidx_before_body,
                         blockidx_after_body,
@@ -245,23 +232,23 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
                 test, cons, alt, ..
             }) => {
                 wrap_up_block();
-                let test = expr_to_ssa(&test);
+                let test = expr_to_basic_blocks(&test);
                 wrap_up_block();
-                let blockidx_before = basic_blocks.borrow().len() - 1;
+                let blockidx_before = current_block_index();
                 wrap_up_block();
 
                 let old_conditionals = conditionals.replace(Some(HashMap::new()));
 
-                let blockidx_consequent_before = basic_blocks.borrow().len() - 1;
-                stat_to_ssa(&cons);
+                let blockidx_consequent_before = current_block_index();
+                stat_to_basic_blocks(&cons);
                 let blockidx_consequent_after = wrap_up_block();
 
                 let blockidx_alternate = if let Some(alt) = alt {
                     wrap_up_block();
-                    let blockidx_alternate_before = basic_blocks.borrow().len() - 1;
-                    stat_to_ssa(&alt);
+                    let blockidx_alternate_before = current_block_index();
+                    stat_to_basic_blocks(&alt);
                     wrap_up_block();
-                    let blockidx_alternate_after = basic_blocks.borrow().len() - 1;
+                    let blockidx_alternate_after = current_block_index();
                     Some((blockidx_alternate_before, blockidx_alternate_after))
                 } else {
                     None
@@ -275,15 +262,15 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
                 if let Some((blockidx_alternate_before, blockidx_alternate_after)) =
                     blockidx_alternate
                 {
-                    exits.borrow_mut()[blockidx_before] = Some(SsaExit::Cond(
+                    exits.borrow_mut()[blockidx_before] = Some(BasicBlockExit::Cond(
                         test,
                         blockidx_consequent_before,
                         blockidx_alternate_before,
                     ));
                     exits.borrow_mut()[blockidx_consequent_after] =
-                        Some(SsaExit::Jump(blockidx_alternate_after));
+                        Some(BasicBlockExit::Jump(blockidx_alternate_after));
                 } else {
-                    exits.borrow_mut()[blockidx_before] = Some(SsaExit::Cond(
+                    exits.borrow_mut()[blockidx_before] = Some(BasicBlockExit::Cond(
                         test,
                         blockidx_consequent_before,
                         blockidx_consequent_after,
@@ -293,7 +280,7 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
             Stmt::Block(block) => {
                 push_label(NestedIntoStatement::Unlabelled);
                 for stat in &block.stmts {
-                    stat_to_ssa(stat);
+                    stat_to_basic_blocks(stat);
                     wrap_up_block();
                 }
                 let jumpers_towards_me = pop_label();
@@ -301,7 +288,7 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
                     wrap_up_block();
                     for jumper in jumpers_towards_me {
                         let mut exits = exits.borrow_mut();
-                        exits[jumper] = Some(SsaExit::Jump(basic_blocks.borrow().len() - 1));
+                        exits[jumper] = Some(BasicBlockExit::Jump(current_block_index()));
                     }
                 }
             }
@@ -325,7 +312,7 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
     });
 
     for stat in statements {
-        stat_to_ssa(stat);
+        stat_to_basic_blocks(stat);
         wrap_up_block();
     }
 
@@ -338,10 +325,11 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
             Some(exit) => exit.clone(),
             None => {
                 if i + 1 >= exit_count {
-                    let undef_ret = nth_ssa_push(SsaAstNode::Undefined, i);
-                    SsaExit::ExitFn(ExitType::Return, undef_ret)
+                    let undef_ret =
+                        push_instruction_to_nth_block(BasicBlockInstruction::Undefined, i);
+                    BasicBlockExit::ExitFn(ExitType::Return, undef_ret)
                 } else {
-                    SsaExit::Jump(i + 1)
+                    BasicBlockExit::Jump(i + 1)
                 }
             }
         })
@@ -356,18 +344,16 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> BasicBlockGroup {
         .map(|(exit, block)| BasicBlock::new(block.clone(), exit.clone()))
         .collect::<Vec<_>>();
 
-    let ssa = BasicBlockGroup::from_asts(asts);
-
-    ssa
+    BasicBlockGroup::from_asts(asts)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::basic_blocks::testutils::{test_ssa, test_ssa_block};
+    use crate::basic_blocks::testutils::{test_basic_blocks, test_basic_blocks_expr};
 
     #[test]
     fn simple_add() {
-        let s = test_ssa("10 + 20 + 30;");
+        let s = test_basic_blocks_expr("10 + 20 + 30;");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 10
@@ -383,7 +369,7 @@ mod tests {
 
     #[test]
     fn simple_add_2() {
-        let s = test_ssa_block(
+        let s = test_basic_blocks(
             "
         var a = 10;
         var b = 20;
@@ -407,7 +393,7 @@ mod tests {
 
     #[test]
     fn simple_cond() {
-        let s = test_ssa("1 ? 10 : 20;");
+        let s = test_basic_blocks_expr("1 ? 10 : 20;");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
@@ -431,7 +417,7 @@ mod tests {
 
     #[test]
     fn cond_nested() {
-        let s = test_ssa("1 ? (2 ? 10 : 15) : 20;");
+        let s = test_basic_blocks_expr("1 ? (2 ? 10 : 15) : 20;");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
@@ -470,7 +456,7 @@ mod tests {
 
     #[test]
     fn simple_vars() {
-        let s = test_ssa_block("var x = 1; x + 2");
+        let s = test_basic_blocks("var x = 1; x + 2");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
@@ -485,7 +471,7 @@ mod tests {
 
     #[test]
     fn cond_nested_reassign() {
-        let s = test_ssa_block("var x = 1; 123 ? (x = 2, 1) : x = 3; x + 2");
+        let s = test_basic_blocks("var x = 1; 123 ? (x = 2, 1) : x = 3; x + 2");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
@@ -518,7 +504,8 @@ mod tests {
 
     #[test]
     fn cond_nested_reassign_2() {
-        let s = test_ssa_block("var x = 1; 123 ? ((x = 1234) ? (x = 567) : 890, 1) : x = 3; x + 2");
+        let s =
+            test_basic_blocks("var x = 1; 123 ? ((x = 1234) ? (x = 567) : 890, 1) : x = 3; x + 2");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
@@ -566,7 +553,7 @@ mod tests {
 
     #[test]
     fn a_loop() {
-        let s = test_ssa_block("123; while (123) { 456; }");
+        let s = test_basic_blocks("123; while (123) { 456; }");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 123
@@ -595,7 +582,7 @@ mod tests {
 
     #[test]
     fn a_loop_break() {
-        let s = test_ssa_block("while (123) { break }");
+        let s = test_basic_blocks("while (123) { break }");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 123
@@ -622,7 +609,7 @@ mod tests {
 
     #[test]
     fn an_if() {
-        let s = test_ssa_block(
+        let s = test_basic_blocks(
             "if (123) {
                 456;
             } else {
@@ -660,7 +647,7 @@ mod tests {
 
     #[test]
     fn an_if_2() {
-        let s = test_ssa_block(
+        let s = test_basic_blocks(
             "
             if (123) {
                 if (456) {
@@ -712,5 +699,4 @@ mod tests {
         }
         "###);
     }
-
 }

@@ -13,9 +13,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokenizer::tokens::{Comment, JsToken};
 
+mod basic_blocks;
 mod parser;
 mod scope;
-mod basic_blocks;
 mod tokenizer;
 
 #[derive(Serialize, Deserialize)]

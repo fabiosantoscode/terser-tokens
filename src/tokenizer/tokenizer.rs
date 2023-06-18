@@ -1,13 +1,7 @@
 use core::panic;
 use std::collections::HashMap;
 
-use nom::{
-    branch::alt,
-    bytes::complete::take_while1,
-    combinator::map,
-    multi::fold_many0,
-    IResult,
-};
+use nom::{branch::alt, bytes::complete::take_while1, combinator::map, multi::fold_many0, IResult};
 
 use crate::tokenizer::{
     comments::{handle_comment, handle_shebang},
@@ -151,7 +145,7 @@ impl Tokenizer {
             loop {
                 self.line += 1;
 
-                if let Some(new_idx) = self.text[self.tokpos..self.tokpos+idx].rfind('\n') {
+                if let Some(new_idx) = self.text[self.tokpos..self.tokpos + idx].rfind('\n') {
                     idx = new_idx;
                 } else {
                     break;

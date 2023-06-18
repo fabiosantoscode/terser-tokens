@@ -8,8 +8,8 @@ use domtree::{
 };
 
 use super::{
-    basic_block::{BasicBlock, SsaExit},
-    basic_block_group::{BasicBlockGroup, StatementOrBlock},
+    basic_block::{BasicBlock, BasicBlockExit},
+    basic_block_group::BasicBlockGroup,
 };
 
 #[derive(Clone)]
@@ -63,7 +63,7 @@ pub struct Node {
     pub frontiers: UnsafeCell<HashMemberSet<usize>>, // node's dominance frontiers
     pub incoming_edges: Vec<usize>,                  // node's in-edges
     pub outgoing_edges: Vec<usize>,                  // node's out-edges
-    pub ssa: BasicBlock,                                 // node's SSA AST
+    pub basic_block: BasicBlock,                     // node's blocks AST
 }
 
 #[derive(Debug)]
@@ -73,13 +73,12 @@ pub struct Graph {
 
 impl Graph {
     pub fn direct_subs(&self, of: usize) -> Vec<usize> {
-        self
-        .nodes
-        .iter()
-        .filter(|n| n.dom == Some(of))
-        .filter(|n| n.tag != of)
-        .map(|n| n.tag)
-        .collect::<Vec<_>>()
+        self.nodes
+            .iter()
+            .filter(|n| n.dom == Some(of))
+            .filter(|n| n.tag != of)
+            .map(|n| n.tag)
+            .collect::<Vec<_>>()
     }
 }
 
@@ -136,11 +135,11 @@ impl DominanceFrontier for Graph {
     }
 }
 
-fn outgoing_edges(ssa: &BasicBlock) -> Vec<usize> {
-    match ssa.exit {
-        SsaExit::Jump(target) => vec![target],
-        SsaExit::Cond(_, true_target, false_target) => vec![true_target, false_target],
-        SsaExit::ExitFn(_, _) => vec![],
+fn outgoing_edges(bb: &BasicBlock) -> Vec<usize> {
+    match bb.exit {
+        BasicBlockExit::Jump(target) => vec![target],
+        BasicBlockExit::Cond(_, true_target, false_target) => vec![true_target, false_target],
+        BasicBlockExit::ExitFn(_, _) => vec![],
     }
 }
 
@@ -152,7 +151,7 @@ impl BasicBlockGroup {
                 all_incoming
                     .entry(target)
                     .or_insert_with(Vec::new)
-                    .push(*tag);
+                    .push(tag);
             }
         }
 
@@ -160,12 +159,12 @@ impl BasicBlockGroup {
             nodes: self
                 .iter()
                 .map(|(tag, node)| Node {
-                    tag: *tag,
+                    tag: tag,
                     dom: None,
                     frontiers: UnsafeCell::new(HashMemberSet(std::collections::HashSet::new())),
-                    incoming_edges: all_incoming.get(tag).cloned().unwrap_or_default(),
+                    incoming_edges: all_incoming.get(&tag).cloned().unwrap_or_default(),
                     outgoing_edges: outgoing_edges(node),
-                    ssa: node.clone(),
+                    basic_block: node.clone(),
                 })
                 .collect(),
         };
@@ -179,21 +178,21 @@ impl BasicBlockGroup {
 
 #[test]
 fn test_dominance() {
-    use crate::basic_blocks::testutils::test_ssa_block;
+    use crate::basic_blocks::testutils::test_basic_blocks;
 
-    let block = test_ssa_block("
-        var x = 0;
+    let block = test_basic_blocks(
+        "var x = 0;
         while (x < 10) {
             x = x + 1;
-        }
-    ");
+        }",
+    );
 
-    let mut g = block.get_dom_graph();
+    let g = block.get_dom_graph();
 
     println!("{:#?}", block);
 
-    for (id, node) in block.iter() {
-        for dom in g.dom_iter(*id) {
+    for (id, _node) in block.iter() {
+        for dom in g.dom_iter(id) {
             println!("{} doms {:?}", id, dom);
         }
     }
