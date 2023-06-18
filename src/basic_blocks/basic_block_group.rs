@@ -4,27 +4,27 @@ use swc_ecma_ast::Module;
 
 use crate::parser::parse_module;
 
-use super::convert::module_to_ssa;
-use super::ssa_ast::SsaAst;
+use super::convert::module_to_basic_blocks;
+use super::basic_block::BasicBlock;
 
 #[derive(Default)]
-pub struct SsaFn {
+pub struct BasicBlockGroup {
     pub asts: HashMap<usize, StatementOrBlock>,
 }
 
 pub enum StatementOrBlock {
-    SsaAst(SsaAst),
-    SsaFn(SsaFn),
+    SsaAst(BasicBlock),
+    SsaFn(BasicBlockGroup),
 }
 
-impl SsaFn {
+impl BasicBlockGroup {
     pub fn new() -> Self {
         Self {
             ..Default::default()
         }
     }
 
-    pub fn from_asts(asts: Vec<SsaAst>) -> Self {
+    pub fn from_asts(asts: Vec<BasicBlock>) -> Self {
         Self {
             asts: asts
                 .into_iter()
@@ -35,11 +35,11 @@ impl SsaFn {
     }
 
     pub fn from_module(m: &Module) -> Self {
-        module_to_ssa(m)
+        module_to_basic_blocks(m)
     }
 
     pub fn from_module_source(m: &str) -> Self {
-        module_to_ssa(&parse_module(m))
+        module_to_basic_blocks(&parse_module(m))
     }
 
     pub fn iter<'a>(&'a self) -> SsaFnIterator<'a> {
@@ -60,7 +60,7 @@ impl SsaFn {
     }
 }
 
-impl Debug for SsaFn {
+impl Debug for BasicBlockGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut asts = self.asts.iter().collect::<Vec<_>>();
         asts.sort_by_key(|(k, _)| *k);
@@ -81,12 +81,12 @@ impl Debug for StatementOrBlock {
 }
 
 pub struct SsaFnIterator<'a> {
-    asts_sorted_keys: Vec<(&'a usize, &'a SsaAst)>,
+    asts_sorted_keys: Vec<(&'a usize, &'a BasicBlock)>,
     current: usize,
 }
 
 impl<'a> Iterator for SsaFnIterator<'a> {
-    type Item = (&'a usize, &'a SsaAst);
+    type Item = (&'a usize, &'a BasicBlock);
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(ast) = self.asts_sorted_keys.get(self.current) {

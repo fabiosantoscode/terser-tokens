@@ -1,7 +1,8 @@
-mod ssa_ast;
+mod basic_block;
 mod convert;
-mod ssa_fn;
+mod basic_block_group;
 mod to_ast;
 mod dominator_tree;
+mod normalize;
 #[cfg(test)]
 mod testutils;

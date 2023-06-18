@@ -8,8 +8,8 @@ use domtree::{
 };
 
 use super::{
-    ssa_ast::{SsaAst, SsaExit},
-    ssa_fn::{SsaFn, StatementOrBlock},
+    basic_block::{BasicBlock, SsaExit},
+    basic_block_group::{BasicBlockGroup, StatementOrBlock},
 };
 
 #[derive(Clone)]
@@ -45,11 +45,11 @@ impl<T: PartialEq + Eq + Hash + Clone> MemberSet<T> for HashMemberSet<T> {
 
 #[derive(Clone, Default)]
 pub struct DomTreeable {
-    nodes: Vec<SsaAst>,
+    nodes: Vec<BasicBlock>,
 }
 
-impl From<SsaFn> for DomTreeable {
-    fn from(value: SsaFn) -> Self {
+impl From<BasicBlockGroup> for DomTreeable {
+    fn from(value: BasicBlockGroup) -> Self {
         DomTreeable {
             nodes: value.iter().map(|(_, node)| node.clone()).collect(),
         }
@@ -63,7 +63,7 @@ pub struct Node {
     pub frontiers: UnsafeCell<HashMemberSet<usize>>, // node's dominance frontiers
     pub incoming_edges: Vec<usize>,                  // node's in-edges
     pub outgoing_edges: Vec<usize>,                  // node's out-edges
-    pub ssa: SsaAst,                                 // node's SSA AST
+    pub ssa: BasicBlock,                                 // node's SSA AST
 }
 
 #[derive(Debug)]
@@ -136,7 +136,7 @@ impl DominanceFrontier for Graph {
     }
 }
 
-fn outgoing_edges(ssa: &SsaAst) -> Vec<usize> {
+fn outgoing_edges(ssa: &BasicBlock) -> Vec<usize> {
     match ssa.exit {
         SsaExit::Jump(target) => vec![target],
         SsaExit::Cond(_, true_target, false_target) => vec![true_target, false_target],
@@ -144,7 +144,7 @@ fn outgoing_edges(ssa: &SsaAst) -> Vec<usize> {
     }
 }
 
-impl SsaFn {
+impl BasicBlockGroup {
     pub fn get_dom_graph(&self) -> Graph {
         let mut all_incoming = HashMap::new();
         for (tag, node) in self.iter() {
@@ -179,7 +179,7 @@ impl SsaFn {
 
 #[test]
 fn test_dominance() {
-    use crate::ssa::testutils::test_ssa_block;
+    use crate::basic_blocks::testutils::test_ssa_block;
 
     let block = test_ssa_block("
         var x = 0;

@@ -1,12 +1,12 @@
 use std::{fmt::{Debug, Formatter}};
 
 #[derive(Clone, Default)]
-pub struct SsaAst {
+pub struct BasicBlock {
     pub body: Vec<(usize, SsaAstNode)>,
     pub exit: SsaExit,
 }
 
-impl SsaAst {
+impl BasicBlock {
     pub fn new(body: Vec<(usize, SsaAstNode)>, exit: SsaExit) -> Self {
         Self { body, exit }
     }
@@ -82,7 +82,7 @@ impl SsaAstNode {
     }
 }
 
-impl Debug for SsaAst {
+impl Debug for BasicBlock {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{\n")?;
         for (id, node) in &self.body {

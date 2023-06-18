@@ -1,13 +1,13 @@
 use super::dominator_tree::Graph;
-use super::ssa_ast::{ExitType, SsaAstNode, SsaExit};
-use super::ssa_fn::SsaFn;
+use super::basic_block::{ExitType, SsaAstNode, SsaExit};
+use super::basic_block_group::BasicBlockGroup;
 use domtree::frontier::DominanceFrontier;
 use domtree::DomTree;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use swc_ecma_ast::{Expr, Ident, ReturnStmt, Stmt};
 
-impl SsaFn {
+impl BasicBlockGroup {
     pub fn to_js_ast(&self) -> () {
         todo!()
     }
@@ -127,7 +127,7 @@ enum ContainingSyntax {
 
 // https://dl.acm.org/doi/pdf/10.1145/3547621
 //
-fn do_tree(func: &SsaFn)  -> StructuredFlow{
+fn do_tree(func: &BasicBlockGroup)  -> StructuredFlow{
     let dom = func.get_dom_graph();
 
     do_tree_inner(&dom, 0, Default::default())
@@ -254,7 +254,7 @@ fn is_merge_node(graph: &Graph, child: usize, root: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::ssa::{
+    use crate::basic_blocks::{
         testutils::test_ssa_block,
         to_ast::{do_tree, reverse_postorder},
     };
