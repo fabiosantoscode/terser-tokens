@@ -15,34 +15,16 @@ pub fn normalize_basic_blocks(
     Vec<BasicBlockExit>,
     Vec<Vec<(usize, BasicBlockInstruction)>>,
 ) {
-    let jumped_to = exits
-        .iter()
-        .enumerate()
-        .flat_map(|(i, e)| match e {
-            BasicBlockExit::Jump(j) if *j != i + 1 => vec![*j],
-            BasicBlockExit::Cond(_, cons, alt) => vec![*cons, *alt],
-            _ => vec![],
-        })
-        .collect::<HashSet<_>>();
+    let jumped_to = get_blocks_jumped_to(exits);
 
+    // keep track of eliminated block and how labels change around
     let mut eliminated_count = 0;
     let mut swapped_labels: HashMap<usize, usize> = Default::default();
 
     let out_exits: Vec<BasicBlockExit> = vec![];
     let out_basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>> = vec![];
 
-    let reachable_blocks = {
-        let func = BasicBlockGroup::from_asts(
-            exits.iter().zip(basic_blocks.iter()).map(
-                |(exit, block)| {
-                    BasicBlock::new(block.clone(), exit.clone())
-                },
-            ).collect()
-        );
-        let g = func.get_dom_graph();
-
-        HashSet::<usize>::from_iter(g.post_order_sequence(0).into_iter())
-    };
+    let reachable_blocks = get_reachable_blocks(exits, basic_blocks);
 
     let (mut out_exits, out_basic_blocks) = exits.iter().zip(basic_blocks.iter()).enumerate().fold(
         (out_exits, out_basic_blocks),
@@ -97,4 +79,30 @@ pub fn normalize_basic_blocks(
     assert_eq!(out_exits.len(), out_basic_blocks.len());
 
     (out_exits, out_basic_blocks)
+}
+
+fn get_blocks_jumped_to(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
+    exits
+        .iter()
+        .enumerate()
+        .flat_map(|(i, e)| match e {
+            BasicBlockExit::Jump(j) if *j != i + 1 => vec![*j],
+            BasicBlockExit::Cond(_, cons, alt) => vec![*cons, *alt],
+            _ => vec![],
+        })
+        .collect::<HashSet<_>>()
+}
+
+fn get_reachable_blocks(exits: &Vec<BasicBlockExit>, basic_blocks: &Vec<Vec<(usize, BasicBlockInstruction)>>) -> HashSet<usize> {
+    let func = BasicBlockGroup::from_asts(
+        basic_blocks.iter().cloned().zip(exits.iter().cloned())
+        .map(
+            |(block, exit)| {
+                BasicBlock::new(block.clone(), exit.clone())
+            },
+        ).collect()
+    );
+    let g = func.get_dom_graph();
+
+    HashSet::<usize>::from_iter(g.post_order_sequence(0).into_iter())
 }

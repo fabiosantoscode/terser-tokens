@@ -19,80 +19,6 @@ enum StructuredFlow {
     VarRef(usize),
 }
 
-impl StructuredFlow {
-    fn str_head(&self) -> String {
-        match self {
-            StructuredFlow::Branch(_, _, _) => "Branch".to_string(),
-            StructuredFlow::Break(_) => "Break".to_string(),
-            StructuredFlow::Continue(_) => "Continue".to_string(),
-            StructuredFlow::Loop(_) => "Loop".to_string(),
-            StructuredFlow::Block(_) => "Block".to_string(),
-            StructuredFlow::Return(_) => "Return".to_string(),
-            StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
-            StructuredFlow::VarRef(_) => "VarRef".to_string(),
-        }
-    }
-    fn children(&self) -> Vec<Vec<StructuredFlow>> {
-        match self {
-            StructuredFlow::Branch(x, y, z) => vec![x.clone(), y.clone(), z.clone()],
-            StructuredFlow::Break(_) => vec![],
-            StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(x) => vec![x.clone()],
-            StructuredFlow::Block(x) => vec![x.clone()],
-            StructuredFlow::Return(_) => vec![],
-            StructuredFlow::BasicBlock(_) => vec![],
-            StructuredFlow::VarRef(_) => vec![],
-        }
-    }
-    fn index(&self) -> Option<usize> {
-        match self {
-            StructuredFlow::Branch(_, _, _) => None,
-            StructuredFlow::Break(x) => Some(*x),
-            StructuredFlow::Continue(x) => Some(*x),
-            StructuredFlow::Loop(_) => None,
-            StructuredFlow::Block(_) => None,
-            StructuredFlow::Return(_) => None,
-            StructuredFlow::BasicBlock(x) => Some(*x),
-            StructuredFlow::VarRef(x) => Some(*x),
-        }
-    }
-}
-
-impl Debug for StructuredFlow {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let indent_str_lines = |s: &str| {
-            let lines = s.lines();
-            let indented_lines = lines.map(|line| format!("    {}", line));
-            indented_lines.collect::<Vec<String>>().join("\n")
-        };
-
-        if let Some(index) = self.index() {
-            write!(f, "{}({})", self.str_head(), index)
-        } else {
-            let children = self.children();
-            if children.len() == 0 {
-                write!(f, "{}", self.str_head())
-            } else if children.len() == 1 {
-                let children = format!("{:?}", children[0]);
-                let is_multiline = children.contains("\n");
-                if is_multiline {
-                    let lines = indent_str_lines(&children);
-                    return write!(f, "{}(\n{}\n)", self.str_head(), lines);
-                }
-                write!(f, "{}({})", self.str_head(), children)
-            } else {
-                let lines = children
-                    .iter()
-                    .map(|child| indent_str_lines(&format!("{:?}", child)))
-                    .collect::<Vec<String>>()
-                    .join("\n");
-
-                write!(f, "{}(\n{}\n)", self.str_head(), lines)
-            }
-        }
-    }
-}
-
 // type Context = [ContainingSyntax] -- innermost form first
 // data ContainingSyntax
 // = IfThenElse
@@ -445,4 +371,82 @@ mod tests {
         )
         "###);
     }
+
 }
+
+// For printing out these trees
+
+impl StructuredFlow {
+    fn str_head(&self) -> String {
+        match self {
+            StructuredFlow::Branch(_, _, _) => "Branch".to_string(),
+            StructuredFlow::Break(_) => "Break".to_string(),
+            StructuredFlow::Continue(_) => "Continue".to_string(),
+            StructuredFlow::Loop(_) => "Loop".to_string(),
+            StructuredFlow::Block(_) => "Block".to_string(),
+            StructuredFlow::Return(_) => "Return".to_string(),
+            StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
+            StructuredFlow::VarRef(_) => "VarRef".to_string(),
+        }
+    }
+    fn children(&self) -> Vec<Vec<StructuredFlow>> {
+        match self {
+            StructuredFlow::Branch(x, y, z) => vec![x.clone(), y.clone(), z.clone()],
+            StructuredFlow::Break(_) => vec![],
+            StructuredFlow::Continue(_) => vec![],
+            StructuredFlow::Loop(x) => vec![x.clone()],
+            StructuredFlow::Block(x) => vec![x.clone()],
+            StructuredFlow::Return(_) => vec![],
+            StructuredFlow::BasicBlock(_) => vec![],
+            StructuredFlow::VarRef(_) => vec![],
+        }
+    }
+    fn index(&self) -> Option<usize> {
+        match self {
+            StructuredFlow::Branch(_, _, _) => None,
+            StructuredFlow::Break(x) => Some(*x),
+            StructuredFlow::Continue(x) => Some(*x),
+            StructuredFlow::Loop(_) => None,
+            StructuredFlow::Block(_) => None,
+            StructuredFlow::Return(_) => None,
+            StructuredFlow::BasicBlock(x) => Some(*x),
+            StructuredFlow::VarRef(x) => Some(*x),
+        }
+    }
+}
+
+impl Debug for StructuredFlow {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let indent_str_lines = |s: &str| {
+            let lines = s.lines();
+            let indented_lines = lines.map(|line| format!("    {}", line));
+            indented_lines.collect::<Vec<String>>().join("\n")
+        };
+
+        if let Some(index) = self.index() {
+            write!(f, "{}({})", self.str_head(), index)
+        } else {
+            let children = self.children();
+            if children.len() == 0 {
+                write!(f, "{}", self.str_head())
+            } else if children.len() == 1 {
+                let children = format!("{:?}", children[0]);
+                let is_multiline = children.contains("\n");
+                if is_multiline {
+                    let lines = indent_str_lines(&children);
+                    return write!(f, "{}(\n{}\n)", self.str_head(), lines);
+                }
+                write!(f, "{}({})", self.str_head(), children)
+            } else {
+                let lines = children
+                    .iter()
+                    .map(|child| indent_str_lines(&format!("{:?}", child)))
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                write!(f, "{}(\n{}\n)", self.str_head(), lines)
+            }
+        }
+    }
+}
+

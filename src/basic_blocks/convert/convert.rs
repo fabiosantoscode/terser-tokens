@@ -591,15 +591,12 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            exit = cond $0 ? jump @2 : jump @4
+            exit = cond $0 ? jump @2 : jump @3
         }
         @2: {
-            exit = jump @4
+            exit = jump @3
         }
         @3: {
-            exit = jump @0
-        }
-        @4: {
             $1 = undefined
             exit = return $1
         }
