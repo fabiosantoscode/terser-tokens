@@ -80,6 +80,26 @@ impl Graph {
             .map(|n| n.tag)
             .collect::<Vec<_>>()
     }
+    pub fn reverse_postorder(&self) -> Vec<usize> {
+        let mut result = Vec::new();
+
+        let recurse = fix_fn::fix_fn!(|recurse, result: &mut Vec<usize>, node: usize| -> () {
+            if result.contains(&node) {
+                return;
+            }
+            result.push(node);
+
+            for child in self.direct_subs(node) {
+                recurse(result, child);
+            }
+        });
+
+        recurse(&mut result, 0);
+
+        result.reverse();
+
+        result
+    }
 }
 
 impl DFSGraph for Graph {

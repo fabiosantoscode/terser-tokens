@@ -3,6 +3,14 @@ use super::super::basic_block_group::BasicBlockGroup;
 use super::super::dominator_tree::Graph;
 use std::fmt::{Debug, Formatter};
 
+// https://dl.acm.org/doi/pdf/10.1145/3547621
+// This paper really unblocked this project.
+// It explains how one can turn basic blocks into a structured AST.
+// It's focused on WASM, but I've heard JS also has "if", "break" and "loops"
+// So it's probably helpful here too!
+//
+// What follows is a translation of this paper into Rust.
+
 #[derive(Clone)]
 enum StructuredFlow {
     Block(Vec<StructuredFlow>),
@@ -36,8 +44,6 @@ enum ContainingSyntax {
     BlockFollowedBy(usize),
 }
 
-// https://dl.acm.org/doi/pdf/10.1145/3547621
-//
 fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
     let dom = func.get_dom_graph();
 
@@ -118,7 +124,7 @@ fn tx_expr(graph: &Graph, var_index: usize) -> Vec<StructuredFlow> {
 }
 
 fn do_branch(graph: &Graph, source: usize, target: usize, context: Ctx) -> StructuredFlow {
-    let reverse_postorder = reverse_postorder(graph);
+    let reverse_postorder = graph.reverse_postorder();
     let index_source = reverse_postorder.iter().position(|&x| x == source).unwrap();
     let index_target = reverse_postorder.iter().position(|&x| x == target).unwrap();
 
@@ -133,27 +139,6 @@ fn do_branch(graph: &Graph, source: usize, target: usize, context: Ctx) -> Struc
     } else {
         do_tree_inner(graph, target, context)
     }
-}
-
-fn reverse_postorder(graph: &Graph) -> Vec<usize> {
-    let mut result = Vec::new();
-
-    let recurse = fix_fn::fix_fn!(|recurse, result: &mut Vec<usize>, node: usize| -> () {
-        if result.contains(&node) {
-            return;
-        }
-        result.push(node);
-
-        for child in graph.direct_subs(node) {
-            recurse(result, child);
-        }
-    });
-
-    recurse(&mut result, 0);
-
-    result.reverse();
-
-    result
 }
 
 // A node 𝑋 that has two or more forward inedges is a merge node. Being a merge node doesn’t
@@ -176,7 +161,7 @@ fn is_merge_node(graph: &Graph, child: usize, root: usize) -> bool {
 // A node 𝑋 that has a back inedge is a loop header, and its translation is wrapped in a loop
 // form. The translation of the subtree rooted at 𝑋 is placed into the body of the loop.
 fn is_loop_header(graph: &Graph, node: usize, context: Ctx) -> bool {
-    let indices = reverse_postorder(graph);
+    let indices = graph.reverse_postorder();
     let node_index = indices.iter().position(|&x| x == node).unwrap();
     let g_node = &graph.nodes[node];
 
@@ -227,7 +212,7 @@ mod tests {
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
-        println!("{:?}", reverse_postorder(&g));
+        println!("{:?}", g.reverse_postorder());
 
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
@@ -283,7 +268,7 @@ mod tests {
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
-        println!("{:?}", reverse_postorder(&g));
+        println!("{:?}", g.reverse_postorder());
 
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
@@ -346,7 +331,7 @@ mod tests {
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
-        println!("{:?}", reverse_postorder(&g));
+        println!("{:?}", g.reverse_postorder());
 
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"

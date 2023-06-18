@@ -104,5 +104,5 @@ fn get_reachable_blocks(exits: &Vec<BasicBlockExit>, basic_blocks: &Vec<Vec<(usi
     );
     let g = func.get_dom_graph();
 
-    HashSet::<usize>::from_iter(g.post_order_sequence(0).into_iter())
+    HashSet::<usize>::from_iter(g.reverse_postorder().into_iter())
 }
