@@ -1,10 +1,11 @@
 #[macro_use]
 use fix_fn::fix_fn;
+use std::collections::HashSet;
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
 
 use crate::scope::scope::Scope;
 use crate::ssa::ssa_ast::{SsaAstNode, SsaExit};
-use swc_ecma_ast::{CondExpr, Decl, Expr, Lit, Module, ModuleItem, Pat, PatOrExpr, Stmt};
+use swc_ecma_ast::{CondExpr, Decl, Expr, IfStmt, Lit, Module, ModuleItem, Pat, PatOrExpr, Stmt};
 
 use super::ssa_ast::ExitType;
 use super::{ssa_ast::SsaAst, ssa_fn::SsaFn};
@@ -22,6 +23,11 @@ pub fn module_to_ssa(m: &Module) -> SsaFn {
     }
 
     statements_to_ssa(&statements)
+}
+
+enum NestedIntoStatement {
+    Labelled(String),
+    Unlabelled,
 }
 
 pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
@@ -66,6 +72,22 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
         let mut scope = scope.borrow_mut();
         scope.insert(name.into(), value);
     };
+    let push_phi_assignments = |conditionally_assigned: Option<HashMap<String, Vec<usize>>>| {
+        // phi nodes for conditionally assigned variables
+        let to_phi = conditionally_assigned.unwrap();
+        let mut to_phi = to_phi
+            .iter()
+            .filter(|(_name, phies)| phies.len() > 1)
+            .collect::<Vec<_>>();
+        if to_phi.len() > 0 {
+            to_phi.sort_by_key(|(name, _)| *name);
+            for (varname, phies) in to_phi {
+                let phi = SsaAstNode::Phi(phies.clone());
+                let phi_idx = current_ssa_push(phi);
+                scope.borrow_mut().insert(varname.clone(), phi_idx);
+            }
+        }
+    };
 
     let wrap_up_block = || {
         basic_blocks.borrow_mut().push(vec![]);
@@ -74,6 +96,15 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
     };
 
     let expr_to_ssa = fix_fn!(|expr_to_ssa, exp: &Expr| -> usize {
+        let create_gapped_block = |expr: &Expr| {
+            let before = basic_blocks.borrow().len() - 1;
+            let expr = expr_to_ssa(&expr);
+            let after = basic_blocks.borrow().len() - 1;
+            wrap_up_block();
+
+            (before, expr, after)
+        };
+
         let node = match exp {
             Expr::Lit(Lit::Num(num)) => SsaAstNode::LitNumber(num.value),
             Expr::Bin(bin) => {
@@ -113,21 +144,17 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
             Expr::Cond(CondExpr {
                 test, cons, alt, ..
             }) => {
-                let test = expr_to_ssa(&test);
-                let blockidx_before = basic_blocks.borrow().len() - 1;
-                wrap_up_block();
+                let (_, test, blockidx_before) = create_gapped_block(&test);
 
                 let old_conditionals = conditionals.replace(Some(HashMap::new()));
 
-                let blockidx_consequent_before = basic_blocks.borrow().len() - 1;
-                let cons = expr_to_ssa(&cons);
-                let blockidx_consequent_after = basic_blocks.borrow().len() - 1;
-                wrap_up_block();
+                let (blockidx_consequent_before, cons, blockidx_consequent_after) =
+                    create_gapped_block(&cons);
 
                 let blockidx_alternate_before = basic_blocks.borrow().len() - 1;
                 let alt = expr_to_ssa(&alt);
-                let blockidx_after = basic_blocks.borrow().len() - 1;
                 wrap_up_block();
+                let blockidx_after = basic_blocks.borrow().len() - 1;
 
                 // block before gets a Cond node added
                 exits.borrow_mut()[blockidx_before] = Some(SsaExit::Cond(
@@ -141,20 +168,7 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
 
                 let conditionally_assigned = conditionals.replace(old_conditionals);
 
-                // phi nodes for conditionally assigned variables
-                let to_phi = conditionally_assigned.unwrap();
-                let mut to_phi = to_phi
-                    .iter()
-                    .filter(|(_name, phies)| phies.len() > 1)
-                    .collect::<Vec<_>>();
-                if to_phi.len() > 0 {
-                    to_phi.sort_by_key(|(name, _)| *name);
-                    for (varname, phies) in to_phi {
-                        let phi = SsaAstNode::Phi(phies.clone());
-                        let phi_idx = current_ssa_push(phi);
-                        scope.borrow_mut().insert(varname.clone(), phi_idx);
-                    }
-                }
+                push_phi_assignments(conditionally_assigned);
                 wrap_up_block();
 
                 // the retval of our ternary is a phi node
@@ -167,6 +181,18 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
 
         current_ssa_push(node)
     });
+
+    // First item is downward propagated (contains where we are), the second is upward propagated (the jump target of a break)
+    let mut label_tracking: RefCell<Vec<(NestedIntoStatement, Vec<usize>)>> = Default::default();
+    let push_label = |label: NestedIntoStatement| {
+        let mut label_tracking = label_tracking.borrow_mut();
+        label_tracking.push((label, vec![]));
+    };
+    let pop_label = || {
+        let (_, target) = label_tracking.borrow_mut().pop().unwrap();
+        target
+    };
+
     let stat_to_ssa = fix_fn!(|stat_to_ssa, stat: &Stmt| -> () {
         match stat {
             Stmt::Expr(expr) => {
@@ -215,12 +241,83 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
                     ));
                 }
             }
+            Stmt::If(IfStmt {
+                test, cons, alt, ..
+            }) => {
+                wrap_up_block();
+                let test = expr_to_ssa(&test);
+                wrap_up_block();
+                let blockidx_before = basic_blocks.borrow().len() - 1;
+                wrap_up_block();
+
+                let old_conditionals = conditionals.replace(Some(HashMap::new()));
+
+                let blockidx_consequent_before = basic_blocks.borrow().len() - 1;
+                stat_to_ssa(&cons);
+                let blockidx_consequent_after = wrap_up_block();
+
+                let blockidx_alternate = if let Some(alt) = alt {
+                    wrap_up_block();
+                    let blockidx_alternate_before = basic_blocks.borrow().len() - 1;
+                    stat_to_ssa(&alt);
+                    wrap_up_block();
+                    let blockidx_alternate_after = basic_blocks.borrow().len() - 1;
+                    Some((blockidx_alternate_before, blockidx_alternate_after))
+                } else {
+                    None
+                };
+
+                let conditionally_assigned = conditionals.replace(old_conditionals);
+
+                push_phi_assignments(conditionally_assigned);
+                wrap_up_block();
+
+                if let Some((blockidx_alternate_before, blockidx_alternate_after)) =
+                    blockidx_alternate
+                {
+                    exits.borrow_mut()[blockidx_before] = Some(SsaExit::Cond(
+                        test,
+                        blockidx_consequent_before,
+                        blockidx_alternate_before,
+                    ));
+                    exits.borrow_mut()[blockidx_consequent_after] =
+                        Some(SsaExit::Jump(blockidx_alternate_after));
+                } else {
+                    exits.borrow_mut()[blockidx_before] = Some(SsaExit::Cond(
+                        test,
+                        blockidx_consequent_before,
+                        blockidx_consequent_after,
+                    ));
+                }
+            }
             Stmt::Block(block) => {
+                push_label(NestedIntoStatement::Unlabelled);
                 for stat in &block.stmts {
                     stat_to_ssa(stat);
                     wrap_up_block();
                 }
+                let jumpers_towards_me = pop_label();
+                if jumpers_towards_me.len() > 0 {
+                    wrap_up_block();
+                    for jumper in jumpers_towards_me {
+                        let mut exits = exits.borrow_mut();
+                        exits[jumper] = Some(SsaExit::Jump(basic_blocks.borrow().len() - 1));
+                    }
+                }
             }
+            Stmt::Break(br) => match br.label {
+                Some(_) => {
+                    todo!("statements_to_ssa: stat_to_ssa: break with label not implemented")
+                }
+                None => {
+                    if let Some(last) = label_tracking.borrow_mut().last_mut() {
+                        let this_block = wrap_up_block();
+                        last.1.push(this_block);
+                    } else {
+                        unreachable!()
+                    }
+                }
+            },
             _ => {
                 todo!("statements_to_ssa: stat_to_ssa: {:?} not implemented", stat)
             }
@@ -232,9 +329,9 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
         wrap_up_block();
     }
 
-    let exits = exits.borrow();
-    let exit_count = exits.len();
+    let exit_count = exits.borrow().len();
     let exits = exits
+        .borrow()
         .iter()
         .enumerate()
         .map(|(i, e)| match e {
@@ -250,15 +347,99 @@ pub fn statements_to_ssa(statements: &[&Stmt]) -> SsaFn {
         })
         .collect::<Vec<_>>();
 
+    // let (exits, basic_blocks) = (exits.clone(), basic_blocks.borrow().clone());
+    let (exits, basic_blocks) = normalize_basic_blocks(&exits, &basic_blocks.borrow());
+
     let asts = exits
         .iter()
-        .zip(basic_blocks.borrow().iter())
+        .zip(basic_blocks.iter())
         .map(|(exit, block)| SsaAst::new(block.clone(), exit.clone()))
         .collect::<Vec<_>>();
 
     let ssa = SsaFn::from_asts(asts);
 
     ssa
+}
+
+fn normalize_basic_blocks(
+    exits: &Vec<SsaExit>,
+    basic_blocks: &Vec<Vec<(usize, SsaAstNode)>>,
+) -> (Vec<SsaExit>, Vec<Vec<(usize, SsaAstNode)>>) {
+    let jumped_to = exits
+        .iter()
+        .enumerate()
+        .flat_map(|(i, e)| match e {
+            SsaExit::Jump(j) if *j != i + 1 => vec![*j],
+            SsaExit::Cond(_, cons, alt) => vec![*cons, *alt],
+            _ => vec![],
+        })
+        .collect::<HashSet<_>>();
+
+    let mut eliminated_count = 0;
+    let mut swapped_labels: HashMap<usize, usize> = Default::default();
+
+    let out_exits: Vec<SsaExit> = vec![];
+    let out_basic_blocks: Vec<Vec<(usize, SsaAstNode)>> = vec![];
+
+    let (mut out_exits, mut out_basic_blocks) =
+        exits.iter().zip(basic_blocks.iter()).enumerate().fold(
+            (out_exits, out_basic_blocks),
+            |(mut out_exits, mut out_basic_blocks), (i, (exit, block))| {
+                let can_eliminate = match out_exits.last() {
+                    Some(SsaExit::Jump(j)) if *j == i => {
+                        !jumped_to.contains(j)
+                            && !jumped_to.contains(&(*j + 1))
+                            && !jumped_to.contains(&i)
+                    }
+                    _ => false,
+                };
+
+                match (
+                    can_eliminate,
+                    out_exits.last_mut(),
+                    out_basic_blocks.last_mut(),
+                ) {
+                    (true, Some(prev_exit), Some(prev_block)) => {
+                        *prev_exit = exit.clone();
+                        prev_block.extend(block.clone());
+
+                        eliminated_count += 1;
+                    }
+                    _ => {
+                        out_exits.push(exit.clone());
+                        out_basic_blocks.push(block.clone());
+                    }
+                };
+
+                swapped_labels.insert(i, i - eliminated_count);
+
+                (out_exits, out_basic_blocks)
+            },
+        );
+
+    // adjust labels for however many blocks were eliminated
+    for exit in out_exits.iter_mut() {
+        match exit {
+            SsaExit::Jump(j) => {
+                if let Some(new_j) = swapped_labels.get(j) {
+                    *j = *new_j;
+                }
+            }
+            SsaExit::Cond(_, c, a) => {
+                if let Some(new_c) = swapped_labels.get(c) {
+                    *c = *new_c;
+                }
+                if let Some(new_a) = swapped_labels.get(a) {
+                    *a = *new_a;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(out_exits.len(), out_basic_blocks.len());
+
+    (out_exits, out_basic_blocks)
 }
 
 #[cfg(test)]
@@ -275,11 +456,32 @@ mod tests {
             $2 = $0 + $1
             $3 = 30
             $4 = $2 + $3
-            exit = jump @1
-        }
-        @1: {
             $5 = undefined
             exit = return $5
+        }
+        "###);
+    }
+
+    #[test]
+    fn simple_add_2() {
+        let s = test_ssa_block(
+            "
+        var a = 10;
+        var b = 20;
+        var c = a + b + 30;
+        ",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 10
+            $1 = 20
+            $2 = $0
+            $3 = $1
+            $4 = $2 + $3
+            $5 = 30
+            $6 = $4 + $5
+            $7 = undefined
+            exit = return $7
         }
         "###);
     }
@@ -294,20 +496,14 @@ mod tests {
         }
         @1: {
             $1 = 10
-            exit = jump @2
+            exit = jump @3
         }
         @2: {
             $2 = 20
             exit = jump @3
         }
         @3: {
-            exit = jump @4
-        }
-        @4: {
             $3 = either($1, $2)
-            exit = jump @5
-        }
-        @5: {
             $4 = undefined
             exit = return $4
         }
@@ -328,7 +524,7 @@ mod tests {
         }
         @2: {
             $2 = 10
-            exit = jump @3
+            exit = jump @4
         }
         @3: {
             $3 = 15
@@ -339,20 +535,14 @@ mod tests {
         }
         @5: {
             $4 = either($2, $3)
-            exit = jump @6
+            exit = jump @7
         }
         @6: {
             $5 = 20
             exit = jump @7
         }
         @7: {
-            exit = jump @8
-        }
-        @8: {
             $6 = either($4, $5)
-            exit = jump @9
-        }
-        @9: {
             $7 = undefined
             exit = return $7
         }
@@ -365,15 +555,9 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
-            exit = jump @1
-        }
-        @1: {
             $1 = $0
             $2 = 2
             $3 = $1 + $2
-            exit = jump @2
-        }
-        @2: {
             $4 = undefined
             exit = return $4
         }
@@ -395,7 +579,7 @@ mod tests {
         @2: {
             $2 = 2
             $3 = 1
-            exit = jump @3
+            exit = jump @4
         }
         @3: {
             $4 = 3
@@ -403,19 +587,10 @@ mod tests {
         }
         @4: {
             $5 = either($2, $4)
-            exit = jump @5
-        }
-        @5: {
             $6 = either($3, $4)
-            exit = jump @6
-        }
-        @6: {
             $7 = $5
             $8 = 2
             $9 = $7 + $8
-            exit = jump @7
-        }
-        @7: {
             $10 = undefined
             exit = return $10
         }
@@ -440,7 +615,7 @@ mod tests {
         }
         @3: {
             $3 = 567
-            exit = jump @4
+            exit = jump @5
         }
         @4: {
             $4 = 890
@@ -452,7 +627,7 @@ mod tests {
         @6: {
             $5 = either($3, $4)
             $6 = 1
-            exit = jump @7
+            exit = jump @8
         }
         @7: {
             $7 = 3
@@ -460,19 +635,10 @@ mod tests {
         }
         @8: {
             $8 = either($2, $7)
-            exit = jump @9
-        }
-        @9: {
             $9 = either($6, $7)
-            exit = jump @10
-        }
-        @10: {
             $10 = $8
             $11 = 2
             $12 = $10 + $11
-            exit = jump @11
-        }
-        @11: {
             $13 = undefined
             exit = return $13
         }
@@ -502,6 +668,68 @@ mod tests {
             exit = jump @1
         }
         @5: {
+            $3 = undefined
+            exit = return $3
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_loop_break() {
+        let s = test_ssa_block("while (123) { break }");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 123
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $0 ? jump @2 : jump @5
+        }
+        @2: {
+            exit = jump @4
+        }
+        @3: {
+            exit = jump @4
+        }
+        @4: {
+            exit = jump @0
+        }
+        @5: {
+            $1 = undefined
+            exit = return $1
+        }
+        "###);
+    }
+
+    #[test]
+    fn an_if() {
+        let s = test_ssa_block(
+            "if (123) {
+                456;
+            } else {
+                789;
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 123
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $0 ? jump @2 : jump @4
+        }
+        @2: {
+            $1 = 456
+            exit = jump @3
+        }
+        @3: {
+            exit = jump @6
+        }
+        @4: {
+            $2 = 789
+            exit = jump @5
+        }
+        @5: {
             exit = jump @6
         }
         @6: {
@@ -510,4 +738,60 @@ mod tests {
         }
         "###);
     }
+
+    #[test]
+    fn an_if_2() {
+        let s = test_ssa_block(
+            "
+            if (123) {
+                if (456) {
+                    789;
+                }
+            } else {
+                999;
+            }
+        ",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 123
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $0 ? jump @2 : jump @8
+        }
+        @2: {
+            $1 = 456
+            exit = jump @3
+        }
+        @3: {
+            exit = cond $1 ? jump @4 : jump @6
+        }
+        @4: {
+            $2 = 789
+            exit = jump @5
+        }
+        @5: {
+            exit = jump @6
+        }
+        @6: {
+            exit = jump @7
+        }
+        @7: {
+            exit = jump @10
+        }
+        @8: {
+            $3 = 999
+            exit = jump @9
+        }
+        @9: {
+            exit = jump @10
+        }
+        @10: {
+            $4 = undefined
+            exit = return $4
+        }
+        "###);
+    }
+
 }

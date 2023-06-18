@@ -14,6 +14,7 @@ use super::{
 
 #[derive(Clone)]
 pub struct VecSet<Y>(Vec<Y>);
+#[derive(Clone, Debug)]
 pub struct HashMemberSet<T>(std::collections::HashSet<T>);
 
 impl<Y: Clone + Default> AssocSet<usize, Y> for VecSet<Y> {
@@ -57,16 +58,29 @@ impl From<SsaFn> for DomTreeable {
 
 #[derive(Debug)]
 pub struct Node {
-    tag: usize,                                  // node's identifier
-    dom: Option<usize>,                          // node's immediate dominator
-    frontiers: UnsafeCell<HashMemberSet<usize>>, // node's dominance frontiers
-    incoming_edges: Vec<usize>,                  // node's in-edges
-    outgoing_edges: Vec<usize>,                  // node's out-edges
+    pub tag: usize,                                  // node's identifier
+    pub dom: Option<usize>,                          // node's immediate dominator
+    pub frontiers: UnsafeCell<HashMemberSet<usize>>, // node's dominance frontiers
+    pub incoming_edges: Vec<usize>,                  // node's in-edges
+    pub outgoing_edges: Vec<usize>,                  // node's out-edges
+    pub ssa: SsaAst,                                 // node's SSA AST
 }
 
 #[derive(Debug)]
 pub struct Graph {
-    nodes: Vec<Node>,
+    pub nodes: Vec<Node>,
+}
+
+impl Graph {
+    pub fn direct_subs(&self, of: usize) -> Vec<usize> {
+        self
+        .nodes
+        .iter()
+        .filter(|n| n.dom == Some(of))
+        .filter(|n| n.tag != of)
+        .map(|n| n.tag)
+        .collect::<Vec<_>>()
+    }
 }
 
 impl DFSGraph for Graph {
@@ -131,7 +145,7 @@ fn outgoing_edges(ssa: &SsaAst) -> Vec<usize> {
 }
 
 impl SsaFn {
-    pub fn to_dom_graph(&self) -> Graph {
+    pub fn get_dom_graph(&self) -> Graph {
         let mut all_incoming = HashMap::new();
         for (tag, node) in self.iter() {
             for target in outgoing_edges(node) {
@@ -151,6 +165,7 @@ impl SsaFn {
                     frontiers: UnsafeCell::new(HashMemberSet(std::collections::HashSet::new())),
                     incoming_edges: all_incoming.get(tag).cloned().unwrap_or_default(),
                     outgoing_edges: outgoing_edges(node),
+                    ssa: node.clone(),
                 })
                 .collect(),
         };
@@ -173,13 +188,13 @@ fn test_dominance() {
         }
     ");
 
-    let mut g = block.to_dom_graph();
+    let mut g = block.get_dom_graph();
 
     println!("{:#?}", block);
 
     for (id, node) in block.iter() {
         for dom in g.dom_iter(*id) {
-            println!("{} doms {:?}, {:?}", id, dom, g.nodes[dom].dom);
+            println!("{} doms {:?}", id, dom);
         }
     }
 

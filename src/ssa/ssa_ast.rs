@@ -32,13 +32,31 @@ pub enum SsaExit {
     ExitFn(ExitType, usize),
 }
 
+impl SsaExit {
+    pub(crate) fn subtract_labels(&self, eliminated_count: usize) -> SsaExit {
+        match self {
+            SsaExit::Jump(target) => SsaExit::Jump(*target - eliminated_count),
+            SsaExit::Cond(cond, true_target, false_target) => {
+                SsaExit::Cond(
+                    *cond,
+                    *true_target - eliminated_count,
+                    *false_target - eliminated_count,
+                )
+            }
+            SsaExit::ExitFn(exit_type, target) => {
+                SsaExit::ExitFn(exit_type.clone(), *target - eliminated_count)
+            }
+        }
+    }
+}
+
 impl Default for SsaExit {
     fn default() -> Self {
         SsaExit::Jump(0)
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ExitType {
     Return,
 }
