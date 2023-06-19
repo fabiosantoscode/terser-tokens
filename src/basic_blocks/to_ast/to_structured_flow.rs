@@ -454,6 +454,48 @@ mod tests {
         )
         "###);
     }
+
+    /*
+    #[test]
+    fn mk_trycatch() {
+        let func = test_basic_blocks(
+            "try {
+                777;
+            } catch (e) {
+                888;
+            }",
+        );
+        insta::assert_debug_snapshot!(func, @r###"
+        @0: {
+            $0 = may_throw $1
+            $1 = 777
+            exit = jump @3
+        }
+        @1: {
+            $2 = either_threw($0)
+            $3 = 888
+            exit = jump @2
+        }
+        @2: {
+            exit = jump @3
+        }
+        @3: {
+            $4 = undefined
+            exit = return $4
+        }
+        "###);
+
+        let g = func.get_dom_graph();
+        println!("{:?}", g);
+        println!("{:?}", g.reverse_postorder());
+
+        let stats = do_tree(&func);
+        insta::assert_debug_snapshot!(stats, @"Block([
+            Block([BasicBlockRef(0), Break(0)]),
+            Block([BasicBlockRef(3), Return])
+        ])");
+    }
+    */
 }
 
 // For printing out these trees

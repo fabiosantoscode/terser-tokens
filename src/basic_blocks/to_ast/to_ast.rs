@@ -1,7 +1,9 @@
-use swc_ecma_ast::{BindingIdent, Decl, Expr, ExprOrSpread, Ident, ReturnStmt, Stmt};
+use swc_ecma_ast::{
+    AwaitExpr, BindingIdent, Decl, Expr, ExprOrSpread, Ident, ReturnStmt, Stmt, YieldExpr,
+};
 
 use crate::basic_blocks::{
-    basic_block::{ArrayElement, BasicBlockInstruction, ExitType},
+    basic_block::{ArrayElement, BasicBlockInstruction, ExitType, TempExitType},
     basic_block_group::BasicBlockGroup,
 };
 
@@ -71,7 +73,6 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 get_variable(*var_idx).into(),
                 Default::default(),
             )),
-            BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
             BasicBlockInstruction::This => {
                 Expr::Ident(Ident::new("this".into(), Default::default()))
             }
@@ -96,6 +97,25 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                     elems: items,
                 })
             }
+
+            BasicBlockInstruction::TempExit(typ, arg) => match typ {
+                TempExitType::Yield => Expr::Yield(YieldExpr {
+                    span: Default::default(),
+                    delegate: false,
+                    arg: Some(Box::new(get_identifier(get_variable(*arg)))),
+                }),
+                TempExitType::YieldStar => Expr::Yield(YieldExpr {
+                    span: Default::default(),
+                    delegate: true,
+                    arg: Some(Box::new(get_identifier(get_variable(*arg)))),
+                }),
+                TempExitType::Await => Expr::Await(AwaitExpr {
+                    span: Default::default(),
+                    arg: Box::new(get_identifier(get_variable(*arg))),
+                }),
+            },
+
+            BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
         }
     });
 

@@ -2,9 +2,14 @@
 use fix_fn::fix_fn;
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
 
-use crate::basic_blocks::basic_block::{ArrayElement, BasicBlockExit, BasicBlockInstruction};
+use crate::basic_blocks::basic_block::{
+    ArrayElement, BasicBlockExit, BasicBlockInstruction, TempExitType,
+};
 use crate::scope::scope::Scope;
-use swc_ecma_ast::{CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Pat, PatOrExpr, Stmt};
+use swc_ecma_ast::{
+    AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Pat, PatOrExpr, Stmt,
+    YieldExpr,
+};
 
 use super::super::basic_block::ExitType;
 use super::super::normalize::normalize_basic_blocks;
@@ -115,11 +120,11 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
             },
             Expr::Paren(paren) => return expr_to_basic_blocks(&paren.expr),
             Expr::Seq(seq) => {
-                let mut last = 0;
+                let mut last = None;
                 for expr in &seq.exprs {
-                    last = expr_to_basic_blocks(expr);
+                    last = Some(expr_to_basic_blocks(expr));
                 }
-                return last;
+                return last.expect("Seq must have 1+ exprs");
             }
             Expr::Cond(CondExpr {
                 test, cons, alt, ..
@@ -193,9 +198,26 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
             Expr::TaggedTpl(_) => todo!(),
             Expr::Arrow(_) => todo!(),
             Expr::Class(_) => todo!(),
-            Expr::Yield(_) => todo!(),
             Expr::MetaProp(_) => todo!(),
-            Expr::Await(_) => todo!(),
+            Expr::Yield(YieldExpr { arg, delegate, .. }) => {
+                let typ = if *delegate {
+                    TempExitType::YieldStar
+                } else {
+                    TempExitType::Yield
+                };
+
+                let arg = match arg {
+                    Some(arg) => expr_to_basic_blocks(arg),
+                    None => current_block_index(),
+                };
+
+                BasicBlockInstruction::TempExit(typ, arg)
+            }
+            Expr::Await(AwaitExpr { arg, .. }) => {
+                let arg = expr_to_basic_blocks(arg);
+
+                BasicBlockInstruction::TempExit(TempExitType::Await, arg)
+            }
             Expr::OptChain(_) => todo!(),
             Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
             Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
@@ -227,6 +249,10 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
     let pop_label = || {
         let (_, target) = label_tracking.borrow_mut().pop().unwrap();
         target
+    };
+    let set_exit = |at: usize, new_exit: BasicBlockExit| {
+        let mut exits = exits.borrow_mut();
+        exits[at] = Some(new_exit);
     };
 
     let stat_to_basic_blocks = fix_fn!(|stat_to_basic_blocks, stat: &Stmt| -> () {
@@ -308,7 +334,7 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                 stat_to_basic_blocks(&cons);
                 let blockidx_consequent_after = wrap_up_block();
 
-                let blockidx_alternate = if let Some(alt) = alt {
+                let alt = if let Some(alt) = alt {
                     wrap_up_block();
                     let blockidx_alternate_before = current_block_index();
                     stat_to_basic_blocks(&alt);
@@ -324,22 +350,28 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                 push_phi_assignments(conditionally_assigned);
                 wrap_up_block();
 
-                if let Some((blockidx_alternate_before, blockidx_alternate_after)) =
-                    blockidx_alternate
-                {
-                    exits.borrow_mut()[blockidx_before] = Some(BasicBlockExit::Cond(
-                        test,
-                        blockidx_consequent_before,
-                        blockidx_alternate_before,
-                    ));
-                    exits.borrow_mut()[blockidx_consequent_after] =
-                        Some(BasicBlockExit::Jump(blockidx_alternate_after));
-                } else {
-                    exits.borrow_mut()[blockidx_before] = Some(BasicBlockExit::Cond(
-                        test,
-                        blockidx_consequent_before,
+                if let Some((blockidx_alternate_before, blockidx_alternate_after)) = alt {
+                    set_exit(
+                        blockidx_before,
+                        BasicBlockExit::Cond(
+                            test,
+                            blockidx_consequent_before,
+                            blockidx_alternate_before,
+                        ),
+                    );
+                    set_exit(
                         blockidx_consequent_after,
-                    ));
+                        BasicBlockExit::Jump(blockidx_alternate_after),
+                    );
+                } else {
+                    set_exit(
+                        blockidx_before,
+                        BasicBlockExit::Cond(
+                            test,
+                            blockidx_consequent_before,
+                            blockidx_consequent_after,
+                        ),
+                    );
                 }
             }
             Stmt::Block(block) => {
@@ -361,14 +393,47 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                     }
                 }
             },
-            Stmt::Empty(_) => todo!(),
             Stmt::Debugger(_) => todo!(),
             Stmt::With(_) => todo!(),
             Stmt::Labeled(_) => todo!(),
             Stmt::Continue(_) => todo!(),
             Stmt::Switch(_) => todo!(),
             Stmt::Throw(_) => todo!(),
-            Stmt::Try(_) => todo!(),
+            Stmt::Try(ref stmt) => {
+                todo!()
+                /*
+                let body_idx = wrap_up_block();
+                let may_throw_idx = push_instruction(BasicBlockInstruction::MayThrow(body_idx));
+                stat_to_basic_blocks(&Stmt::Block(stmt.block.clone()));
+                wrap_up_block();
+
+                let before_catch_idx = wrap_up_block();
+
+                if let Some(ref handler) = stmt.handler {
+                    wrap_up_block();
+                    let ex_var = push_instruction(BasicBlockInstruction::PhiCatch(vec![may_throw_idx]));
+
+                    if let Some(p) = &handler.param {
+                        let sym = p.clone().ident().unwrap(/* TODO */);
+                        scope.borrow_mut().insert(sym.to_string(), ex_var);
+                    }
+                    let body = handler.body.clone();
+                    stat_to_basic_blocks(&Stmt::Block(body));
+
+                    wrap_up_block();
+                    set_exit(before_catch_idx, BasicBlockExit::Jump(current_block_index()));
+                }
+
+                wrap_up_block();
+
+                if let Some(ref finalizer) = stmt.finalizer {
+                    todo!();
+                    let finalizer = BlockStmt { span: Default::default(), stmts: finalizer.stmts.clone() };
+                    stat_to_basic_blocks(&Stmt::Block(finalizer));
+                    wrap_up_block();
+                } */
+            }
+            Stmt::Empty(_) => {}
             _ => {
                 todo!("statements_to_ssa: stat_to_ssa: {:?} not implemented", stat)
             }
@@ -426,6 +491,36 @@ mod tests {
             $4 = $2 + $3
             $5 = undefined
             exit = return $5
+        }
+        "###);
+    }
+
+    #[test]
+    fn an_array() {
+        let s = test_basic_blocks("var x = [1, 2, , ...3];");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            $1 = 2
+            $2 = 3
+            $3 = [$0, $1, , ...$2,]
+            $4 = undefined
+            exit = return $4
+        }
+        "###);
+    }
+
+    #[test]
+    fn yield_await() {
+        let s = test_basic_blocks("yield (await (yield* 1))");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            $1 = YieldStar $0
+            $2 = Await $1
+            $3 = Yield $2
+            $4 = undefined
+            exit = return $4
         }
         "###);
     }
@@ -757,18 +852,57 @@ mod tests {
         "###);
     }
 
+    /*
     #[test]
-    fn an_array() {
-        let s = test_basic_blocks("var x = [1, 2, , ...3];");
+    fn a_try_catch() {
+        let s = test_basic_blocks(
+            "try {
+                777
+            } catch {
+                888
+            }",
+        );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            $0 = 1
-            $1 = 2
-            $2 = 3
-            $3 = [$0, $1, , ...$2,]
+            $0 = may_throw $1
+            $1 = 777
+            exit = jump @3
+        }
+        @1: {
+            $2 = either_threw($0)
+            $3 = 888
+            exit = jump @2
+        }
+        @2: {
+            exit = jump @3
+        }
+        @3: {
             $4 = undefined
             exit = return $4
         }
         "###);
-    }
+    } */
+
+    /*
+    #[test]
+    fn a_trycatchfinally() {
+        let s = test_basic_blocks(
+            "try {
+                777
+            } catch {
+                888
+            } finally {
+                999
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 777    ? TODO ?
+            $1 = 888    ? TODO ?
+            $2 = 999    ? TODO ?
+            $3 = undefined
+            exit = return $3
+        }
+        "###);
+    } */
 }

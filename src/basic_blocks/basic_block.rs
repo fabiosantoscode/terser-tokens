@@ -67,10 +67,11 @@ pub enum BasicBlockInstruction {
     LitNumber(f64),
     Ref(usize),
     BinOp(String, usize, usize),
-    Phi(Vec<usize>),
     Undefined,
     This,
     Array(Vec<ArrayElement>),
+    TempExit(TempExitType, usize),
+    Phi(Vec<usize>),
 }
 
 #[derive(Clone, PartialEq)]
@@ -78,6 +79,13 @@ pub enum ArrayElement {
     Hole,
     Item(usize),
     Spread(usize),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TempExitType {
+    Yield,
+    YieldStar,
+    Await,
 }
 
 impl BasicBlockInstruction {
@@ -97,6 +105,7 @@ impl BasicBlockInstruction {
                     ArrayElement::Spread(id) => Some(id),
                 })
                 .collect(),
+            BasicBlockInstruction::TempExit(_, arg) => vec![arg],
         }
     }
 }
@@ -121,16 +130,6 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }
-            BasicBlockInstruction::Phi(vars) => {
-                write!(
-                    f,
-                    "either({})",
-                    vars.iter()
-                        .map(|v| format!("${}", v))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
             BasicBlockInstruction::Ref(id) => {
                 write!(f, "${}", id)
             }
@@ -153,6 +152,20 @@ impl Debug for BasicBlockInstruction {
                         })
                         .collect::<Vec<_>>()
                         .join(" ")
+                )
+            }
+            BasicBlockInstruction::TempExit(exit_type, arg) => {
+                write!(f, "{:?} ${}", exit_type, arg)
+            }
+
+            BasicBlockInstruction::Phi(vars) => {
+                write!(
+                    f,
+                    "either({})",
+                    vars.iter()
+                        .map(|v| format!("${}", v))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             }
         }
