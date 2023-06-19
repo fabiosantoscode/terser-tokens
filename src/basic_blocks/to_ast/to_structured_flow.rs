@@ -12,17 +12,17 @@ use std::fmt::{Debug, Formatter};
 // What follows is a translation of this paper into Rust.
 
 #[derive(Clone)]
-enum StructuredFlow {
+pub enum StructuredFlow {
     Block(Vec<StructuredFlow>),
     Loop(Vec<StructuredFlow>),
     Branch(
-        Vec<StructuredFlow>,
+        usize,
         Vec<StructuredFlow>,
         Vec<StructuredFlow>,
     ),
     Break(usize),
     Continue(usize),
-    Return(ExitType),
+    Return(ExitType, Option<usize>),
     BasicBlock(usize),
     VarRef(usize),
 }
@@ -44,7 +44,7 @@ enum ContainingSyntax {
     BlockFollowedBy(usize),
 }
 
-fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
+pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
     let dom = func.get_dom_graph();
 
     do_tree_inner(&dom, 0, Default::default())
@@ -90,12 +90,12 @@ fn node_within(graph: &Graph, node: usize, ys: Vec<&usize>, context: Ctx) -> Str
                         inner_context
                     };
                     StructuredFlow::Branch(
-                        tx_expr(graph, *e),
+                        *e,
                         vec![do_branch(graph, node, *t, inner_context.clone())],
                         vec![do_branch(graph, node, *f, inner_context.clone())],
                     )
                 }
-                BasicBlockExit::ExitFn(exit, ret) => StructuredFlow::Return(exit.clone()),
+                BasicBlockExit::ExitFn(exit, ret) => StructuredFlow::Return(exit.clone(), Some(*ret)),
             });
             StructuredFlow::Block(block_contents)
         }
@@ -117,10 +117,6 @@ fn node_within(graph: &Graph, node: usize, ys: Vec<&usize>, context: Ctx) -> Str
 
 fn tx_block(graph: &Graph, node: usize, context: Ctx) -> Vec<StructuredFlow> {
     vec![StructuredFlow::BasicBlock(node)]
-}
-
-fn tx_expr(graph: &Graph, var_index: usize) -> Vec<StructuredFlow> {
-    vec![StructuredFlow::VarRef(var_index)]
 }
 
 fn do_branch(graph: &Graph, source: usize, target: usize, context: Ctx) -> StructuredFlow {
@@ -219,7 +215,6 @@ mod tests {
         Block(
             [BasicBlockRef(0), Block(
                 [BasicBlockRef(1), Branch(
-                    [VarRef(4)]
                     [Block([BasicBlockRef(2), Break(0)])]
                     [Block([BasicBlockRef(3), Break(0)])]
                 )]
@@ -274,10 +269,8 @@ mod tests {
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
             [BasicBlockRef(0), Branch(
-                [VarRef(0)]
                 [Block(
                     [BasicBlockRef(1), Branch(
-                        [VarRef(1)]
                         [Block([BasicBlockRef(2), Break(3)])]
                         [Block([BasicBlockRef(3), Break(3)])]
                     )]
@@ -339,11 +332,9 @@ mod tests {
             [Block(
                 [BasicBlockRef(0), Block(
                     [BasicBlockRef(1), Branch(
-                        [VarRef(0)]
                         [Block(
                             [BasicBlockRef(2), Block(
                                 [BasicBlockRef(3), Branch(
-                                    [VarRef(1)]
                                     [Block([BasicBlockRef(4), Break(0)])]
                                     [Block([BasicBlockRef(5), Block([BasicBlockRef(6), Continue(7)])])]
                                 )]
@@ -369,19 +360,19 @@ impl StructuredFlow {
             StructuredFlow::Continue(_) => "Continue".to_string(),
             StructuredFlow::Loop(_) => "Loop".to_string(),
             StructuredFlow::Block(_) => "Block".to_string(),
-            StructuredFlow::Return(_) => "Return".to_string(),
+            StructuredFlow::Return(_, _) => "Return".to_string(),
             StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
             StructuredFlow::VarRef(_) => "VarRef".to_string(),
         }
     }
     fn children(&self) -> Vec<Vec<StructuredFlow>> {
         match self {
-            StructuredFlow::Branch(x, y, z) => vec![x.clone(), y.clone(), z.clone()],
+            StructuredFlow::Branch(_x /* who cares */, y, z) => vec![y.clone(), z.clone()],
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
             StructuredFlow::Loop(x) => vec![x.clone()],
             StructuredFlow::Block(x) => vec![x.clone()],
-            StructuredFlow::Return(_) => vec![],
+            StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::VarRef(_) => vec![],
         }
@@ -393,7 +384,7 @@ impl StructuredFlow {
             StructuredFlow::Continue(x) => Some(*x),
             StructuredFlow::Loop(_) => None,
             StructuredFlow::Block(_) => None,
-            StructuredFlow::Return(_) => None,
+            StructuredFlow::Return(_, _) => None,
             StructuredFlow::BasicBlock(x) => Some(*x),
             StructuredFlow::VarRef(x) => Some(*x),
         }
