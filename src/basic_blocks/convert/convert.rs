@@ -169,7 +169,7 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
     });
 
     // First item is downward propagated (contains where we are), the second is upward propagated (the jump target of a break)
-    let mut label_tracking: RefCell<Vec<(NestedIntoStatement, Vec<usize>)>> = Default::default();
+    let label_tracking: RefCell<Vec<(NestedIntoStatement, Vec<usize>)>> = Default::default();
     let push_label = |label: NestedIntoStatement| {
         let mut label_tracking = label_tracking.borrow_mut();
         label_tracking.push((label, vec![]));

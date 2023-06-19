@@ -2,17 +2,17 @@ use std::fmt::{Debug, Formatter};
 
 #[derive(Clone, Default, PartialEq)]
 pub struct BasicBlock {
-    pub body: Vec<(usize, BasicBlockInstruction)>,
+    pub instructions: Vec<(usize, BasicBlockInstruction)>,
     pub exit: BasicBlockExit,
 }
 
 impl BasicBlock {
     pub fn new(body: Vec<(usize, BasicBlockInstruction)>, exit: BasicBlockExit) -> Self {
-        Self { body, exit }
+        Self { instructions: body, exit }
     }
 
     pub fn extend(&mut self, other: Self) {
-        self.body.extend(other.body);
+        self.instructions.extend(other.instructions);
         self.exit = other.exit;
     }
 
@@ -69,12 +69,12 @@ pub enum BasicBlockInstruction {
 }
 
 impl BasicBlockInstruction {
-    pub fn used_vars(&self) -> Vec<usize> {
+    pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
             BasicBlockInstruction::LitNumber(_) => vec![],
-            BasicBlockInstruction::Ref(id) => vec![*id],
-            BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
-            BasicBlockInstruction::Phi(vars) => vars.clone(),
+            BasicBlockInstruction::Ref(id) => vec![id],
+            BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
+            BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
             BasicBlockInstruction::Undefined => vec![],
         }
     }
@@ -83,7 +83,7 @@ impl BasicBlockInstruction {
 impl Debug for BasicBlock {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{\n")?;
-        for (id, node) in &self.body {
+        for (id, node) in &self.instructions {
             write!(f, "    ${} = {:?}\n", id, node)?;
         }
         write!(f, "    exit = {:?}\n", &self.exit)?;

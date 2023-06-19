@@ -4,7 +4,7 @@ use super::super::dominator_tree::Graph;
 use std::fmt::{Debug, Formatter};
 
 // https://dl.acm.org/doi/pdf/10.1145/3547621
-// This paper really unblocked this project.
+// This paper really unlocked this project.
 // It explains how one can turn basic blocks into a structured AST.
 // It's focused on WASM, but I've heard JS also has "if", "break" and "loops"
 // So it's probably helpful here too!
@@ -15,11 +15,7 @@ use std::fmt::{Debug, Formatter};
 pub enum StructuredFlow {
     Block(Vec<StructuredFlow>),
     Loop(Vec<StructuredFlow>),
-    Branch(
-        usize,
-        Vec<StructuredFlow>,
-        Vec<StructuredFlow>,
-    ),
+    Branch(usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
     Break(usize),
     Continue(usize),
     Return(ExitType, Option<usize>),
@@ -37,6 +33,14 @@ struct Ctx {
     containing_syntax: Vec<ContainingSyntax>,
 }
 
+impl Ctx {
+    pub fn pushed(&self, syn: ContainingSyntax) -> Self {
+        let mut new = self.clone();
+        new.containing_syntax.push(syn);
+        new
+    }
+}
+
 #[derive(Debug, Clone)]
 enum ContainingSyntax {
     IfThenElse,
@@ -52,63 +56,57 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
 
 fn do_tree_inner(graph: &Graph, node: usize, context: Ctx) -> StructuredFlow {
     let code_for_node = |context: Ctx| {
+        let ys = graph
+        .direct_subs(node)
+        .into_iter()
+        .filter(|child| is_merge_node(graph, *child, 0))
+        .collect::<Vec<_>>();
         node_within(
             graph,
             node,
-            graph
-                .direct_subs(node)
-                .iter()
-                .filter(|child| is_merge_node(graph, **child, 0))
-                .collect(),
+            &ys,
             context,
         )
     };
 
     if is_loop_header(graph, node, context.clone()) {
-        let mut inner_context = context.clone();
-        inner_context
-            .containing_syntax
-            .push(ContainingSyntax::LoopHeadedBy(node));
+        let inner_context = context.pushed(ContainingSyntax::LoopHeadedBy(node));
         StructuredFlow::Loop(vec![code_for_node(inner_context)])
     } else {
         code_for_node(context)
     }
 }
 
-fn node_within(graph: &Graph, node: usize, ys: Vec<&usize>, context: Ctx) -> StructuredFlow {
+fn node_within(graph: &Graph, node: usize, ys: &[usize], context: Ctx) -> StructuredFlow {
     match ys.split_first() {
         None => {
             let mut block_contents: Vec<StructuredFlow> = tx_block(graph, node, context.clone());
             block_contents.push(match &graph.nodes[node].basic_block.exit {
                 BasicBlockExit::Jump(to) => do_branch(graph, node, *to, context),
                 BasicBlockExit::Cond(e, t, f) => {
-                    let inner_context = {
-                        let mut inner_context = context.clone();
-                        inner_context
-                            .containing_syntax
-                            .push(ContainingSyntax::IfThenElse);
-                        inner_context
-                    };
+                    let inner_context = context.pushed(ContainingSyntax::IfThenElse);
+
                     StructuredFlow::Branch(
                         *e,
                         vec![do_branch(graph, node, *t, inner_context.clone())],
                         vec![do_branch(graph, node, *f, inner_context.clone())],
                     )
                 }
-                BasicBlockExit::ExitFn(exit, ret) => StructuredFlow::Return(exit.clone(), Some(*ret)),
+                BasicBlockExit::ExitFn(exit, ret) => {
+                    StructuredFlow::Return(exit.clone(), Some(*ret))
+                }
             });
             StructuredFlow::Block(block_contents)
         }
         Some((y, ys)) => {
             let inner = vec![
-                node_within(graph, node, ys.iter().copied().collect(), {
-                    let mut inner_context = context.clone();
-                    inner_context
-                        .containing_syntax
-                        .push(ContainingSyntax::BlockFollowedBy(**y));
-                    inner_context
-                }),
-                do_tree_inner(&graph, **y, context),
+                node_within(
+                    graph,
+                    node,
+                    ys,
+                    context.pushed(ContainingSyntax::BlockFollowedBy(*y)),
+                ),
+                do_tree_inner(&graph, *y, context),
             ];
             StructuredFlow::Block(inner)
         }
@@ -141,17 +139,15 @@ fn do_branch(graph: &Graph, source: usize, target: usize, context: Ctx) -> Struc
 // affect how 𝑋 is translated, but it does affect the placement of 𝑋 ’s translation: the translation
 // will follow a block form.
 fn is_merge_node(graph: &Graph, child: usize, root: usize) -> bool {
+    let reverse_postorder = graph.reverse_postorder();
+    let index = |child| reverse_postorder.iter().position(|&x| x == child).unwrap();
     let forward_inedges = graph.nodes[child]
         .incoming_edges
         .iter()
-        .filter(|&&edge| edge > child)
+        .filter(|&&edge| index(edge) > index(child))
         .count();
 
-    if forward_inedges >= 2 {
-        todo!("test merge nodes")
-    } else {
-        false
-    }
+    forward_inedges >= 2
 }
 
 // A node 𝑋 that has a back inedge is a loop header, and its translation is wrapped in a loop
@@ -214,10 +210,12 @@ mod tests {
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
             [BasicBlockRef(0), Block(
-                [BasicBlockRef(1), Branch(
-                    [Block([BasicBlockRef(2), Break(0)])]
-                    [Block([BasicBlockRef(3), Break(0)])]
-                )]
+                [Block(
+                    [BasicBlockRef(1), Branch(
+                        [Block([BasicBlockRef(2), Break(0)])]
+                        [Block([BasicBlockRef(3), Break(0)])]
+                    )]
+                ), Block([BasicBlockRef(4), Return])]
             )]
         )
         "###);
@@ -268,14 +266,83 @@ mod tests {
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), Branch(
+            [Block(
+                [BasicBlockRef(0), Branch(
+                    [Block(
+                        [Block(
+                            [BasicBlockRef(1), Branch(
+                                [Block([BasicBlockRef(2), Break(3)])]
+                                [Block([BasicBlockRef(3), Break(3)])]
+                            )]
+                        ), Block([BasicBlockRef(4), Block([BasicBlockRef(5), Break(0)])])]
+                    )]
+                    [Block([BasicBlockRef(6), Break(0)])]
+                )]
+            ), Block([BasicBlockRef(7), Return])]
+        )
+        "###);
+    }
+
+    #[test]
+    fn mk_stats_3() {
+        let func = test_basic_blocks("if (123) { 345 } 10; if (1) 2");
+
+        insta::assert_debug_snapshot!(func, @r###"
+        @0: {
+            $0 = 123
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $0 ? jump @2 : jump @4
+        }
+        @2: {
+            $1 = 345
+            exit = jump @3
+        }
+        @3: {
+            exit = jump @4
+        }
+        @4: {
+            $2 = 10
+            $3 = 1
+            exit = jump @5
+        }
+        @5: {
+            exit = cond $3 ? jump @6 : jump @7
+        }
+        @6: {
+            $4 = 2
+            exit = jump @7
+        }
+        @7: {
+            $5 = undefined
+            exit = return $5
+        }
+        "###);
+
+        let g = func.get_dom_graph();
+        println!("{:?}", g);
+        println!("{:?}", g.reverse_postorder());
+
+        let stats = do_tree(&func);
+        insta::assert_debug_snapshot!(stats, @r###"
+        Block(
+            [BasicBlockRef(0), Block(
                 [Block(
                     [BasicBlockRef(1), Branch(
-                        [Block([BasicBlockRef(2), Break(3)])]
-                        [Block([BasicBlockRef(3), Break(3)])]
+                        [Block([BasicBlockRef(2), Block([BasicBlockRef(3), Break(3)])])]
+                        [Break(3)]
+                    )]
+                ), Block(
+                    [BasicBlockRef(4), Block(
+                        [Block(
+                            [BasicBlockRef(5), Branch(
+                                [Block([BasicBlockRef(6), Break(0)])]
+                                [Break(0)]
+                            )]
+                        ), Block([BasicBlockRef(7), Return])]
                     )]
                 )]
-                [Block([BasicBlockRef(6), Break(0)])]
             )]
         )
         "###);
@@ -331,23 +398,24 @@ mod tests {
         Loop(
             [Block(
                 [BasicBlockRef(0), Block(
-                    [BasicBlockRef(1), Branch(
-                        [Block(
-                            [BasicBlockRef(2), Block(
-                                [BasicBlockRef(3), Branch(
-                                    [Block([BasicBlockRef(4), Break(0)])]
-                                    [Block([BasicBlockRef(5), Block([BasicBlockRef(6), Continue(7)])])]
+                    [Block(
+                        [BasicBlockRef(1), Branch(
+                            [Block(
+                                [BasicBlockRef(2), Block(
+                                    [BasicBlockRef(3), Branch(
+                                        [Block([BasicBlockRef(4), Break(0)])]
+                                        [Block([BasicBlockRef(5), Block([BasicBlockRef(6), Continue(7)])])]
+                                    )]
                                 )]
                             )]
+                            [Break(0)]
                         )]
-                        [Break(0)]
-                    )]
+                    ), Block([BasicBlockRef(7), Return])]
                 )]
             )]
         )
         "###);
     }
-
 }
 
 // For printing out these trees
@@ -425,4 +493,3 @@ impl Debug for StructuredFlow {
         }
     }
 }
-

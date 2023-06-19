@@ -2,9 +2,9 @@ use std::{fmt::Debug, iter::Enumerate};
 
 use super::basic_block::{self, BasicBlock};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct BasicBlockGroup {
-    pub asts: Vec<BasicBlock>,
+    pub blocks: Vec<BasicBlock>,
 }
 
 impl BasicBlockGroup {
@@ -14,12 +14,12 @@ impl BasicBlockGroup {
         }
     }
 
-    pub fn from_asts(asts: Vec<BasicBlock>) -> Self {
-        Self { asts }
+    pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {
+        Self { blocks }
     }
 
     pub fn iter<'a>(&'a self) -> Enumerate<std::slice::Iter<'_, basic_block::BasicBlock>> {
-        self.asts.iter().enumerate()
+        self.blocks.iter().enumerate()
     }
 }
 

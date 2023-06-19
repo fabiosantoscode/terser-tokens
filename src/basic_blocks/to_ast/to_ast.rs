@@ -5,10 +5,17 @@ use crate::basic_blocks::{
     basic_block_group::BasicBlockGroup,
 };
 
-use super::to_structured_flow::{do_tree, StructuredFlow};
+use super::{
+    remove_phi::remove_phi,
+    to_structured_flow::{do_tree, StructuredFlow},
+};
 
 fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
-    let tree = do_tree(block_group);
+    let mut block_group: BasicBlockGroup = block_group.clone();
+
+    remove_phi(&mut block_group);
+
+    let tree = do_tree(&block_group);
 
     to_ast_inner(&tree, &block_group)
 }
@@ -61,6 +68,10 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                     right: Box::new(right),
                 })
             }
+            BasicBlockInstruction::Ref(var_idx) => {
+                swc_ecma_ast::Expr::Ident(Ident::new(get_variable(*var_idx).into(), Default::default()))
+            }
+            BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
             _ => todo!("to_expr: {:?}", expr),
         }
     });
@@ -73,7 +84,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
         match node {
             StructuredFlow::Block(stats) => to_stat_vec(stats),
             StructuredFlow::BasicBlock(block_idx) => {
-                let stats = &block_group.asts[*block_idx].body;
+                let stats = &block_group.blocks[*block_idx].instructions;
 
                 stats
                     .iter()
@@ -107,8 +118,8 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 let if_stmt = swc_ecma_ast::Stmt::If(swc_ecma_ast::IfStmt {
                     span: Default::default(),
                     test: Box::new(branch_expr),
-                    cons: Box::new(block( &cons)),
-                    alt: Some( Box::new(block( &alt))),
+                    cons: Box::new(block(&cons)),
+                    alt: Some(Box::new(block(&alt))),
                 });
 
                 vec![if_stmt]
@@ -116,7 +127,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
             StructuredFlow::Break(nest_count) => {
                 let break_stmt = swc_ecma_ast::Stmt::Break(swc_ecma_ast::BreakStmt {
                     span: Default::default(),
-                    label: None /* TODO */,
+                    label: None, /* TODO */
                 });
 
                 vec![break_stmt]
@@ -124,7 +135,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
             StructuredFlow::Continue(nest_count) => {
                 let break_stmt = swc_ecma_ast::Stmt::Continue(swc_ecma_ast::ContinueStmt {
                     span: Default::default(),
-                    label: None /* TODO */,
+                    label: None, /* TODO */
                 });
 
                 vec![break_stmt]
@@ -135,7 +146,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 let while_stmt = swc_ecma_ast::Stmt::While(swc_ecma_ast::WhileStmt {
                     span: Default::default(),
                     test: Box::new(swc_ecma_ast::Expr::Lit(true.into())),
-                    body: Box::new(block( &body)),
+                    body: Box::new(block(&body)),
                 });
 
                 vec![while_stmt]
@@ -178,12 +189,14 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = 1;
         if ($0) {
-            var $1 = 2;
+            var $3 = 2;
             break;
         } else {
-            var $2 = 3;
+            var $3 = 3;
             break;
         }
+        var $4 = undefined;
+        return $4;
         "###);
     }
 
@@ -205,7 +218,36 @@ mod tests {
             } else {
                 break;
             }
+            var $2 = undefined;
+            return $2;
         }
+        "###);
+    }
+
+    #[test]
+    fn to_conditional_var() {
+        let block_group = test_basic_blocks(
+            "var x = 10;
+            if (123) { x = 456; } else { x = 789; }
+            x + 1",
+        );
+
+        let tree = to_ast(&block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var $0 = 10;
+        var $1 = 123;
+        if ($1) {
+            var $4 = 456;
+            break;
+        } else {
+            var $4 = 789;
+            break;
+        }
+        var $5 = $4;
+        var $6 = 1;
+        var $7 = $5 + $6;
+        var $8 = undefined;
+        return $8;
         "###);
     }
 }
