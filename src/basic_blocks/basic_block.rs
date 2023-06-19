@@ -8,7 +8,10 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     pub fn new(body: Vec<(usize, BasicBlockInstruction)>, exit: BasicBlockExit) -> Self {
-        Self { instructions: body, exit }
+        Self {
+            instructions: body,
+            exit,
+        }
     }
 
     pub fn extend(&mut self, other: Self) {
@@ -66,6 +69,15 @@ pub enum BasicBlockInstruction {
     BinOp(String, usize, usize),
     Phi(Vec<usize>),
     Undefined,
+    This,
+    Array(Vec<ArrayElement>),
+}
+
+#[derive(Clone, PartialEq)]
+pub enum ArrayElement {
+    Hole,
+    Item(usize),
+    Spread(usize),
 }
 
 impl BasicBlockInstruction {
@@ -76,6 +88,15 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
             BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
             BasicBlockInstruction::Undefined => vec![],
+            BasicBlockInstruction::This => vec![],
+            BasicBlockInstruction::Array(elements) => elements
+                .iter_mut()
+                .filter_map(|e| match e {
+                    ArrayElement::Hole => None,
+                    ArrayElement::Item(id) => Some(id),
+                    ArrayElement::Spread(id) => Some(id),
+                })
+                .collect(),
         }
     }
 }
@@ -115,6 +136,24 @@ impl Debug for BasicBlockInstruction {
             }
             BasicBlockInstruction::Undefined => {
                 write!(f, "undefined")
+            }
+            BasicBlockInstruction::This => {
+                write!(f, "this")
+            }
+            BasicBlockInstruction::Array(elements) => {
+                write!(
+                    f,
+                    "[{}]",
+                    elements
+                        .iter()
+                        .map(|e| match e {
+                            ArrayElement::Hole => format!(","),
+                            ArrayElement::Item(id) => format!("${},", id),
+                            ArrayElement::Spread(id) => format!("...${},", id),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
             }
         }
     }

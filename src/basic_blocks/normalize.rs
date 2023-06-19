@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use domtree::dfs::DFSGraph;
-
 use crate::basic_blocks::basic_block::BasicBlock;
 use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
 use crate::basic_blocks::basic_block_group::BasicBlockGroup;
-use crate::basic_blocks::dominator_tree;
 
 pub fn normalize_basic_blocks(
     exits: &Vec<BasicBlockExit>,
@@ -93,14 +90,17 @@ fn get_blocks_jumped_to(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
         .collect::<HashSet<_>>()
 }
 
-fn get_reachable_blocks(exits: &Vec<BasicBlockExit>, basic_blocks: &Vec<Vec<(usize, BasicBlockInstruction)>>) -> HashSet<usize> {
+fn get_reachable_blocks(
+    exits: &Vec<BasicBlockExit>,
+    basic_blocks: &Vec<Vec<(usize, BasicBlockInstruction)>>,
+) -> HashSet<usize> {
     let func = BasicBlockGroup::from_asts(
-        basic_blocks.iter().cloned().zip(exits.iter().cloned())
-        .map(
-            |(block, exit)| {
-                BasicBlock::new(block.clone(), exit.clone())
-            },
-        ).collect()
+        basic_blocks
+            .iter()
+            .cloned()
+            .zip(exits.iter().cloned())
+            .map(|(block, exit)| BasicBlock::new(block.clone(), exit.clone()))
+            .collect(),
     );
     let g = func.get_dom_graph();
 

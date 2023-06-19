@@ -1,7 +1,7 @@
-use swc_ecma_ast::{BindingIdent, Decl, Expr, Ident, ReturnStmt, Stmt};
+use swc_ecma_ast::{BindingIdent, Decl, Expr, ExprOrSpread, Ident, ReturnStmt, Stmt};
 
 use crate::basic_blocks::{
-    basic_block::{BasicBlockInstruction, ExitType},
+    basic_block::{ArrayElement, BasicBlockInstruction, ExitType},
     basic_block_group::BasicBlockGroup,
 };
 
@@ -22,10 +22,9 @@ fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
 
 fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stmt> {
     let get_variable = |var_idx: usize| format!("${}", var_idx);
-    let get_identifier =
-        |i: String| swc_ecma_ast::Expr::Ident(Ident::new(i.into(), Default::default()));
+    let get_identifier = |i: String| Expr::Ident(Ident::new(i.into(), Default::default()));
     let var_decl = |name: &String, value: Expr| {
-        let varname = swc_ecma_ast::Ident::new(name.clone().into(), Default::default());
+        let varname = Ident::new(name.clone().into(), Default::default());
         let vardecl = swc_ecma_ast::VarDecl {
             span: Default::default(),
             kind: swc_ecma_ast::VarDeclKind::Var,
@@ -40,12 +39,12 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 definite: false,
             }],
         };
-        let vardecl = swc_ecma_ast::Stmt::Decl(Decl::Var(Box::new(vardecl)));
+        let vardecl = Stmt::Decl(Decl::Var(Box::new(vardecl)));
 
         vardecl
     };
     let block = |stats: &Vec<Stmt>| {
-        swc_ecma_ast::Stmt::Block(swc_ecma_ast::BlockStmt {
+        Stmt::Block(swc_ecma_ast::BlockStmt {
             span: Default::default(),
             stmts: stats.clone(),
         })
@@ -55,24 +54,48 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
         match expr {
             BasicBlockInstruction::LitNumber(num) => (*num).into(),
             BasicBlockInstruction::Undefined => {
-                swc_ecma_ast::Expr::Ident(Ident::new("undefined".into(), Default::default()))
+                Expr::Ident(Ident::new("undefined".into(), Default::default()))
             }
             BasicBlockInstruction::BinOp(name, left, right) => {
                 let left = get_identifier(get_variable(*left));
                 let right = get_identifier(get_variable(*right));
 
-                swc_ecma_ast::Expr::Bin(swc_ecma_ast::BinExpr {
+                Expr::Bin(swc_ecma_ast::BinExpr {
                     span: Default::default(),
                     op: swc_ecma_ast::BinaryOp::Add, /* major TODO lol */
                     left: Box::new(left),
                     right: Box::new(right),
                 })
             }
-            BasicBlockInstruction::Ref(var_idx) => {
-                swc_ecma_ast::Expr::Ident(Ident::new(get_variable(*var_idx).into(), Default::default()))
-            }
+            BasicBlockInstruction::Ref(var_idx) => Expr::Ident(Ident::new(
+                get_variable(*var_idx).into(),
+                Default::default(),
+            )),
             BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
-            _ => todo!("to_expr: {:?}", expr),
+            BasicBlockInstruction::This => {
+                Expr::Ident(Ident::new("this".into(), Default::default()))
+            }
+            BasicBlockInstruction::Array(items) => {
+                let items = items
+                    .iter()
+                    .map(|item| match item {
+                        ArrayElement::Item(var_idx) => Some(ExprOrSpread {
+                            spread: None,
+                            expr: Box::new(get_identifier(get_variable(*var_idx))),
+                        }),
+                        ArrayElement::Spread(var_idx) => Some(ExprOrSpread {
+                            spread: Some(Default::default()),
+                            expr: Box::new(get_identifier(get_variable(*var_idx))),
+                        }),
+                        ArrayElement::Hole => None,
+                    })
+                    .collect();
+
+                Expr::Array(swc_ecma_ast::ArrayLit {
+                    span: Default::default(),
+                    elems: items,
+                })
+            }
         }
     });
 
@@ -89,19 +112,18 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 stats
                     .iter()
                     .map(|(variable, instruction)| {
-                        let expression: swc_ecma_ast::Expr = to_expr(instruction);
+                        let expression: Expr = to_expr(instruction);
 
                         var_decl(&format!("${}", variable), expression)
                     })
                     .collect::<Vec<_>>()
             }
             StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {
-                let varname =
-                    swc_ecma_ast::Ident::new(format!("${}", var_idx).into(), Default::default());
+                let varname = Ident::new(format!("${}", var_idx).into(), Default::default());
 
-                let return_stmt = swc_ecma_ast::Stmt::Return(ReturnStmt {
+                let return_stmt = Stmt::Return(ReturnStmt {
                     span: Default::default(),
-                    arg: Some(Box::new(swc_ecma_ast::Expr::Ident(Ident {
+                    arg: Some(Box::new(Expr::Ident(Ident {
                         span: Default::default(),
                         sym: varname.sym.clone(),
                         optional: false,
@@ -115,7 +137,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 let cons = to_stat_vec(cons);
                 let alt = to_stat_vec(alt);
 
-                let if_stmt = swc_ecma_ast::Stmt::If(swc_ecma_ast::IfStmt {
+                let if_stmt = Stmt::If(swc_ecma_ast::IfStmt {
                     span: Default::default(),
                     test: Box::new(branch_expr),
                     cons: Box::new(block(&cons)),
@@ -125,7 +147,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 vec![if_stmt]
             }
             StructuredFlow::Break(nest_count) => {
-                let break_stmt = swc_ecma_ast::Stmt::Break(swc_ecma_ast::BreakStmt {
+                let break_stmt = Stmt::Break(swc_ecma_ast::BreakStmt {
                     span: Default::default(),
                     label: None, /* TODO */
                 });
@@ -133,7 +155,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 vec![break_stmt]
             }
             StructuredFlow::Continue(nest_count) => {
-                let break_stmt = swc_ecma_ast::Stmt::Continue(swc_ecma_ast::ContinueStmt {
+                let break_stmt = Stmt::Continue(swc_ecma_ast::ContinueStmt {
                     span: Default::default(),
                     label: None, /* TODO */
                 });
@@ -143,9 +165,9 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
             StructuredFlow::Loop(body) => {
                 let body = to_stat_vec(body);
 
-                let while_stmt = swc_ecma_ast::Stmt::While(swc_ecma_ast::WhileStmt {
+                let while_stmt = Stmt::While(swc_ecma_ast::WhileStmt {
                     span: Default::default(),
-                    test: Box::new(swc_ecma_ast::Expr::Lit(true.into())),
+                    test: Box::new(Expr::Lit(true.into())),
                     body: Box::new(block(&body)),
                 });
 

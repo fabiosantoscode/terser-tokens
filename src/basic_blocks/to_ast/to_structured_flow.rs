@@ -57,16 +57,11 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
 fn do_tree_inner(graph: &Graph, node: usize, context: Ctx) -> StructuredFlow {
     let code_for_node = |context: Ctx| {
         let ys = graph
-        .direct_subs(node)
-        .into_iter()
-        .filter(|child| is_merge_node(graph, *child, 0))
-        .collect::<Vec<_>>();
-        node_within(
-            graph,
-            node,
-            &ys,
-            context,
-        )
+            .direct_subs(node)
+            .into_iter()
+            .filter(|child| is_merge_node(graph, *child, 0))
+            .collect::<Vec<_>>();
+        node_within(graph, node, &ys, context)
     };
 
     if is_loop_header(graph, node, context.clone()) {
@@ -211,12 +206,55 @@ mod tests {
         Block(
             [BasicBlockRef(0), Block(
                 [Block(
-                    [BasicBlockRef(1), Branch(
+                    [BasicBlockRef(1), Branch 4 {
                         [Block([BasicBlockRef(2), Break(0)])]
                         [Block([BasicBlockRef(3), Break(0)])]
-                    )]
+                    }]
                 ), Block([BasicBlockRef(4), Return])]
             )]
+        )
+        "###);
+    }
+
+    #[test]
+    fn an_array() {
+        let func = test_basic_blocks("var x = [1, 2 ? 3 : 4, , ...3];");
+        insta::assert_debug_snapshot!(func, @r###"
+        @0: {
+            $0 = 1
+            $1 = 2
+            exit = cond $1 ? jump @1 : jump @2
+        }
+        @1: {
+            $2 = 3
+            exit = jump @3
+        }
+        @2: {
+            $3 = 4
+            exit = jump @3
+        }
+        @3: {
+            $4 = either($2, $3)
+            $5 = 3
+            $6 = [$0, $4, , ...$5,]
+            $7 = undefined
+            exit = return $7
+        }
+        "###);
+
+        let g = func.get_dom_graph();
+        println!("{:?}", g);
+        println!("{:?}", g.reverse_postorder());
+
+        let stats = do_tree(&func);
+        insta::assert_debug_snapshot!(stats, @r###"
+        Block(
+            [Block(
+                [BasicBlockRef(0), Branch 1 {
+                    [Block([BasicBlockRef(1), Break(0)])]
+                    [Block([BasicBlockRef(2), Break(0)])]
+                }]
+            ), Block([BasicBlockRef(3), Return])]
         )
         "###);
     }
@@ -267,17 +305,17 @@ mod tests {
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
             [Block(
-                [BasicBlockRef(0), Branch(
+                [BasicBlockRef(0), Branch 0 {
                     [Block(
                         [Block(
-                            [BasicBlockRef(1), Branch(
+                            [BasicBlockRef(1), Branch 1 {
                                 [Block([BasicBlockRef(2), Break(3)])]
                                 [Block([BasicBlockRef(3), Break(3)])]
-                            )]
+                            }]
                         ), Block([BasicBlockRef(4), Block([BasicBlockRef(5), Break(0)])])]
                     )]
                     [Block([BasicBlockRef(6), Break(0)])]
-                )]
+                }]
             ), Block([BasicBlockRef(7), Return])]
         )
         "###);
@@ -329,17 +367,17 @@ mod tests {
         Block(
             [BasicBlockRef(0), Block(
                 [Block(
-                    [BasicBlockRef(1), Branch(
+                    [BasicBlockRef(1), Branch 0 {
                         [Block([BasicBlockRef(2), Block([BasicBlockRef(3), Break(3)])])]
                         [Break(3)]
-                    )]
+                    }]
                 ), Block(
                     [BasicBlockRef(4), Block(
                         [Block(
-                            [BasicBlockRef(5), Branch(
+                            [BasicBlockRef(5), Branch 3 {
                                 [Block([BasicBlockRef(6), Break(0)])]
                                 [Break(0)]
-                            )]
+                            }]
                         ), Block([BasicBlockRef(7), Return])]
                     )]
                 )]
@@ -399,17 +437,17 @@ mod tests {
             [Block(
                 [BasicBlockRef(0), Block(
                     [Block(
-                        [BasicBlockRef(1), Branch(
+                        [BasicBlockRef(1), Branch 0 {
                             [Block(
                                 [BasicBlockRef(2), Block(
-                                    [BasicBlockRef(3), Branch(
+                                    [BasicBlockRef(3), Branch 1 {
                                         [Block([BasicBlockRef(4), Break(0)])]
                                         [Block([BasicBlockRef(5), Block([BasicBlockRef(6), Continue(7)])])]
-                                    )]
+                                    }]
                                 )]
                             )]
                             [Break(0)]
-                        )]
+                        }]
                     ), Block([BasicBlockRef(7), Return])]
                 )]
             )]
@@ -467,7 +505,19 @@ impl Debug for StructuredFlow {
             indented_lines.collect::<Vec<String>>().join("\n")
         };
 
-        if let Some(index) = self.index() {
+        if let StructuredFlow::Branch(var, cons, alt) = self {
+            let cons = format!("{:?}", cons);
+            let alt = format!("{:?}", alt);
+
+            return write!(
+                f,
+                "{} {} {{\n{}\n{}\n}}",
+                self.str_head(),
+                var,
+                indent_str_lines(&cons),
+                indent_str_lines(&alt)
+            );
+        } else if let Some(index) = self.index() {
             write!(f, "{}({})", self.str_head(), index)
         } else {
             let children = self.children();

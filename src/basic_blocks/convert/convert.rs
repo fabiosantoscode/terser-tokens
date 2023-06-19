@@ -2,9 +2,9 @@
 use fix_fn::fix_fn;
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
 
-use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
+use crate::basic_blocks::basic_block::{ArrayElement, BasicBlockExit, BasicBlockInstruction};
 use crate::scope::scope::Scope;
-use swc_ecma_ast::{CondExpr, Decl, Expr, IfStmt, Lit, Pat, PatOrExpr, Stmt};
+use swc_ecma_ast::{CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Pat, PatOrExpr, Stmt};
 
 use super::super::basic_block::ExitType;
 use super::super::normalize::normalize_basic_blocks;
@@ -98,11 +98,6 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
 
                 BasicBlockInstruction::BinOp("+".into(), l, r)
             }
-            Expr::Ident(ident) => {
-                let Some(var_idx) = scope.borrow().get(&ident.sym.to_string()) else {todo!()};
-
-                BasicBlockInstruction::Ref(var_idx)
-            }
             Expr::Assign(assign) => match &assign.left {
                 PatOrExpr::Pat(e) => match e.borrow() {
                     Pat::Ident(ident) => {
@@ -160,6 +155,61 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                 // the retval of our ternary is a phi node
                 BasicBlockInstruction::Phi(vec![cons, alt])
             }
+            Expr::Ident(ident) => {
+                let Some(var_idx) = scope.borrow().get(&ident.sym.to_string()) else {todo!()};
+
+                BasicBlockInstruction::Ref(var_idx)
+            }
+            Expr::This(_) => BasicBlockInstruction::This,
+            Expr::Array(array_lit) => {
+                let mut elements = vec![];
+
+                for elem in &array_lit.elems {
+                    let elem = match elem {
+                        Some(ExprOrSpread { spread, expr }) => {
+                            if spread.is_none() {
+                                ArrayElement::Item(expr_to_basic_blocks(expr))
+                            } else {
+                                ArrayElement::Spread(expr_to_basic_blocks(expr))
+                            }
+                        }
+                        None => ArrayElement::Hole,
+                    };
+
+                    elements.push(elem);
+                }
+
+                BasicBlockInstruction::Array(elements)
+            }
+            Expr::Object(_) => todo!(),
+            Expr::Fn(_) => todo!(),
+            Expr::Unary(_) => todo!(),
+            Expr::Update(_) => todo!(),
+            Expr::Member(_) => todo!(),
+            Expr::SuperProp(_) => todo!(),
+            Expr::Call(_) => todo!(),
+            Expr::New(_) => todo!(),
+            Expr::Tpl(_) => todo!(),
+            Expr::TaggedTpl(_) => todo!(),
+            Expr::Arrow(_) => todo!(),
+            Expr::Class(_) => todo!(),
+            Expr::Yield(_) => todo!(),
+            Expr::MetaProp(_) => todo!(),
+            Expr::Await(_) => todo!(),
+            Expr::OptChain(_) => todo!(),
+            Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
+            Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
+            Expr::JSXMember(_)
+            | Expr::JSXNamespacedName(_)
+            | Expr::JSXEmpty(_)
+            | Expr::JSXElement(_)
+            | Expr::JSXFragment(_) => unreachable!("Expr::JSX from SWC should be impossible"),
+            Expr::TsTypeAssertion(_)
+            | Expr::TsConstAssertion(_)
+            | Expr::TsNonNull(_)
+            | Expr::TsAs(_)
+            | Expr::TsInstantiation(_)
+            | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
             _ => {
                 todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
             }
@@ -201,6 +251,10 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
 
                 wrap_up_block();
             }
+            Stmt::DoWhile(_) => todo!(),
+            Stmt::For(_) => todo!(),
+            Stmt::ForIn(_) => todo!(),
+            Stmt::ForOf(_) => todo!(),
             Stmt::While(whil) => {
                 let blockidx_start = current_block_index();
                 push_label(NestedIntoStatement::Unlabelled);
@@ -307,6 +361,14 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                     }
                 }
             },
+            Stmt::Empty(_) => todo!(),
+            Stmt::Debugger(_) => todo!(),
+            Stmt::With(_) => todo!(),
+            Stmt::Labeled(_) => todo!(),
+            Stmt::Continue(_) => todo!(),
+            Stmt::Switch(_) => todo!(),
+            Stmt::Throw(_) => todo!(),
+            Stmt::Try(_) => todo!(),
             _ => {
                 todo!("statements_to_ssa: stat_to_ssa: {:?} not implemented", stat)
             }
@@ -337,7 +399,6 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
         })
         .collect::<Vec<_>>();
 
-    // let (exits, basic_blocks) = (exits.clone(), basic_blocks.borrow().clone());
     let (exits, basic_blocks) = normalize_basic_blocks(&exits, &basic_blocks.borrow());
 
     let asts = exits
@@ -690,6 +751,21 @@ mod tests {
             exit = jump @10
         }
         @10: {
+            $4 = undefined
+            exit = return $4
+        }
+        "###);
+    }
+
+    #[test]
+    fn an_array() {
+        let s = test_basic_blocks("var x = [1, 2, , ...3];");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            $1 = 2
+            $2 = 3
+            $3 = [$0, $1, , ...$2,]
             $4 = undefined
             exit = return $4
         }

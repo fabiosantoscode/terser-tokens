@@ -6,8 +6,8 @@ use super::{basic_block_group::BasicBlockGroup, convert::convert::statements_to_
 use crate::parser::{parse_expression, parse_module};
 
 use swc_common::SourceMap;
-use swc_ecma_ast::{ModuleItem, Script};
 use swc_ecma_ast::{ExprStmt, Stmt};
+use swc_ecma_ast::{ModuleItem, Script};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 
 pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
@@ -39,14 +39,16 @@ pub fn stats_to_string(stats: Vec<Stmt>) -> String {
     }
     impl Write for Buf {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.buf.borrow_mut().push_str(std::str::from_utf8(buf).unwrap());
+            self.buf
+                .borrow_mut()
+                .push_str(std::str::from_utf8(buf).unwrap());
             Ok(buf.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
-    
+
     let script: Script = Script {
         span: Default::default(),
         body: stats,
@@ -56,7 +58,7 @@ pub fn stats_to_string(stats: Vec<Stmt>) -> String {
     let buf = Buf { buf: str.clone() };
     let writer = Box::new(buf);
     let sourcemapper: Rc<SourceMap> = Default::default();
-    let mut emitter = Emitter{
+    let mut emitter = Emitter {
         cfg: Default::default(),
         comments: None,
         cm: sourcemapper,
