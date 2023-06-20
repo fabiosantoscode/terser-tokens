@@ -1,4 +1,7 @@
-use std::{fmt::{Debug, Formatter}, collections::HashMap};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Formatter},
+};
 
 #[derive(Clone, Default, PartialEq)]
 pub struct BasicBlock {
@@ -35,7 +38,7 @@ pub enum BasicBlockExit {
     /// (try_block, catch_block, finally_block, after_finally_block). Used when we see "try {". It just goes to try_block, the rest is book-keeping.
     SetTryAndCatch(usize, usize, usize, usize),
     /// (catch_block, finally). Used when we see "} catch". If we had an exception, we go to catch_block. Otherwise, we go to finally_or_after.
-    PopCatch(usize, usize),    
+    PopCatch(usize, usize),
     /// (finally_block, after_finally_block). Used when we see "} finally". We go to the finally-block.
     PopFinally(usize, usize),
     EndFinally(usize),
@@ -47,17 +50,23 @@ impl BasicBlockExit {
 
         match self {
             BasicBlockExit::Jump(target) => BasicBlockExit::Jump(swap(target)),
-            BasicBlockExit::Cond(cond, true_target, false_target) => BasicBlockExit::Cond(
-                *cond,
-                swap(true_target),
-                swap(false_target),
-            ),
+            BasicBlockExit::Cond(cond, true_target, false_target) => {
+                BasicBlockExit::Cond(*cond, swap(true_target), swap(false_target))
+            }
             BasicBlockExit::ExitFn(exit_type, target) => {
                 BasicBlockExit::ExitFn(exit_type.clone(), *target)
             }
-            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after_finally) => {
-                BasicBlockExit::SetTryAndCatch(swap(try_block), swap(catch_block), swap(finally_block), swap(after_finally))
-            }
+            BasicBlockExit::SetTryAndCatch(
+                try_block,
+                catch_block,
+                finally_block,
+                after_finally,
+            ) => BasicBlockExit::SetTryAndCatch(
+                swap(try_block),
+                swap(catch_block),
+                swap(finally_block),
+                swap(after_finally),
+            ),
             BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
                 BasicBlockExit::PopCatch(swap(catch_block), swap(finally_or_after))
             }
@@ -76,8 +85,12 @@ impl BasicBlockExit {
             BasicBlockExit::Cond(_, true_target, false_target) => vec![*true_target, *false_target],
             BasicBlockExit::ExitFn(_, _) => vec![],
             BasicBlockExit::SetTryAndCatch(try_target, _, _, _) => vec![*try_target],
-            BasicBlockExit::PopCatch(catch_target, finally_target) => vec![*catch_target, *finally_target],
-            BasicBlockExit::PopFinally(finally_target, after_finally_target) => vec![*finally_target],
+            BasicBlockExit::PopCatch(catch_target, finally_target) => {
+                vec![*catch_target, *finally_target]
+            }
+            BasicBlockExit::PopFinally(finally_target, after_finally_target) => {
+                vec![*finally_target]
+            }
             BasicBlockExit::EndFinally(after_finally_target) => vec![*after_finally_target],
         }
     }
@@ -92,6 +105,7 @@ impl Default for BasicBlockExit {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExitType {
     Return,
+    Throw,
 }
 
 #[derive(Clone, PartialEq)]
@@ -222,12 +236,23 @@ impl Debug for BasicBlockExit {
                 ExitType::Return => {
                     write!(f, "return ${}", val)
                 }
+                ExitType::Throw => {
+                    write!(f, "throw ${}", val)
+                }
             },
             BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after_block) => {
-                write!(f, "try @{} catch @{} finally @{} after @{}", try_block, catch_block, finally_block, after_block)
+                write!(
+                    f,
+                    "try @{} catch @{} finally @{} after @{}",
+                    try_block, catch_block, finally_block, after_block
+                )
             }
             BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
-                write!(f, "error ? jump @{} : jump @{}", catch_block, finally_or_after)
+                write!(
+                    f,
+                    "error ? jump @{} : jump @{}",
+                    catch_block, finally_or_after
+                )
             }
             BasicBlockExit::PopFinally(finally_block, after_block) => {
                 write!(f, "finally @{} after @{}", finally_block, after_block)

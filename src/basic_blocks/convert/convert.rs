@@ -8,7 +8,7 @@ use crate::basic_blocks::basic_block::{
 use crate::scope::scope::Scope;
 use swc_ecma_ast::{
     AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Pat, PatOrExpr, Stmt,
-    YieldExpr,
+    YieldExpr, ThrowStmt,
 };
 
 use super::super::basic_block::ExitType;
@@ -161,7 +161,7 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                 BasicBlockInstruction::Phi(vec![cons, alt])
             }
             Expr::Ident(ident) => {
-                let Some(var_idx) = scope.borrow().get(&ident.sym.to_string()) else {todo!()};
+                let Some(var_idx) = scope.borrow().get(&ident.sym.to_string()) else {todo!("{} not found in scope", ident.sym.to_string())};
 
                 BasicBlockInstruction::Ref(var_idx)
             }
@@ -266,16 +266,6 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                     let expr = expr_to_basic_blocks(decl.init.as_ref().unwrap().borrow());
                     assign_maybe_conditionally(&ident.sym.to_string(), expr);
                 }
-            }
-            Stmt::Return(ret) => {
-                let expr = expr_to_basic_blocks(ret.arg.as_ref().unwrap());
-                {
-                    let mut exits = exits.borrow_mut();
-                    *exits.last_mut().unwrap() =
-                        Some(BasicBlockExit::ExitFn(ExitType::Return, expr));
-                }
-
-                wrap_up_block();
             }
             Stmt::DoWhile(_) => todo!(),
             Stmt::For(_) => todo!(),
@@ -398,7 +388,24 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
             Stmt::Labeled(_) => todo!(),
             Stmt::Continue(_) => todo!(),
             Stmt::Switch(_) => todo!(),
-            Stmt::Throw(_) => todo!(),
+            Stmt::Throw(ThrowStmt { arg, ..}) => {
+                wrap_up_block();
+                let arg = expr_to_basic_blocks(arg);
+
+                let throw_from = wrap_up_block();
+                set_exit(throw_from, BasicBlockExit::ExitFn(ExitType::Throw, arg));
+
+                wrap_up_block();
+            },
+            Stmt::Return(ret) => {
+                wrap_up_block();
+                let expr = expr_to_basic_blocks(ret.arg.as_ref().unwrap());
+
+                let return_from = wrap_up_block();
+                set_exit(return_from, BasicBlockExit::ExitFn(ExitType::Return, expr));
+
+                wrap_up_block();
+            }
             Stmt::Try(ref stmt) => {
                 let catch_pusher_idx = wrap_up_block();
                 let try_idx = wrap_up_block();
@@ -412,8 +419,9 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                 if let Some(ref handler) = stmt.handler {
                     if let Some(p) = &handler.param {
                         let sym = p.clone().ident().unwrap(/* TODO */);
+                        println!("catching {:?}", sym.to_string());
                         scope.borrow_mut().insert(
-                            sym.to_string(),
+                            sym.sym.to_string(),
                             push_instruction(BasicBlockInstruction::CaughtError),
                         );
                     }

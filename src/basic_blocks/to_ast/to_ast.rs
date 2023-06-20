@@ -1,5 +1,8 @@
+use std::cell::RefCell;
+
 use swc_ecma_ast::{
-    AwaitExpr, BindingIdent, Decl, Expr, ExprOrSpread, Ident, ReturnStmt, Stmt, YieldExpr,
+    AwaitExpr, BindingIdent, Decl, Expr, ExprOrSpread, Ident, ReturnStmt, Stmt, ThrowStmt,
+    YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -25,6 +28,22 @@ fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
 fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stmt> {
     let get_variable = |var_idx: usize| format!("${}", var_idx);
     let get_identifier = |i: String| Expr::Ident(Ident::new(i.into(), Default::default()));
+    let caught_error: RefCell<Option<String>> = RefCell::new(None);
+    let get_caught_error = || {
+        let mut caught_error = caught_error.borrow_mut();
+        caught_error
+            .take()
+            .expect("reference to caught error must be inside catch block")
+    };
+    let error_counter = RefCell::new(0_usize);
+    let set_caught_error = || {
+        let mut caught_error = caught_error.borrow_mut();
+        let mut error_counter = error_counter.borrow_mut();
+        *error_counter += 1;
+        let varname = format!("$error{}", error_counter);
+        *caught_error = Some(varname.clone());
+        varname
+    };
     let var_decl = |name: &String, value: Expr| {
         let varname = Ident::new(name.clone().into(), Default::default());
         let vardecl = swc_ecma_ast::VarDecl {
@@ -116,7 +135,7 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
             },
 
             BasicBlockInstruction::CaughtError => {
-                Expr::Ident(Ident::new("TODO_THE_ERROR".into(), Default::default()))
+                Expr::Ident(Ident::new(get_caught_error().into(), Default::default()))
             }
 
             BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
@@ -155,6 +174,20 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 });
 
                 vec![return_stmt]
+            }
+            StructuredFlow::Return(ExitType::Throw, Some(var_idx)) => {
+                let varname = Ident::new(format!("${}", var_idx).into(), Default::default());
+
+                let throw_stmt = Stmt::Throw(ThrowStmt {
+                    span: Default::default(),
+                    arg: (Box::new(Expr::Ident(Ident {
+                        span: Default::default(),
+                        sym: varname.sym.clone(),
+                        optional: false,
+                    }))),
+                });
+
+                vec![throw_stmt]
             }
             StructuredFlow::Branch(branch_expr, cons, alt) => {
                 let branch_expr = get_identifier(get_variable(*branch_expr));
@@ -196,6 +229,47 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 });
 
                 vec![while_stmt]
+            }
+            StructuredFlow::TryCatch(try_block, catch_block, finally_block, after_block) => {
+                let try_block = to_stat_vec(try_block);
+
+                let catch_handler = set_caught_error();
+                let catch_block = to_stat_vec(catch_block);
+
+                let finally_block = to_stat_vec(finally_block);
+                let after_block = to_stat_vec(after_block);
+
+                let try_catch_stmt = Stmt::Try(Box::new(swc_ecma_ast::TryStmt {
+                    span: Default::default(),
+                    block: swc_ecma_ast::BlockStmt {
+                        span: Default::default(),
+                        stmts: try_block,
+                    },
+                    handler: Some(swc_ecma_ast::CatchClause {
+                        span: Default::default(),
+                        param: Some(swc_ecma_ast::Pat::Ident(BindingIdent {
+                            id: swc_ecma_ast::Ident {
+                                span: Default::default(),
+                                sym: catch_handler.into(),
+                                optional: false,
+                            },
+                            type_ann: None,
+                        })),
+                        body: swc_ecma_ast::BlockStmt {
+                            span: Default::default(),
+                            stmts: catch_block,
+                        },
+                    }),
+                    finalizer: match finally_block.len() {
+                        0 => None,
+                        _ => Some(swc_ecma_ast::BlockStmt {
+                            span: Default::default(),
+                            stmts: finally_block,
+                        }),
+                    },
+                }));
+
+                vec![vec![try_catch_stmt], after_block].concat()
             }
             _ => {
                 todo!("to_stat: {:?}", node)
@@ -294,6 +368,86 @@ mod tests {
         var $7 = $5 + $6;
         var $8 = undefined;
         return $8;
+        "###);
+    }
+
+    #[test]
+    fn to_trycatch() {
+        let block_group = test_basic_blocks(
+            "var x = 10;
+            try {
+                if (x > 10) {
+                    throw 123;
+                }
+            } catch (e) {
+                x = 456;
+            }
+            return x;",
+        );
+
+        let tree = to_ast(&block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var $0 = 10;
+        try {
+            var $1 = $0;
+            var $2 = 10;
+            var $3 = $1 + $2;
+            if ($3) {
+                var $4 = 123;
+                throw $4;
+            } else {}
+        } catch ($error1) {
+            var $5 = $error1;
+            var $6 = 456;
+        }
+        var $7 = $6;
+        return $7;
+        "###);
+    }
+
+    #[test]
+    fn to_trycatch_nested() {
+        let block_group = test_basic_blocks(
+            "var x = 10;
+            try {
+                if (x > 10) {
+                    throw 123;
+                }
+            } catch (e) {
+                try {
+                    123
+                } catch (e2) {
+                    return e + e2;
+                }
+            }
+            return x;",
+        );
+
+        let tree = to_ast(&block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var $0 = 10;
+        try {
+            var $1 = $0;
+            var $2 = 10;
+            var $3 = $1 + $2;
+            if ($3) {
+                var $4 = 123;
+                throw $4;
+            } else {}
+        } catch ($error1) {
+            var $5 = $error1;
+            try {
+                var $6 = 123;
+            } catch ($error2) {
+                var $7 = $error2;
+                var $8 = $5;
+                var $9 = $7;
+                var $10 = $8 + $9;
+                return $10;
+            }
+        }
+        var $11 = $0;
+        return $11;
         "###);
     }
 }
