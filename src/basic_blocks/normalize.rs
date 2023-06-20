@@ -61,16 +61,7 @@ pub fn normalize_basic_blocks(
 
     // adjust labels for however many blocks were eliminated
     for exit in out_exits.iter_mut() {
-        match exit {
-            BasicBlockExit::Jump(j) => {
-                *j = *swapped_labels.get(j).unwrap();
-            }
-            BasicBlockExit::Cond(_, c, a) => {
-                *c = *swapped_labels.get(c).unwrap();
-                *a = *swapped_labels.get(a).unwrap();
-            }
-            BasicBlockExit::ExitFn(_, _) => { /* nothing */ }
-        }
+        *exit = exit.swap_labels(&swapped_labels);
     }
 
     assert_eq!(out_exits.len(), out_basic_blocks.len());
@@ -83,9 +74,16 @@ fn get_blocks_jumped_to(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
         .iter()
         .enumerate()
         .flat_map(|(i, e)| match e {
-            BasicBlockExit::Jump(j) if *j != i + 1 => vec![*j],
+            BasicBlockExit::Jump(j) => {
+                if  *j != i + 1 {vec![*j]} else {vec![]}
+            },
             BasicBlockExit::Cond(_, cons, alt) => vec![*cons, *alt],
-            _ => vec![],
+            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after) => vec![*try_block, *catch_block, *finally_block, *after],
+            BasicBlockExit::PopCatch(catch_block, finally_or_after) => vec![*catch_block, *finally_or_after],
+            BasicBlockExit::PopFinally(finally_block, _after_finally) => vec![*finally_block],
+            BasicBlockExit::EndFinally(after) => vec![*after],
+            BasicBlockExit::ExitFn(_, _) => vec![],
+            
         })
         .collect::<HashSet<_>>()
 }

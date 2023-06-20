@@ -7,7 +7,7 @@ use domtree::{
     DomTree,
 };
 
-use super::{
+use super::super::{
     basic_block::{BasicBlock, BasicBlockExit},
     basic_block_group::BasicBlockGroup,
 };
@@ -155,11 +155,21 @@ impl DominanceFrontier for Graph {
     }
 }
 
-fn outgoing_edges(bb: &BasicBlock) -> Vec<usize> {
-    match bb.exit {
-        BasicBlockExit::Jump(target) => vec![target],
-        BasicBlockExit::Cond(_, true_target, false_target) => vec![true_target, false_target],
-        BasicBlockExit::ExitFn(_, _) => vec![],
+fn to_structured_flow_jump_targets(node: &BasicBlock) -> Vec<usize> {
+    match node.exit {
+        BasicBlockExit::SetTryAndCatch(t, c, f, a) => {
+            vec![t, c, f, a]
+        }
+        BasicBlockExit::PopCatch(c, f) => {
+            vec![]
+        }
+        BasicBlockExit::PopFinally(c, f) => {
+            vec![]
+        }
+        BasicBlockExit::EndFinally(f) => {
+            vec![]
+        }
+        _ => node.jump_targets(),
     }
 }
 
@@ -167,7 +177,7 @@ impl BasicBlockGroup {
     pub fn get_dom_graph(&self) -> Graph {
         let mut all_incoming = HashMap::new();
         for (tag, node) in self.iter() {
-            for target in outgoing_edges(node) {
+            for target in to_structured_flow_jump_targets(node) {
                 all_incoming
                     .entry(target)
                     .or_insert_with(Vec::new)
@@ -183,7 +193,7 @@ impl BasicBlockGroup {
                     dom: None,
                     frontiers: UnsafeCell::new(HashMemberSet(std::collections::HashSet::new())),
                     incoming_edges: all_incoming.get(&tag).cloned().unwrap_or_default(),
-                    outgoing_edges: outgoing_edges(node),
+                    outgoing_edges: to_structured_flow_jump_targets(node),
                     basic_block: node.clone(),
                 })
                 .collect(),

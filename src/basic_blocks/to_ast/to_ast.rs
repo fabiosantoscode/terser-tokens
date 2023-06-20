@@ -115,6 +115,10 @@ fn to_ast_inner(tree: &StructuredFlow, block_group: &BasicBlockGroup) -> Vec<Stm
                 }),
             },
 
+            BasicBlockInstruction::CaughtError => {
+                Expr::Ident(Ident::new("TODO_THE_ERROR".into(), Default::default()))
+            }
+
             BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
         }
     });

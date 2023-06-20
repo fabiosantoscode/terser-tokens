@@ -400,38 +400,61 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
             Stmt::Switch(_) => todo!(),
             Stmt::Throw(_) => todo!(),
             Stmt::Try(ref stmt) => {
-                todo!()
-                /*
-                let body_idx = wrap_up_block();
-                let may_throw_idx = push_instruction(BasicBlockInstruction::MayThrow(body_idx));
+                let catch_pusher_idx = wrap_up_block();
+                let try_idx = wrap_up_block();
+
                 stat_to_basic_blocks(&Stmt::Block(stmt.block.clone()));
                 wrap_up_block();
 
                 let before_catch_idx = wrap_up_block();
+                let catch_idx = wrap_up_block();
 
                 if let Some(ref handler) = stmt.handler {
-                    wrap_up_block();
-                    let ex_var = push_instruction(BasicBlockInstruction::PhiCatch(vec![may_throw_idx]));
-
                     if let Some(p) = &handler.param {
                         let sym = p.clone().ident().unwrap(/* TODO */);
-                        scope.borrow_mut().insert(sym.to_string(), ex_var);
+                        scope.borrow_mut().insert(
+                            sym.to_string(),
+                            push_instruction(BasicBlockInstruction::CaughtError),
+                        );
                     }
                     let body = handler.body.clone();
                     stat_to_basic_blocks(&Stmt::Block(body));
-
-                    wrap_up_block();
-                    set_exit(before_catch_idx, BasicBlockExit::Jump(current_block_index()));
                 }
 
-                wrap_up_block();
+                let after_catch_idx = wrap_up_block();
+                let finally_idx = wrap_up_block();
 
                 if let Some(ref finalizer) = stmt.finalizer {
-                    todo!();
-                    let finalizer = BlockStmt { span: Default::default(), stmts: finalizer.stmts.clone() };
+                    let finalizer = BlockStmt {
+                        span: Default::default(),
+                        stmts: finalizer.stmts.clone(),
+                    };
                     stat_to_basic_blocks(&Stmt::Block(finalizer));
-                    wrap_up_block();
-                } */
+                }
+
+                let after_finally_idx = wrap_up_block();
+                let done_and_dusted = wrap_up_block();
+
+                // declare the trycatch
+                set_exit(
+                    catch_pusher_idx,
+                    BasicBlockExit::SetTryAndCatch(try_idx, catch_idx, finally_idx, done_and_dusted),
+                );
+                // catch the error
+                set_exit(
+                    before_catch_idx,
+                    BasicBlockExit::PopCatch(catch_idx, finally_idx),
+                );
+                // finally
+                set_exit(
+                    after_catch_idx,
+                    BasicBlockExit::PopFinally(finally_idx, after_finally_idx),
+                );
+                // end
+                set_exit(
+                    after_finally_idx,
+                    BasicBlockExit::EndFinally(done_and_dusted),
+                );
             }
             Stmt::Empty(_) => {}
             _ => {
@@ -852,7 +875,6 @@ mod tests {
         "###);
     }
 
-    /*
     #[test]
     fn a_try_catch() {
         let s = test_basic_blocks(
@@ -864,26 +886,38 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            $0 = may_throw $1
-            $1 = 777
-            exit = jump @3
+            exit = jump @1
         }
         @1: {
-            $2 = either_threw($0)
-            $3 = 888
-            exit = jump @2
+            exit = try @2 catch @4 finally @6 after @8
         }
         @2: {
+            $0 = 777
             exit = jump @3
         }
         @3: {
-            $4 = undefined
-            exit = return $4
+            exit = error ? jump @4 : jump @6
+        }
+        @4: {
+            $1 = 888
+            exit = jump @5
+        }
+        @5: {
+            exit = finally @6 after @7
+        }
+        @6: {
+            exit = jump @7
+        }
+        @7: {
+            exit = end finally after @8
+        }
+        @8: {
+            $2 = undefined
+            exit = return $2
         }
         "###);
-    } */
+    }
 
-    /*
     #[test]
     fn a_trycatchfinally() {
         let s = test_basic_blocks(
@@ -897,12 +931,36 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            $0 = 777    ? TODO ?
-            $1 = 888    ? TODO ?
-            $2 = 999    ? TODO ?
+            exit = jump @1
+        }
+        @1: {
+            exit = try @2 catch @4 finally @6 after @8
+        }
+        @2: {
+            $0 = 777
+            exit = jump @3
+        }
+        @3: {
+            exit = error ? jump @4 : jump @6
+        }
+        @4: {
+            $1 = 888
+            exit = jump @5
+        }
+        @5: {
+            exit = finally @6 after @7
+        }
+        @6: {
+            $2 = 999
+            exit = jump @7
+        }
+        @7: {
+            exit = end finally after @8
+        }
+        @8: {
             $3 = undefined
             exit = return $3
         }
         "###);
-    } */
+    }
 }

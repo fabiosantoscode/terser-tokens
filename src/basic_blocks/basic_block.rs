@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Formatter};
+use std::{fmt::{Debug, Formatter}, collections::HashMap};
 
 #[derive(Clone, Default, PartialEq)]
 pub struct BasicBlock {
@@ -19,34 +19,66 @@ impl BasicBlock {
         self.exit = other.exit;
     }
 
-    pub fn outgoing_edges(&self) -> Vec<usize> {
-        match self.exit {
-            BasicBlockExit::Jump(target) => vec![target],
-            BasicBlockExit::Cond(_, true_target, false_target) => vec![true_target, false_target],
-            BasicBlockExit::ExitFn(_, _) => vec![],
-        }
+    pub fn jump_targets(&self) -> Vec<usize> {
+        self.exit.jump_targets()
     }
 }
 
 #[derive(Clone, PartialEq)]
 pub enum BasicBlockExit {
+    /// unconditional jump to target
     Jump(usize),
+    /// (cond_var, true_target, false_target). If cond_var is true, go to true_target. Otherwise, go to false_target.
     Cond(usize, usize, usize),
+    /// (exit_type, returned). Used when we see "return" or "throw". "returned" holds the value returned or thrown.
     ExitFn(ExitType, usize),
+    /// (try_block, catch_block, finally_block, after_finally_block). Used when we see "try {". It just goes to try_block, the rest is book-keeping.
+    SetTryAndCatch(usize, usize, usize, usize),
+    /// (catch_block, finally). Used when we see "} catch". If we had an exception, we go to catch_block. Otherwise, we go to finally_or_after.
+    PopCatch(usize, usize),    
+    /// (finally_block, after_finally_block). Used when we see "} finally". We go to the finally-block.
+    PopFinally(usize, usize),
+    EndFinally(usize),
 }
 
 impl BasicBlockExit {
-    pub(crate) fn subtract_labels(&self, eliminated_count: usize) -> BasicBlockExit {
+    pub(crate) fn swap_labels(&self, swap_key: &HashMap<usize, usize>) -> BasicBlockExit {
+        let swap = |x: &usize| swap_key.get(&x).unwrap_or(&x).clone();
+
         match self {
-            BasicBlockExit::Jump(target) => BasicBlockExit::Jump(*target - eliminated_count),
+            BasicBlockExit::Jump(target) => BasicBlockExit::Jump(swap(target)),
             BasicBlockExit::Cond(cond, true_target, false_target) => BasicBlockExit::Cond(
                 *cond,
-                *true_target - eliminated_count,
-                *false_target - eliminated_count,
+                swap(true_target),
+                swap(false_target),
             ),
             BasicBlockExit::ExitFn(exit_type, target) => {
-                BasicBlockExit::ExitFn(exit_type.clone(), *target - eliminated_count)
+                BasicBlockExit::ExitFn(exit_type.clone(), *target)
             }
+            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after_finally) => {
+                BasicBlockExit::SetTryAndCatch(swap(try_block), swap(catch_block), swap(finally_block), swap(after_finally))
+            }
+            BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
+                BasicBlockExit::PopCatch(swap(catch_block), swap(finally_or_after))
+            }
+            BasicBlockExit::PopFinally(finally_block, after_finally) => {
+                BasicBlockExit::PopFinally(swap(finally_block), swap(after_finally))
+            }
+            BasicBlockExit::EndFinally(finally_block) => {
+                BasicBlockExit::EndFinally(swap(finally_block))
+            }
+        }
+    }
+
+    fn jump_targets(&self) -> Vec<usize> {
+        match self {
+            BasicBlockExit::Jump(target) => vec![*target],
+            BasicBlockExit::Cond(_, true_target, false_target) => vec![*true_target, *false_target],
+            BasicBlockExit::ExitFn(_, _) => vec![],
+            BasicBlockExit::SetTryAndCatch(try_target, _, _, _) => vec![*try_target],
+            BasicBlockExit::PopCatch(catch_target, finally_target) => vec![*catch_target, *finally_target],
+            BasicBlockExit::PopFinally(finally_target, after_finally_target) => vec![*finally_target],
+            BasicBlockExit::EndFinally(after_finally_target) => vec![*after_finally_target],
         }
     }
 }
@@ -69,6 +101,7 @@ pub enum BasicBlockInstruction {
     BinOp(String, usize, usize),
     Undefined,
     This,
+    CaughtError,
     Array(Vec<ArrayElement>),
     TempExit(TempExitType, usize),
     Phi(Vec<usize>),
@@ -106,6 +139,7 @@ impl BasicBlockInstruction {
                 })
                 .collect(),
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
+            BasicBlockInstruction::CaughtError => vec![],
         }
     }
 }
@@ -168,6 +202,9 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
+            BasicBlockInstruction::CaughtError => {
+                write!(f, "caught_error()")
+            }
         }
     }
 }
@@ -186,6 +223,18 @@ impl Debug for BasicBlockExit {
                     write!(f, "return ${}", val)
                 }
             },
+            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after_block) => {
+                write!(f, "try @{} catch @{} finally @{} after @{}", try_block, catch_block, finally_block, after_block)
+            }
+            BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
+                write!(f, "error ? jump @{} : jump @{}", catch_block, finally_or_after)
+            }
+            BasicBlockExit::PopFinally(finally_block, after_block) => {
+                write!(f, "finally @{} after @{}", finally_block, after_block)
+            }
+            BasicBlockExit::EndFinally(after_block) => {
+                write!(f, "end finally after @{}", after_block)
+            }
         }
     }
 }
