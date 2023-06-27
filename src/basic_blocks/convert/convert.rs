@@ -7,7 +7,7 @@ use crate::basic_blocks::basic_block::{
 use crate::scope::scope::Scope;
 use swc_ecma_ast::{
     AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Pat, PatOrExpr, Stmt,
-    YieldExpr, ThrowStmt,
+    ThrowStmt, YieldExpr,
 };
 
 use super::super::basic_block::ExitType;
@@ -19,35 +19,52 @@ enum NestedIntoStatement {
     Unlabelled,
 }
 
-pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
-    let basic_blocks = RefCell::new(vec![vec![]]);
-    let exits = RefCell::new(vec![None]);
-    // We'll be incrementing these unique varnames as we go
-    let var_index = RefCell::new(0_usize);
-    let conditionals: RefCell<Option<HashMap<String, Vec<usize>>>> = RefCell::new(None);
-    let scope: RefCell<Scope> = RefCell::new(Scope::new(false));
-    let push_instruction = |node: BasicBlockInstruction| {
-        let id = var_index.borrow().clone();
-        *var_index.borrow_mut() += 1;
-        basic_blocks
-            .borrow_mut()
-            .last_mut()
-            .unwrap()
-            .push((id, node));
+struct ConvertContext {
+    pub basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
+    pub exits: Vec<Option<BasicBlockExit>>,
+    pub var_index: usize,
+    pub conditionals: Vec<HashMap<String, Vec<usize>>>,
+    pub scope: Scope,
+    pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
+}
+
+impl ConvertContext {
+    pub fn new() -> Self {
+        Self {
+            basic_blocks: vec![vec![]],
+            exits: vec![None],
+            var_index: 0,
+            conditionals: vec![],
+            scope: Scope::new(false),
+            label_tracking: vec![],
+        }
+    }
+
+    pub fn push_instruction(&mut self, node: BasicBlockInstruction) -> usize {
+        let id = self.var_index;
+        self.var_index += 1;
+        self.basic_blocks.last_mut().unwrap().push((id, node));
         id
-    };
-    let push_instruction_to_nth_block = |node: BasicBlockInstruction, n: usize| {
-        let id = var_index.borrow().clone();
-        *var_index.borrow_mut() += 1;
-        basic_blocks.borrow_mut()[n].push((id, node));
+    }
+
+    pub fn push_instruction_to_nth_block(
+        &mut self,
+        node: BasicBlockInstruction,
+        n: usize,
+    ) -> usize {
+        let id = self.var_index;
+        self.var_index += 1;
+        self.basic_blocks[n].push((id, node));
         id
-    };
-    let current_block_index = || basic_blocks.borrow().len() - 1;
-    let assign_maybe_conditionally = |name: &str, value: usize| {
-        let mut conditionals = conditionals.borrow_mut();
-        println!("assign_maybe_conditionally: {} = {}", name, value);
-        println!("conditionals: {:?}", conditionals);
-        match *conditionals {
+    }
+
+    pub fn set_exit(&mut self, at: usize, new_exit: BasicBlockExit) {
+        self.exits[at] = Some(new_exit)
+    }
+
+    pub fn assign_maybe_conditionally(&mut self, name: &str, value: usize) {
+        let mut conditionals = self.conditionals.last_mut();
+        match conditionals {
             Some(ref mut conditionals) => {
                 if let Some(conditional) = conditionals.get_mut(name) {
                     conditional.push(value);
@@ -56,12 +73,23 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
                 }
             }
             None => {}
-        }
+        };
 
-        let mut scope = scope.borrow_mut();
-        scope.insert(name.into(), value);
-    };
-    let push_phi_assignments = |conditionally_assigned: Option<HashMap<String, Vec<usize>>>| {
+        self.scope.insert(name.into(), value);
+    }
+
+    pub fn push_conditionals_context(&mut self) {
+        self.conditionals.push(HashMap::new())
+    }
+
+    pub fn pop_conditionals_context(&mut self) -> Option<HashMap<String, Vec<usize>>> {
+        self.conditionals.pop()
+    }
+
+    pub fn push_phi_assignments(
+        &mut self,
+        conditionally_assigned: Option<HashMap<String, Vec<usize>>>,
+    ) {
         // phi nodes for conditionally assigned variables
         let to_phi = conditionally_assigned.unwrap();
         let mut to_phi = to_phi
@@ -72,429 +100,423 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
             to_phi.sort_by_key(|(name, _)| *name);
             for (varname, phies) in to_phi {
                 let phi = BasicBlockInstruction::Phi(phies.clone());
-                let phi_idx = push_instruction(phi);
-                scope.borrow_mut().insert(varname.clone(), phi_idx);
+                let phi_idx = self.push_instruction(phi);
+                self.scope.insert(varname.clone(), phi_idx);
             }
         }
-    };
-
-    let wrap_up_block = || {
-        basic_blocks.borrow_mut().push(vec![]);
-        exits.borrow_mut().push(None);
-        current_block_index()
-    };
-
-    let expr_to_basic_blocks = fix_fn!(|expr_to_basic_blocks, exp: &Expr| -> usize {
-        let create_gapped_block = |expr: &Expr| {
-            let before = current_block_index();
-            let expr = expr_to_basic_blocks(&expr);
-            let after = current_block_index();
-            wrap_up_block();
-
-            (before, expr, after)
-        };
-
-        let node = match exp {
-            Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
-            Expr::Bin(bin) => {
-                let l = expr_to_basic_blocks(&bin.left);
-                let r = expr_to_basic_blocks(&bin.right);
-
-                BasicBlockInstruction::BinOp("+".into(), l, r)
-            }
-            Expr::Assign(assign) => match &assign.left {
-                PatOrExpr::Pat(e) => match e.borrow() {
-                    Pat::Ident(ident) => {
-                        let sym = ident.sym.to_string();
-                        let Some(_old_idx) = scope.borrow().get(&sym) else {todo!()};
-
-                        let expr_idx = expr_to_basic_blocks(&assign.right);
-                        assign_maybe_conditionally(&sym, expr_idx);
-
-                        return expr_idx;
-                    }
-                    _ => todo!(),
-                },
-                _ => todo!(),
-            },
-            Expr::Paren(paren) => return expr_to_basic_blocks(&paren.expr),
-            Expr::Seq(seq) => {
-                let mut last = None;
-                for expr in &seq.exprs {
-                    last = Some(expr_to_basic_blocks(expr));
-                }
-                return last.expect("Seq must have 1+ exprs");
-            }
-            Expr::Cond(CondExpr {
-                test, cons, alt, ..
-            }) => {
-                let (_, test, blockidx_before) = create_gapped_block(&test);
-
-                let old_conditionals = conditionals.replace(Some(HashMap::new()));
-
-                let (blockidx_consequent_before, cons, blockidx_consequent_after) =
-                    create_gapped_block(&cons);
-
-                let blockidx_alternate_before = current_block_index();
-                let alt = expr_to_basic_blocks(&alt);
-                wrap_up_block();
-                let blockidx_after = current_block_index();
-
-                // block before gets a Cond node added
-                exits.borrow_mut()[blockidx_before] = Some(BasicBlockExit::Cond(
-                    test,
-                    blockidx_consequent_before,
-                    blockidx_alternate_before,
-                ));
-
-                // block starting with cons gets a Jump node added, to the current block
-                exits.borrow_mut()[blockidx_consequent_after] =
-                    Some(BasicBlockExit::Jump(blockidx_after));
-
-                let conditionally_assigned = conditionals.replace(old_conditionals);
-
-                push_phi_assignments(conditionally_assigned);
-                wrap_up_block();
-
-                // the retval of our ternary is a phi node
-                BasicBlockInstruction::Phi(vec![cons, alt])
-            }
-            Expr::Ident(ident) => {
-                let Some(var_idx) = scope.borrow().get(&ident.sym.to_string()) else {todo!("{} not found in scope", ident.sym.to_string())};
-
-                BasicBlockInstruction::Ref(var_idx)
-            }
-            Expr::This(_) => BasicBlockInstruction::This,
-            Expr::Array(array_lit) => {
-                let mut elements = vec![];
-
-                for elem in &array_lit.elems {
-                    let elem = match elem {
-                        Some(ExprOrSpread { spread, expr }) => {
-                            if spread.is_none() {
-                                ArrayElement::Item(expr_to_basic_blocks(expr))
-                            } else {
-                                ArrayElement::Spread(expr_to_basic_blocks(expr))
-                            }
-                        }
-                        None => ArrayElement::Hole,
-                    };
-
-                    elements.push(elem);
-                }
-
-                BasicBlockInstruction::Array(elements)
-            }
-            Expr::Object(_) => todo!(),
-            Expr::Fn(_) => todo!(),
-            Expr::Unary(_) => todo!(),
-            Expr::Update(_) => todo!(),
-            Expr::Member(_) => todo!(),
-            Expr::SuperProp(_) => todo!(),
-            Expr::Call(_) => todo!(),
-            Expr::New(_) => todo!(),
-            Expr::Tpl(_) => todo!(),
-            Expr::TaggedTpl(_) => todo!(),
-            Expr::Arrow(_) => todo!(),
-            Expr::Class(_) => todo!(),
-            Expr::MetaProp(_) => todo!(),
-            Expr::Yield(YieldExpr { arg, delegate, .. }) => {
-                let typ = if *delegate {
-                    TempExitType::YieldStar
-                } else {
-                    TempExitType::Yield
-                };
-
-                let arg = match arg {
-                    Some(arg) => expr_to_basic_blocks(arg),
-                    None => current_block_index(),
-                };
-
-                BasicBlockInstruction::TempExit(typ, arg)
-            }
-            Expr::Await(AwaitExpr { arg, .. }) => {
-                let arg = expr_to_basic_blocks(arg);
-
-                BasicBlockInstruction::TempExit(TempExitType::Await, arg)
-            }
-            Expr::OptChain(_) => todo!(),
-            Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
-            Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
-            Expr::JSXMember(_)
-            | Expr::JSXNamespacedName(_)
-            | Expr::JSXEmpty(_)
-            | Expr::JSXElement(_)
-            | Expr::JSXFragment(_) => unreachable!("Expr::JSX from SWC should be impossible"),
-            Expr::TsTypeAssertion(_)
-            | Expr::TsConstAssertion(_)
-            | Expr::TsNonNull(_)
-            | Expr::TsAs(_)
-            | Expr::TsInstantiation(_)
-            | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
-            _ => {
-                todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
-            }
-        };
-
-        push_instruction(node)
-    });
-
-    // First item is downward propagated (contains where we are), the second is upward propagated (the jump target of a break)
-    let label_tracking: RefCell<Vec<(NestedIntoStatement, Vec<usize>)>> = Default::default();
-    let push_label = |label: NestedIntoStatement| {
-        let mut label_tracking = label_tracking.borrow_mut();
-        label_tracking.push((label, vec![]));
-    };
-    let pop_label = || {
-        let (_, target) = label_tracking.borrow_mut().pop().unwrap();
-        target
-    };
-    let set_exit = |at: usize, new_exit: BasicBlockExit| {
-        let mut exits = exits.borrow_mut();
-        exits[at] = Some(new_exit);
-    };
-
-    let stat_to_basic_blocks = fix_fn!(|stat_to_basic_blocks, stat: &Stmt| -> () {
-        match stat {
-            Stmt::Expr(expr) => {
-                let _exprid = expr_to_basic_blocks(&expr.expr);
-            }
-            Stmt::Decl(Decl::Var(var)) => {
-                for decl in &var.decls {
-                    let Pat::Ident(ident) = &decl.name else {todo!()};
-                    let expr = expr_to_basic_blocks(decl.init.as_ref().unwrap().borrow());
-                    assign_maybe_conditionally(&ident.sym.to_string(), expr);
-                }
-            }
-            Stmt::DoWhile(_) => todo!(),
-            Stmt::For(_) => todo!(),
-            Stmt::ForIn(_) => todo!(),
-            Stmt::ForOf(_) => todo!(),
-            Stmt::While(whil) => {
-                let blockidx_start = current_block_index();
-                push_label(NestedIntoStatement::Unlabelled);
-
-                let test = expr_to_basic_blocks(&whil.test);
-
-                let test_after_idx = wrap_up_block();
-
-                let blockidx_before_body = wrap_up_block();
-                stat_to_basic_blocks(&whil.body);
-
-                // loop back to start
-                {
-                    let mut exits = exits.borrow_mut();
-                    *exits.last_mut().unwrap() = Some(BasicBlockExit::Jump(blockidx_start));
-                }
-
-                let blockidx_after_body = wrap_up_block();
-
-                {
-                    let mut exits = exits.borrow_mut();
-                    exits[test_after_idx] = Some(BasicBlockExit::Cond(
-                        test,
-                        blockidx_before_body,
-                        blockidx_after_body,
-                    ));
-                }
-
-                let jumpers_towards_me = pop_label();
-                if jumpers_towards_me.len() > 0 {
-                    for jumper in jumpers_towards_me {
-                        let mut exits = exits.borrow_mut();
-                        exits[jumper] = Some(BasicBlockExit::Jump(current_block_index()));
-                    }
-                }
-
-                wrap_up_block();
-            }
-            Stmt::If(IfStmt {
-                test, cons, alt, ..
-            }) => {
-                wrap_up_block();
-                let test = expr_to_basic_blocks(&test);
-                wrap_up_block();
-                let blockidx_before = current_block_index();
-                wrap_up_block();
-
-                let old_conditionals = conditionals.replace(Some(HashMap::new()));
-
-                let blockidx_consequent_before = current_block_index();
-                stat_to_basic_blocks(&cons);
-                let blockidx_consequent_after = wrap_up_block();
-
-                let alt = if let Some(alt) = alt {
-                    wrap_up_block();
-                    let blockidx_alternate_before = current_block_index();
-                    stat_to_basic_blocks(&alt);
-                    wrap_up_block();
-                    let blockidx_alternate_after = current_block_index();
-                    Some((blockidx_alternate_before, blockidx_alternate_after))
-                } else {
-                    None
-                };
-
-                let conditionally_assigned = conditionals.replace(old_conditionals);
-
-                push_phi_assignments(conditionally_assigned);
-                wrap_up_block();
-
-                if let Some((blockidx_alternate_before, blockidx_alternate_after)) = alt {
-                    set_exit(
-                        blockidx_before,
-                        BasicBlockExit::Cond(
-                            test,
-                            blockidx_consequent_before,
-                            blockidx_alternate_before,
-                        ),
-                    );
-                    set_exit(
-                        blockidx_consequent_after,
-                        BasicBlockExit::Jump(blockidx_alternate_after),
-                    );
-                } else {
-                    set_exit(
-                        blockidx_before,
-                        BasicBlockExit::Cond(
-                            test,
-                            blockidx_consequent_before,
-                            blockidx_consequent_after,
-                        ),
-                    );
-                }
-            }
-            Stmt::Block(block) => {
-                for stat in &block.stmts {
-                    stat_to_basic_blocks(stat);
-                    wrap_up_block();
-                }
-            }
-            Stmt::Break(br) => match br.label {
-                Some(_) => {
-                    todo!("statements_to_ssa: stat_to_ssa: break with label not implemented")
-                }
-                None => {
-                    if let Some(last) = label_tracking.borrow_mut().last_mut() {
-                        let this_block = wrap_up_block();
-                        last.1.push(this_block);
-                    } else {
-                        unreachable!()
-                    }
-                }
-            },
-            Stmt::Debugger(_) => todo!(),
-            Stmt::With(_) => todo!(),
-            Stmt::Labeled(_) => todo!(),
-            Stmt::Continue(_) => todo!(),
-            Stmt::Switch(_) => todo!(),
-            Stmt::Throw(ThrowStmt { arg, ..}) => {
-                wrap_up_block();
-                let arg = expr_to_basic_blocks(arg);
-
-                let throw_from = wrap_up_block();
-                set_exit(throw_from, BasicBlockExit::ExitFn(ExitType::Throw, arg));
-
-                wrap_up_block();
-            },
-            Stmt::Return(ret) => {
-                wrap_up_block();
-                let expr = expr_to_basic_blocks(ret.arg.as_ref().unwrap());
-
-                let return_from = wrap_up_block();
-                set_exit(return_from, BasicBlockExit::ExitFn(ExitType::Return, expr));
-
-                wrap_up_block();
-            }
-            Stmt::Try(ref stmt) => {
-                let catch_pusher_idx = wrap_up_block();
-                let try_idx = wrap_up_block();
-
-                stat_to_basic_blocks(&Stmt::Block(stmt.block.clone()));
-                wrap_up_block();
-
-                let before_catch_idx = wrap_up_block();
-                let catch_idx = wrap_up_block();
-
-                if let Some(ref handler) = stmt.handler {
-                    if let Some(p) = &handler.param {
-                        let sym = p.clone().ident().unwrap(/* TODO */);
-                        println!("catching {:?}", sym.to_string());
-                        scope.borrow_mut().insert(
-                            sym.sym.to_string(),
-                            push_instruction(BasicBlockInstruction::CaughtError),
-                        );
-                    }
-                    let body = handler.body.clone();
-                    stat_to_basic_blocks(&Stmt::Block(body));
-                }
-
-                let after_catch_idx = wrap_up_block();
-                let finally_idx = wrap_up_block();
-
-                if let Some(ref finalizer) = stmt.finalizer {
-                    let finalizer = BlockStmt {
-                        span: Default::default(),
-                        stmts: finalizer.stmts.clone(),
-                    };
-                    stat_to_basic_blocks(&Stmt::Block(finalizer));
-                }
-
-                let after_finally_idx = wrap_up_block();
-                let done_and_dusted = wrap_up_block();
-
-                // declare the trycatch
-                set_exit(
-                    catch_pusher_idx,
-                    BasicBlockExit::SetTryAndCatch(try_idx, catch_idx, finally_idx, done_and_dusted),
-                );
-                // catch the error
-                set_exit(
-                    before_catch_idx,
-                    BasicBlockExit::PopCatch(catch_idx, finally_idx),
-                );
-                // finally
-                set_exit(
-                    after_catch_idx,
-                    BasicBlockExit::PopFinally(finally_idx, after_finally_idx),
-                );
-                // end
-                set_exit(
-                    after_finally_idx,
-                    BasicBlockExit::EndFinally(done_and_dusted),
-                );
-            }
-            Stmt::Empty(_) => {}
-            _ => {
-                todo!("statements_to_ssa: stat_to_ssa: {:?} not implemented", stat)
-            }
-        }
-    });
-
-    for stat in statements {
-        stat_to_basic_blocks(stat);
-        wrap_up_block();
     }
 
-    let exit_count = exits.borrow().len();
-    let exits = exits
-        .borrow()
-        .iter()
-        .enumerate()
-        .map(|(i, e)| match e {
-            Some(exit) => exit.clone(),
+    pub fn current_block_index(&self) -> usize {
+        self.basic_blocks.len() - 1
+    }
+
+    pub fn wrap_up_block(&mut self) -> usize {
+        self.basic_blocks.push(vec![]);
+        self.exits.push(None);
+        self.current_block_index()
+    }
+
+    pub fn create_gapped_block(&mut self, expr: &Expr) -> (usize, usize, usize) {
+        let block_idx = self.current_block_index();
+        let expr_idx = expr_to_basic_blocks(self, expr);
+        let next_block_idx = self.current_block_index();
+        self.wrap_up_block();
+
+        (block_idx, expr_idx, next_block_idx)
+    }
+
+    pub fn push_label(&mut self, label: NestedIntoStatement) {
+        self.label_tracking.push((label, vec![]));
+    }
+
+    pub fn pop_label(&mut self) -> Vec<usize> {
+        let (_, block_indices) = self.label_tracking.pop().unwrap();
+        block_indices
+    }
+}
+
+fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
+    let node = match exp {
+        Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
+        Expr::Bin(bin) => {
+            let l = expr_to_basic_blocks(ctx, &bin.left);
+            let r = expr_to_basic_blocks(ctx, &bin.right);
+
+            BasicBlockInstruction::BinOp("+".into(), l, r)
+        }
+        Expr::Assign(assign) => match &assign.left {
+            PatOrExpr::Pat(e) => match e.borrow() {
+                Pat::Ident(ident) => {
+                    let sym = ident.sym.to_string();
+                    let Some(_old_idx) = ctx.scope.borrow().get(&sym) else {todo!()};
+
+                    let expr_idx = expr_to_basic_blocks(ctx, &assign.right);
+                    ctx.assign_maybe_conditionally(&sym, expr_idx);
+
+                    return expr_idx;
+                }
+                _ => todo!(),
+            },
+            _ => todo!(),
+        },
+        Expr::Paren(paren) => return expr_to_basic_blocks(ctx, &paren.expr),
+        Expr::Seq(seq) => {
+            let mut last = None;
+            for expr in &seq.exprs {
+                last = Some(expr_to_basic_blocks(ctx, expr));
+            }
+            return last.expect("Seq must have 1+ exprs");
+        }
+        Expr::Cond(CondExpr {
+            test, cons, alt, ..
+        }) => {
+            let (_, test, blockidx_before) = ctx.create_gapped_block(&test);
+
+            ctx.push_conditionals_context();
+
+            let (blockidx_consequent_before, cons, blockidx_consequent_after) =
+                ctx.create_gapped_block(&cons);
+
+            let blockidx_alternate_before = ctx.current_block_index();
+            let alt = expr_to_basic_blocks(ctx, &alt);
+            ctx.wrap_up_block();
+            let blockidx_after = ctx.current_block_index();
+
+            // block before gets a Cond node added
+            ctx.set_exit(
+                blockidx_before,
+                BasicBlockExit::Cond(test, blockidx_consequent_before, blockidx_alternate_before),
+            );
+
+            // block starting with cons gets a Jump node added, to the current block
+            ctx.set_exit(
+                blockidx_consequent_after,
+                BasicBlockExit::Jump(blockidx_after),
+            );
+
+            let conditionally_assigned = ctx.pop_conditionals_context();
+
+            ctx.push_phi_assignments(conditionally_assigned);
+            ctx.wrap_up_block();
+
+            // the retval of our ternary is a phi node
+            BasicBlockInstruction::Phi(vec![cons, alt])
+        }
+        Expr::Ident(ident) => {
+            let Some(var_idx) = ctx.scope.borrow().get(&ident.sym.to_string()) else {todo!("{} not found in scope", ident.sym.to_string())};
+
+            BasicBlockInstruction::Ref(var_idx)
+        }
+        Expr::This(_) => BasicBlockInstruction::This,
+        Expr::Array(array_lit) => {
+            let mut elements = vec![];
+
+            for elem in &array_lit.elems {
+                let elem = match elem {
+                    Some(ExprOrSpread { spread, expr }) => {
+                        if spread.is_none() {
+                            ArrayElement::Item(expr_to_basic_blocks(ctx, expr))
+                        } else {
+                            ArrayElement::Spread(expr_to_basic_blocks(ctx, expr))
+                        }
+                    }
+                    None => ArrayElement::Hole,
+                };
+
+                elements.push(elem);
+            }
+
+            BasicBlockInstruction::Array(elements)
+        }
+        Expr::Object(_) => todo!(),
+        Expr::Fn(_) => todo!(),
+        Expr::Unary(_) => todo!(),
+        Expr::Update(_) => todo!(),
+        Expr::Member(_) => todo!(),
+        Expr::SuperProp(_) => todo!(),
+        Expr::Call(_) => todo!(),
+        Expr::New(_) => todo!(),
+        Expr::Tpl(_) => todo!(),
+        Expr::TaggedTpl(_) => todo!(),
+        Expr::Arrow(_) => todo!(),
+        Expr::Class(_) => todo!(),
+        Expr::MetaProp(_) => todo!(),
+        Expr::Yield(YieldExpr { arg, delegate, .. }) => {
+            let typ = if *delegate {
+                TempExitType::YieldStar
+            } else {
+                TempExitType::Yield
+            };
+
+            let arg = match arg {
+                Some(arg) => expr_to_basic_blocks(ctx, arg),
+                None => ctx.current_block_index(),
+            };
+
+            BasicBlockInstruction::TempExit(typ, arg)
+        }
+        Expr::Await(AwaitExpr { arg, .. }) => {
+            let arg = expr_to_basic_blocks(ctx, arg);
+
+            BasicBlockInstruction::TempExit(TempExitType::Await, arg)
+        }
+        Expr::OptChain(_) => todo!(),
+        Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
+        Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
+        Expr::JSXMember(_)
+        | Expr::JSXNamespacedName(_)
+        | Expr::JSXEmpty(_)
+        | Expr::JSXElement(_)
+        | Expr::JSXFragment(_) => unreachable!("Expr::JSX from SWC should be impossible"),
+        Expr::TsTypeAssertion(_)
+        | Expr::TsConstAssertion(_)
+        | Expr::TsNonNull(_)
+        | Expr::TsAs(_)
+        | Expr::TsInstantiation(_)
+        | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
+        _ => {
+            todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
+        }
+    };
+
+    ctx.push_instruction(node)
+}
+
+fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
+    match stat {
+        Stmt::Expr(expr) => {
+            let _exprid = expr_to_basic_blocks(ctx, &expr.expr);
+        }
+        Stmt::Decl(Decl::Var(var)) => {
+            for decl in &var.decls {
+                let Pat::Ident(ident) = &decl.name else {todo!()};
+                let expr = expr_to_basic_blocks(ctx, decl.init.as_ref().unwrap().borrow());
+                ctx.assign_maybe_conditionally(&ident.sym.to_string(), expr);
+            }
+        }
+        Stmt::DoWhile(_) => todo!(),
+        Stmt::For(_) => todo!(),
+        Stmt::ForIn(_) => todo!(),
+        Stmt::ForOf(_) => todo!(),
+        Stmt::While(whil) => {
+            let blockidx_start = ctx.current_block_index();
+            ctx.push_label(NestedIntoStatement::Unlabelled);
+
+            let test = expr_to_basic_blocks(ctx, &whil.test);
+
+            let test_after_idx = ctx.wrap_up_block();
+
+            let blockidx_before_body = ctx.wrap_up_block();
+            stat_to_basic_blocks(ctx, &whil.body);
+
+            // loop back to start
+            ctx.set_exit(
+                ctx.current_block_index(),
+                BasicBlockExit::Jump(blockidx_start),
+            );
+
+            let blockidx_after_body = ctx.wrap_up_block();
+
+            ctx.set_exit(
+                test_after_idx,
+                BasicBlockExit::Cond(test, blockidx_before_body, blockidx_after_body),
+            );
+
+            let jumpers_towards_me = ctx.pop_label();
+            if jumpers_towards_me.len() > 0 {
+                for jumper in jumpers_towards_me {
+                    ctx.set_exit(jumper, BasicBlockExit::Jump(ctx.current_block_index()))
+                }
+            }
+
+            ctx.wrap_up_block();
+        }
+        Stmt::If(IfStmt {
+            test, cons, alt, ..
+        }) => {
+            ctx.wrap_up_block();
+            let test = expr_to_basic_blocks(ctx, &test);
+            ctx.wrap_up_block();
+            let blockidx_before = ctx.current_block_index();
+            ctx.wrap_up_block();
+
+            ctx.push_conditionals_context();
+
+            let blockidx_consequent_before = ctx.current_block_index();
+            stat_to_basic_blocks(ctx, &cons);
+            let blockidx_consequent_after = ctx.wrap_up_block();
+
+            let alt = if let Some(alt) = alt {
+                ctx.wrap_up_block();
+                let blockidx_alternate_before = ctx.current_block_index();
+                stat_to_basic_blocks(ctx, &alt);
+                ctx.wrap_up_block();
+                let blockidx_alternate_after = ctx.current_block_index();
+                Some((blockidx_alternate_before, blockidx_alternate_after))
+            } else {
+                None
+            };
+
+            let conditionally_assigned = ctx.pop_conditionals_context();
+
+            ctx.push_phi_assignments(conditionally_assigned);
+            ctx.wrap_up_block();
+
+            if let Some((blockidx_alternate_before, blockidx_alternate_after)) = alt {
+                ctx.set_exit(
+                    blockidx_before,
+                    BasicBlockExit::Cond(
+                        test,
+                        blockidx_consequent_before,
+                        blockidx_alternate_before,
+                    ),
+                );
+                ctx.set_exit(
+                    blockidx_consequent_after,
+                    BasicBlockExit::Jump(blockidx_alternate_after),
+                );
+            } else {
+                ctx.set_exit(
+                    blockidx_before,
+                    BasicBlockExit::Cond(
+                        test,
+                        blockidx_consequent_before,
+                        blockidx_consequent_after,
+                    ),
+                );
+            }
+        }
+        Stmt::Block(block) => {
+            for stat in &block.stmts {
+                stat_to_basic_blocks(ctx, stat);
+                ctx.wrap_up_block();
+            }
+        }
+        Stmt::Break(br) => match br.label {
+            Some(_) => {
+                todo!("statements_to_ssa: stat_to_ssa: break with label not implemented")
+            }
+            None => {
+                assert!(!ctx.label_tracking.is_empty());
+
+                let this_block = ctx.wrap_up_block();
+                let (_, last) = ctx.label_tracking.last_mut().unwrap();
+                last.push(this_block);
+            }
+        },
+        Stmt::Debugger(_) => todo!(),
+        Stmt::With(_) => todo!(),
+        Stmt::Labeled(_) => todo!(),
+        Stmt::Continue(_) => todo!(),
+        Stmt::Switch(_) => todo!(),
+        Stmt::Throw(ThrowStmt { arg, .. }) => {
+            ctx.wrap_up_block();
+            let arg = expr_to_basic_blocks(ctx, arg);
+
+            let throw_from = ctx.wrap_up_block();
+            ctx.set_exit(throw_from, BasicBlockExit::ExitFn(ExitType::Throw, arg));
+
+            ctx.wrap_up_block();
+        }
+        Stmt::Return(ret) => {
+            ctx.wrap_up_block();
+            let expr = expr_to_basic_blocks(ctx, ret.arg.as_ref().unwrap());
+
+            let return_from = ctx.wrap_up_block();
+            ctx.set_exit(return_from, BasicBlockExit::ExitFn(ExitType::Return, expr));
+
+            ctx.wrap_up_block();
+        }
+        Stmt::Try(ref stmt) => {
+            let catch_pusher_idx = ctx.wrap_up_block();
+            let try_idx = ctx.wrap_up_block();
+
+            stat_to_basic_blocks(ctx, &Stmt::Block(stmt.block.clone()));
+            ctx.wrap_up_block();
+
+            let before_catch_idx = ctx.wrap_up_block();
+            let catch_idx = ctx.wrap_up_block();
+
+            if let Some(ref handler) = stmt.handler {
+                if let Some(p) = &handler.param {
+                    let sym = p.clone().ident().unwrap(/* TODO */);
+                    let catcherr = ctx.push_instruction(BasicBlockInstruction::CaughtError);
+                    ctx.scope.insert(sym.sym.to_string(), catcherr);
+                }
+                let body = handler.body.clone();
+                stat_to_basic_blocks(ctx, &Stmt::Block(body));
+            }
+
+            let after_catch_idx = ctx.wrap_up_block();
+            let finally_idx = ctx.wrap_up_block();
+
+            if let Some(ref finalizer) = stmt.finalizer {
+                let finalizer = BlockStmt {
+                    span: Default::default(),
+                    stmts: finalizer.stmts.clone(),
+                };
+                stat_to_basic_blocks(ctx, &Stmt::Block(finalizer));
+            }
+
+            let after_finally_idx = ctx.wrap_up_block();
+            let done_and_dusted = ctx.wrap_up_block();
+
+            // declare the trycatch
+            ctx.set_exit(
+                catch_pusher_idx,
+                BasicBlockExit::SetTryAndCatch(try_idx, catch_idx, finally_idx, done_and_dusted),
+            );
+            // catch the error
+            ctx.set_exit(
+                before_catch_idx,
+                BasicBlockExit::PopCatch(catch_idx, finally_idx),
+            );
+            // finally
+            ctx.set_exit(
+                after_catch_idx,
+                BasicBlockExit::PopFinally(finally_idx, after_finally_idx),
+            );
+            // end
+            ctx.set_exit(
+                after_finally_idx,
+                BasicBlockExit::EndFinally(done_and_dusted),
+            );
+        }
+        Stmt::Empty(_) => {}
+        _ => {
+            todo!("statements_to_ssa: stat_to_ssa: {:?} not implemented", stat)
+        }
+    }
+}
+
+pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
+    let mut ctx = ConvertContext::new();
+
+    for stat in statements {
+        stat_to_basic_blocks(&mut ctx, stat);
+        ctx.wrap_up_block();
+    }
+
+    let exit_count = ctx.exits.len();
+    let mut exits = vec![];
+
+    for i in 0..exit_count {
+        let e = ctx.exits[i].clone();
+        match e {
+            Some(exit) => exits.push(exit),
             None => {
                 if i + 1 >= exit_count {
                     let undef_ret =
-                        push_instruction_to_nth_block(BasicBlockInstruction::Undefined, i);
-                    BasicBlockExit::ExitFn(ExitType::Return, undef_ret)
+                        ctx.push_instruction_to_nth_block(BasicBlockInstruction::Undefined, i);
+                    exits.push(BasicBlockExit::ExitFn(ExitType::Return, undef_ret));
                 } else {
-                    BasicBlockExit::Jump(i + 1)
+                    exits.push(BasicBlockExit::Jump(i + 1));
                 }
             }
-        })
-        .collect::<Vec<_>>();
+        }
+    }
 
-    let (exits, basic_blocks) = normalize_basic_blocks(&exits, &basic_blocks.borrow());
+    let (exits, basic_blocks) = normalize_basic_blocks(&exits, &ctx.basic_blocks);
 
     let asts = exits
         .iter()
