@@ -1,4 +1,3 @@
-#[macro_use]
 use fix_fn::fix_fn;
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
 
