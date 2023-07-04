@@ -2,7 +2,15 @@ use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 
-use super::{basic_block_group::BasicBlockGroup, convert::convert::statements_to_basic_blocks};
+use nom::IResult;
+
+use super::{
+    basic_block::{
+        ArrayElement, BasicBlock, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
+    },
+    basic_block_group::BasicBlockGroup,
+    convert::convert::statements_to_basic_blocks,
+};
 use crate::parser::{parse_asyncgen, parse_expression};
 
 use swc_common::SourceMap;
@@ -58,4 +66,333 @@ pub fn stats_to_string(stats: Vec<Stmt>) -> String {
     emitter.emit_script(&script).unwrap();
 
     str.clone().borrow().clone()
+}
+
+macro_rules! whitespace {
+    ($input:ident) => {{
+        let (input, _) = nom::character::complete::multispace0($input)?;
+        input
+    }};
+}
+
+pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
+    fn basic_block_instruction(input: &str) -> IResult<&str, (usize, BasicBlockInstruction)> {
+        fn ins_litnumber(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // 10
+            let (input, n) = nom::character::complete::digit1(input)?;
+            let n_float: f64 = n.parse().unwrap();
+            Ok((input, BasicBlockInstruction::LitNumber(n_float)))
+        }
+
+        fn ins_ref(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // $123
+            let (input, _) = nom::bytes::complete::tag("@")(input)?;
+            let (input, n) = nom::character::complete::digit1(input)?;
+            let n_usize: usize = n.parse().unwrap();
+            Ok((input, BasicBlockInstruction::Ref(n_usize)))
+        }
+
+        fn ins_binop(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // {ref} {operator} {ref}
+            let (input, left) = parse_ref(input)?;
+            let input = whitespace!(input);
+            let (input, op) = nom::character::complete::one_of("+-*/")(input)?;
+            let input = whitespace!(input);
+            let (input, right) = parse_ref(input)?;
+            Ok((
+                input,
+                BasicBlockInstruction::BinOp(String::from(op), left, right),
+            ))
+        }
+
+        fn ins_undefined(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // undefined
+            let (input, _) = nom::bytes::complete::tag("undefined")(input)?;
+            Ok((input, BasicBlockInstruction::Undefined))
+        }
+
+        fn ins_this(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // this
+            let (input, _) = nom::bytes::complete::tag("this")(input)?;
+            Ok((input, BasicBlockInstruction::This))
+        }
+
+        fn ins_caught_error(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // caught_error
+            let (input, _) = nom::bytes::complete::tag("caught_error")(input)?;
+            Ok((input, BasicBlockInstruction::CaughtError))
+        }
+
+        fn ins_array(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // [ref, ref, ...]
+            let (input, _) = nom::bytes::complete::tag("[")(input)?;
+            let input = whitespace!(input);
+            let (input, items) = nom::multi::separated_list0(
+                nom::bytes::complete::tag(","),
+                nom::sequence::preceded(nom::character::complete::multispace0, parse_ref),
+            )(input)?;
+            let input = whitespace!(input);
+            let (input, _) = nom::bytes::complete::tag("]")(input)?;
+            Ok((
+                input,
+                BasicBlockInstruction::Array(
+                    items
+                        .into_iter()
+                        .map(|r| ArrayElement::Item(r))
+                        .collect::<Vec<_>>(),
+                ),
+            ))
+        }
+
+        fn ins_tempexit(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // YieldStar {ref}
+            // Yield {ref}
+            // Await {ref}
+            let (input, exit_type) = nom::branch::alt((
+                nom::combinator::map(nom::bytes::complete::tag("YieldStar"), |_| {
+                    TempExitType::YieldStar
+                }),
+                nom::combinator::map(nom::bytes::complete::tag("Yield"), |_| TempExitType::Yield),
+                nom::combinator::map(nom::bytes::complete::tag("Await"), |_| TempExitType::Await),
+            ))(input)?;
+
+            let input = whitespace!(input);
+            let (input, ref_) = ins_ref(input)?;
+
+            Ok((
+                input,
+                BasicBlockInstruction::TempExit(exit_type, ref_.unwrap_ref()),
+            ))
+        }
+
+        fn ins_phi(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // either({ref}, {ref}, {ref}, ...)
+            let (input, _) = nom::bytes::complete::tag("either")(input)?;
+            let input = whitespace!(input);
+            let (input, items) = nom::multi::separated_list0(
+                nom::bytes::complete::tag(","),
+                nom::sequence::preceded(nom::character::complete::multispace0, ins_ref),
+            )(input)?;
+            Ok((
+                input,
+                BasicBlockInstruction::Phi(
+                    items
+                        .into_iter()
+                        .map(|r| r.unwrap_ref())
+                        .collect::<Vec<_>>(),
+                ),
+            ))
+        }
+
+        // $123 =
+        let input = whitespace!(input);
+
+        let (input, var_name) = parse_ref(input)?;
+        let input = whitespace!(input);
+        let (input, _) = nom::bytes::complete::tag("=")(input)?;
+        let input = whitespace!(input);
+
+        let (input, instruction) = nom::branch::alt((
+            ins_undefined,
+            ins_this,
+            ins_litnumber,
+            ins_ref,
+            ins_binop,
+            ins_caught_error,
+            ins_array,
+            ins_tempexit,
+            ins_phi,
+        ))(input)?;
+
+        let input = whitespace!(input);
+
+        Ok((input, (var_name, instruction)))
+    }
+
+    fn parse_basic_block_exit(input: &str) -> IResult<&str, BasicBlockExit> {
+        // exit = jump @123
+
+        let input = whitespace!(input);
+        let (input, _exit) = nom::bytes::complete::tag("exit")(input)?;
+        let input = whitespace!(input);
+        let (input, _exit) = nom::bytes::complete::tag("=")(input)?;
+        let input = whitespace!(input);
+
+        let (input, word) = nom::branch::alt((
+            nom::bytes::complete::tag("jump"),
+            nom::bytes::complete::tag("cond"),
+            nom::bytes::complete::tag("return"),
+        ))(input)?;
+
+        let input = whitespace!(input);
+
+        let (input, ret) = match word {
+            "return" => {
+                let (input, ref_) = parse_ref(input)?;
+                (input, BasicBlockExit::ExitFn(ExitType::Return, ref_))
+            }
+            "jump" => {
+                let (input, ref_) = parse_blockref(input)?;
+                (input, BasicBlockExit::Jump(ref_))
+            }
+            "cond" => {
+                // cond {ref} ? jump @123 : jump @456
+                let (input, condition) = parse_ref(input)?;
+                let input = whitespace!(input);
+                let (input, _) = nom::bytes::complete::tag("?")(input)?;
+                let input = whitespace!(input);
+                let (input, _) = nom::bytes::complete::tag("jump")(input)?;
+                let input = whitespace!(input);
+                let (input, consequent) = parse_blockref(input)?;
+                let input = whitespace!(input);
+                let (input, _) = nom::bytes::complete::tag(":")(input)?;
+                let input = whitespace!(input);
+                let (input, _) = nom::bytes::complete::tag("jump")(input)?;
+                let input = whitespace!(input);
+                let (input, alternate) = parse_blockref(input)?;
+                (
+                    input,
+                    BasicBlockExit::Cond(condition, consequent, alternate),
+                )
+            }
+            _ => unimplemented!(),
+        };
+
+        let input = whitespace!(input);
+
+        Ok((input, ret))
+    }
+
+    fn basic_block(input: &str) -> IResult<&str, BasicBlock> {
+        let input = whitespace!(input);
+        // @0: { ...instructions, exit = {basic block exit} }
+        let (input, _) = nom::bytes::complete::tag("@")(input)?;
+        let (input, _) = nom::character::complete::digit1(input)?;
+        let (input, _) = nom::bytes::complete::tag(":")(input)?;
+        // whitespace
+        let input = whitespace!(input);
+        let (input, _) = nom::bytes::complete::tag("{")(input)?;
+        // whitespace
+        let input = whitespace!(input);
+
+        let (input, instructions) = nom::multi::many0(basic_block_instruction)(input)?;
+
+        let input = whitespace!(input);
+        let (input, exit) = parse_basic_block_exit(input)?;
+
+        let input = whitespace!(input);
+        let (input, _) = nom::bytes::complete::tag("}")(input)?;
+
+        let input = whitespace!(input);
+
+        Ok((input, BasicBlock { instructions, exit }))
+    }
+    fn parse_ref(input: &str) -> IResult<&str, usize> {
+        let (input, _) = nom::bytes::complete::tag("$")(input)?;
+        let (input, n) = nom::character::complete::digit1(input)?;
+        Ok((input, n.parse().unwrap()))
+    }
+    fn parse_blockref(input: &str) -> IResult<&str, usize> {
+        let (input, _) = nom::bytes::complete::tag("@")(input)?;
+        let (input, n) = nom::character::complete::digit1(input)?;
+        Ok((input, n.parse().unwrap()))
+    }
+
+    let (input, blocks) = nom::multi::many0(basic_block)(input)?;
+
+    let (input, _) = nom::combinator::eof(input)?;
+
+    assert_eq!(input, "");
+
+    Ok((input, BasicBlockGroup { blocks }))
+}
+
+#[test]
+fn test_parse_basic_blocks() {
+    let blocks = parse_basic_blocks(
+        r###"
+        @0: {
+            $0 = 123
+            exit = jump @1
+        }
+        "###,
+    )
+    .unwrap()
+    .1;
+
+    insta::assert_debug_snapshot!(blocks, @r###"
+    @0: {
+        $0 = 123
+        exit = jump @1
+    }
+    "###);
+}
+
+#[test]
+fn test_parse_basic_blocks_2() {
+    let blocks = parse_basic_blocks(
+        r###"
+    @0: {
+        $0 = 777
+        exit = jump @1
+    }
+    @1: {
+        exit = cond $0 ? jump @2 : jump @7
+    }
+    @2: {
+        $1 = 888
+        exit = jump @3
+    }
+    @3: {
+        exit = cond $1 ? jump @4 : jump @5
+    }
+    @4: {
+        exit = jump @7
+    }
+    @5: {
+        exit = jump @6
+    }
+    @6: {
+        exit = jump @0
+    }
+    @7: {
+        $2 = 999
+        $3 = undefined
+        exit = return $3
+    }
+    "###,
+    )
+    .unwrap()
+    .1;
+
+    insta::assert_debug_snapshot!(blocks, @r###"
+    @0: {
+        $0 = 777
+        exit = jump @1
+    }
+    @1: {
+        exit = cond $0 ? jump @2 : jump @7
+    }
+    @2: {
+        $1 = 888
+        exit = jump @3
+    }
+    @3: {
+        exit = cond $1 ? jump @4 : jump @5
+    }
+    @4: {
+        exit = jump @7
+    }
+    @5: {
+        exit = jump @6
+    }
+    @6: {
+        exit = jump @0
+    }
+    @7: {
+        $2 = 999
+        $3 = undefined
+        exit = return $3
+    }
+    "###);
 }

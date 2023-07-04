@@ -156,6 +156,13 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::CaughtError => vec![],
         }
     }
+
+    pub fn unwrap_ref(&self) -> usize {
+        match self {
+            BasicBlockInstruction::Ref(id) => *id,
+            _ => panic!("Expected Ref"),
+        }
+    }
 }
 
 impl Debug for BasicBlock {
