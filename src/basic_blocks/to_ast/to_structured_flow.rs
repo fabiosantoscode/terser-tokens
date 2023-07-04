@@ -71,12 +71,12 @@ fn do_tree_inner(graph: &Graph, node: usize, context: Ctx) -> StructuredFlow {
         let ys = graph
             .direct_subs(node)
             .into_iter()
-            .filter(|child| is_merge_node(graph, *child, 0))
+            .filter(|child| is_merge_node(graph, *child))
             .collect::<Vec<_>>();
         node_within(graph, node, &ys, context)
     };
 
-    if is_loop_header(graph, node, context.clone()) {
+    if is_loop_header(graph, node) {
         let inner_context = context.pushed(ContainingSyntax::LoopHeadedBy(node));
         StructuredFlow::Loop(code_for_node(inner_context).into_flat_vec())
     } else {
@@ -165,14 +165,15 @@ fn do_branch(graph: &Graph, source: usize, target: usize, context: Ctx) -> Struc
     let index_target = reverse_postorder.iter().position(|&x| x == target).unwrap();
 
     if
-    /* is backwards */
+    /* is backwards, so this must be a continuation of an enclosing loop */
     index_target > index_source {
         StructuredFlow::Continue(index_target) // continue the loop
     } else if
-    /* multiple nodes come here */
-    graph.nodes[target].incoming_edges.len() > 1 {
-        StructuredFlow::Break(index_target) // continue the loop
+    /* a forward branch to a merge node exits a block */
+    is_merge_node(graph, target) {
+        StructuredFlow::Break(index_target) // break the loop
     } else {
+        /* plain goto next */
         do_tree_inner(graph, target, context)
     }
 }
@@ -180,7 +181,7 @@ fn do_branch(graph: &Graph, source: usize, target: usize, context: Ctx) -> Struc
 // A node 𝑋 that has two or more forward inedges is a merge node. Being a merge node doesn’t
 // affect how 𝑋 is translated, but it does affect the placement of 𝑋 ’s translation: the translation
 // will follow a block form.
-fn is_merge_node(graph: &Graph, child: usize, root: usize) -> bool {
+fn is_merge_node(graph: &Graph, child: usize) -> bool {
     let reverse_postorder = graph.reverse_postorder();
     let index = |child| reverse_postorder.iter().position(|&x| x == child).unwrap();
     let forward_inedges = graph.nodes[child]
@@ -194,7 +195,7 @@ fn is_merge_node(graph: &Graph, child: usize, root: usize) -> bool {
 
 // A node 𝑋 that has a back inedge is a loop header, and its translation is wrapped in a loop
 // form. The translation of the subtree rooted at 𝑋 is placed into the body of the loop.
-fn is_loop_header(graph: &Graph, node: usize, context: Ctx) -> bool {
+fn is_loop_header(graph: &Graph, node: usize) -> bool {
     let indices = graph.reverse_postorder();
     let node_index = indices.iter().position(|&x| x == node).unwrap();
     let g_node = &graph.nodes[node];
@@ -209,6 +210,28 @@ fn is_loop_header(graph: &Graph, node: usize, context: Ctx) -> bool {
 mod tests {
     use super::*;
     use crate::basic_blocks::testutils::{parse_basic_blocks, test_basic_blocks};
+
+    #[test]
+    fn basic_flow() {
+        let func = parse_basic_blocks(
+            r###"
+        @0: {
+            $0 = 123
+            exit = jump @1
+        }
+        @1: {
+            $1 = 456
+            exit = return $1
+        }
+        "###,
+        );
+
+        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        Block(
+            [BasicBlockRef(0), BasicBlockRef(1), Return]
+        )
+        "###);
+    }
 
     #[test]
     fn basic_if() {
@@ -409,6 +432,66 @@ mod tests {
                 )]
                 [Break(0)]
             }, BasicBlockRef(7), Return]
+        )
+        "###);
+    }
+
+    #[test]
+    fn basic_while_3() {
+        let func = parse_basic_blocks(
+            r###"
+        @0: {
+            $0 = 777
+            exit = jump @1
+        }
+        @1: {
+            $0 = 777
+            exit = jump @2
+        }
+        @2: {
+            exit = cond $0 ? jump @3 : jump @8
+        }
+        @3: {
+            $1 = 888
+            exit = jump @4
+        }
+        @4: {
+            exit = cond $1 ? jump @5 : jump @6
+        }
+        @5: {
+            exit = jump @8
+        }
+        @6: {
+            exit = jump @7
+        }
+        @7: {
+            exit = jump @1
+        }
+        @8: {
+            $2 = 999
+            $3 = undefined
+            exit = return $3
+        }
+        "###,
+        );
+
+        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        Block(
+            [BasicBlockRef(0), Loop(
+                [BasicBlockRef(1), BasicBlockRef(2), Branch 0 {
+                    [Block(
+                        [BasicBlockRef(3), BasicBlockRef(4), Branch 1 {
+                            [Block(
+                                [BasicBlockRef(5), Break(0)]
+                            )]
+                            [Block(
+                                [BasicBlockRef(6), BasicBlockRef(7), Continue(7)]
+                            )]
+                        }]
+                    )]
+                    [Break(0)]
+                }, BasicBlockRef(8), Return]
+            )]
         )
         "###);
     }
