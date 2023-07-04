@@ -75,7 +75,12 @@ macro_rules! whitespace {
     }};
 }
 
-pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
+pub fn parse_basic_blocks(input: &str) -> BasicBlockGroup {
+    let (_, bb) = parse_basic_blocks_inner(input).unwrap();
+    bb
+}
+
+fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
     fn basic_block_instruction(input: &str) -> IResult<&str, (usize, BasicBlockInstruction)> {
         fn ins_litnumber(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // 10
@@ -168,20 +173,16 @@ pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
         fn ins_phi(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // either({ref}, {ref}, {ref}, ...)
             let (input, _) = nom::bytes::complete::tag("either")(input)?;
+            let (input, _paren) = nom::bytes::complete::tag("(")(input)?;
             let input = whitespace!(input);
             let (input, items) = nom::multi::separated_list0(
                 nom::bytes::complete::tag(","),
-                nom::sequence::preceded(nom::character::complete::multispace0, ins_ref),
+                nom::sequence::preceded(nom::character::complete::multispace0, parse_ref),
             )(input)?;
-            Ok((
-                input,
-                BasicBlockInstruction::Phi(
-                    items
-                        .into_iter()
-                        .map(|r| r.unwrap_ref())
-                        .collect::<Vec<_>>(),
-                ),
-            ))
+            println!("here {input}");
+            let (input, _paren) = nom::bytes::complete::tag(")")(input)?;
+
+            Ok((input, BasicBlockInstruction::Phi(items)))
         }
 
         // $123 =
@@ -222,6 +223,7 @@ pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
             nom::bytes::complete::tag("jump"),
             nom::bytes::complete::tag("cond"),
             nom::bytes::complete::tag("return"),
+            nom::bytes::complete::tag("try"),
         ))(input)?;
 
         let input = whitespace!(input);
@@ -255,6 +257,31 @@ pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
                     BasicBlockExit::Cond(condition, consequent, alternate),
                 )
             }
+            "try" => {
+                // try @123 catch @456 finally @789 after @101112
+                let (input, try_block) = parse_blockref(input)?;
+                let input = whitespace!(input);
+                let (input, _) = nom::bytes::complete::tag("catch")(input)?;
+                let input = whitespace!(input);
+                let (input, catch_block) = parse_blockref(input)?;
+                let input = whitespace!(input);
+                let (input, _) = nom::bytes::complete::tag("finally")(input)?;
+                let input = whitespace!(input);
+                let (input, finally_block) = parse_blockref(input)?;
+                let input = whitespace!(input);
+                let (input, _) = nom::bytes::complete::tag("after")(input)?;
+                let input = whitespace!(input);
+                let (input, after_block) = parse_blockref(input)?;
+                (
+                    input,
+                    BasicBlockExit::SetTryAndCatch(
+                        try_block,
+                        catch_block,
+                        finally_block,
+                        after_block,
+                    ),
+                )
+            }
             _ => unimplemented!(),
         };
 
@@ -263,12 +290,19 @@ pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
         Ok((input, ret))
     }
 
+    fn basic_block_header(input: &str) -> IResult<&str, usize> {
+        // @0: { ...instructions, exit = {basic block exit} }
+
+        let input = whitespace!(input);
+        let (input, _) = nom::bytes::complete::tag("@")(input)?;
+        let (input, index) = nom::character::complete::digit1(input)?;
+        let (input, _) = nom::bytes::complete::tag(":")(input)?;
+
+        Ok((input, index.parse().unwrap()))
+    }
+
     fn basic_block(input: &str) -> IResult<&str, BasicBlock> {
         let input = whitespace!(input);
-        // @0: { ...instructions, exit = {basic block exit} }
-        let (input, _) = nom::bytes::complete::tag("@")(input)?;
-        let (input, _) = nom::character::complete::digit1(input)?;
-        let (input, _) = nom::bytes::complete::tag(":")(input)?;
         // whitespace
         let input = whitespace!(input);
         let (input, _) = nom::bytes::complete::tag("{")(input)?;
@@ -298,7 +332,10 @@ pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
         Ok((input, n.parse().unwrap()))
     }
 
-    let (input, blocks) = nom::multi::many0(basic_block)(input)?;
+    let (input, blocks) = nom::multi::many0(nom::sequence::preceded(
+        basic_block_header,
+        nom::combinator::cut(basic_block),
+    ))(input)?;
 
     let (input, _) = nom::combinator::eof(input)?;
 
@@ -309,7 +346,7 @@ pub fn parse_basic_blocks(input: &str) -> IResult<&str, BasicBlockGroup> {
 
 #[test]
 fn test_parse_basic_blocks() {
-    let blocks = parse_basic_blocks(
+    let blocks = parse_basic_blocks_inner(
         r###"
         @0: {
             $0 = 123
@@ -330,7 +367,7 @@ fn test_parse_basic_blocks() {
 
 #[test]
 fn test_parse_basic_blocks_2() {
-    let blocks = parse_basic_blocks(
+    let blocks = parse_basic_blocks_inner(
         r###"
     @0: {
         $0 = 777

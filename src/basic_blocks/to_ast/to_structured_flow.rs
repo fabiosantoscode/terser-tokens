@@ -78,7 +78,7 @@ fn do_tree_inner(graph: &Graph, node: usize, context: Ctx) -> StructuredFlow {
 
     if is_loop_header(graph, node, context.clone()) {
         let inner_context = context.pushed(ContainingSyntax::LoopHeadedBy(node));
-        StructuredFlow::Loop(vec![code_for_node(inner_context)])
+        StructuredFlow::Loop(code_for_node(inner_context).into_flat_vec())
     } else {
         code_for_node(context)
     }
@@ -96,10 +96,10 @@ fn node_within(graph: &Graph, node: usize, ys: &[usize], context: Ctx) -> Struct
                 ) => {
                     let inner = context.pushed(ContainingSyntax::TryCatch);
                     return StructuredFlow::TryCatch(
-                        vec![do_branch(graph, node, *try_block, inner.clone())],
-                        vec![do_branch(graph, node, *catch_block, inner.clone())],
-                        vec![do_branch(graph, node, *finally_block, inner.clone())],
-                        vec![do_branch(graph, node, *after_block, inner.clone())],
+                        do_branch(graph, node, *try_block, inner.clone()).into_flat_vec(),
+                        do_branch(graph, node, *catch_block, inner.clone()).into_flat_vec(),
+                        do_branch(graph, node, *finally_block, inner.clone()).into_flat_vec(),
+                        do_branch(graph, node, *after_block, inner.clone()).into_flat_vec(),
                     );
                 }
                 BasicBlockExit::PopCatch(catch_block, _finally_or_after) => {
@@ -116,29 +116,32 @@ fn node_within(graph: &Graph, node: usize, ys: &[usize], context: Ctx) -> Struct
 
             let mut block_contents: Vec<StructuredFlow> = vec![StructuredFlow::BasicBlock(node)];
 
-            block_contents.push(match &graph.nodes[node].basic_block.exit {
-                BasicBlockExit::Jump(to) | BasicBlockExit::EndFinally(to) => {
-                    do_branch(graph, node, *to, context)
-                }
+            block_contents.extend(
+                match &graph.nodes[node].basic_block.exit {
+                    BasicBlockExit::Jump(to) | BasicBlockExit::EndFinally(to) => {
+                        do_branch(graph, node, *to, context)
+                    }
 
-                BasicBlockExit::Cond(e, t, f) => {
-                    let inner = context.pushed(ContainingSyntax::IfThenElse);
-                    StructuredFlow::Branch(
-                        *e,
-                        vec![do_branch(graph, node, *t, inner.clone())],
-                        vec![do_branch(graph, node, *f, inner.clone())],
-                    )
+                    BasicBlockExit::Cond(e, t, f) => {
+                        let inner = context.pushed(ContainingSyntax::IfThenElse);
+                        StructuredFlow::Branch(
+                            *e,
+                            vec![do_branch(graph, node, *t, inner.clone())],
+                            vec![do_branch(graph, node, *f, inner.clone())],
+                        )
+                    }
+                    BasicBlockExit::ExitFn(exit, ret) => {
+                        StructuredFlow::Return(exit.clone(), Some(*ret))
+                    }
+                    BasicBlockExit::SetTryAndCatch(_, _, _, _)
+                    | BasicBlockExit::PopCatch(_, _)
+                    | BasicBlockExit::PopFinally(_, _) => {
+                        unreachable!("handled above")
+                    }
                 }
-                BasicBlockExit::ExitFn(exit, ret) => {
-                    StructuredFlow::Return(exit.clone(), Some(*ret))
-                }
-                BasicBlockExit::SetTryAndCatch(_, _, _, _)
-                | BasicBlockExit::PopCatch(_, _)
-                | BasicBlockExit::PopFinally(_, _) 
-                | BasicBlockExit::EndFinally(_) => {
-                    unreachable!("handled above")
-                }
-            });
+                .into_flat_vec()
+                .into_iter(),
+            );
             StructuredFlow::Block(block_contents)
         }
         Some((y, ys)) => {
@@ -196,20 +199,219 @@ fn is_loop_header(graph: &Graph, node: usize, context: Ctx) -> bool {
     let node_index = indices.iter().position(|&x| x == node).unwrap();
     let g_node = &graph.nodes[node];
 
-    g_node.incoming_edges.iter().any(|&edge| {
-        if let Some(index_edge) = indices.iter().position(|&x| x == edge) {
-            node_index > index_edge
-        } else {
-            // TODO why would that be None?
-            false
-        }
-    })
+    g_node
+        .incoming_edges
+        .iter()
+        .any(|&edge| indices.iter().position(|&x| x == edge).unwrap() < node_index)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::testutils::test_basic_blocks;
+    use crate::basic_blocks::testutils::{parse_basic_blocks, test_basic_blocks};
+
+    #[test]
+    fn basic_if() {
+        let func = parse_basic_blocks(
+            r###"
+        @0: {
+            $0 = 123
+            exit = cond $0 ? jump @1 : jump @2
+        }
+        @1: {
+            $1 = 456
+            exit = jump @3
+        }
+        @2: {
+            $2 = 789
+            exit = jump @3
+        }
+        @3: {
+            $3 = either($1, $2)
+            $4 = undefined
+            exit = return $4
+        }
+        "###,
+        );
+
+        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        Block(
+            [Block(
+                [BasicBlockRef(0), Branch 0 {
+                    [Block(
+                        [BasicBlockRef(1), Break(0)]
+                    )]
+                    [Block(
+                        [BasicBlockRef(2), Break(0)]
+                    )]
+                }]
+            ), Block(
+                [BasicBlockRef(3), Return]
+            )]
+        )
+        "###);
+    }
+
+    #[test]
+    fn basic_if_2() {
+        let func = parse_basic_blocks(
+            r###"
+            @0: {
+                exit = jump @1
+            }
+            @1: {
+                $0 = 123
+                exit = cond $0 ? jump @2 : jump @3
+            }
+            @2: {
+                $1 = 456
+                exit = jump @4
+            }
+            @3: {
+                $2 = 789
+                exit = jump @4
+            }
+            @4: {
+                $3 = either($1, $2)
+                $4 = undefined
+                exit = return $4
+            }
+        "###,
+        );
+
+        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        Block(
+            [BasicBlockRef(0), BasicBlockRef(1), Branch 0 {
+                [Block(
+                    [BasicBlockRef(2), Break(0)]
+                )]
+                [Block(
+                    [BasicBlockRef(3), Break(0)]
+                )]
+            }, BasicBlockRef(4), Return]
+        )
+        "###);
+    }
+
+    #[test]
+    fn basic_while_minimal() {
+        let func = parse_basic_blocks(
+            r###"
+            @0: {
+                $0 = 123
+                exit = cond $0 ? jump @1 : jump @2
+            }
+            @1: {
+                $1 = 456
+                exit = jump @0
+            }
+            @2: {
+                $2 = 789
+                exit = return $2
+            }
+        "###,
+        );
+
+        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        Loop(
+            [BasicBlockRef(0), Branch 0 {
+                [Block(
+                    [BasicBlockRef(1), Continue(2)]
+                )]
+                [Block(
+                    [BasicBlockRef(2), Return]
+                )]
+            }]
+        )
+        "###);
+    }
+
+    #[test]
+    fn basic_while() {
+        let func = parse_basic_blocks(
+            r###"
+            @0: {
+                $0 = 123
+                exit = cond $0 ? jump @1 : jump @2
+            }
+            @1: {
+                $1 = 456
+                exit = jump @0
+            }
+            @2: {
+                $2 = 789
+                exit = return $2
+            }
+        "###,
+        );
+
+        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        Loop(
+            [BasicBlockRef(0), Branch 0 {
+                [Block(
+                    [BasicBlockRef(1), Continue(2)]
+                )]
+                [Block(
+                    [BasicBlockRef(2), Return]
+                )]
+            }]
+        )
+        "###);
+    }
+
+    #[test]
+    fn basic_while_2() {
+        let func = parse_basic_blocks(
+            r###"
+        @0: {
+            $0 = 777
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $0 ? jump @2 : jump @7
+        }
+        @2: {
+            $1 = 888
+            exit = jump @3
+        }
+        @3: {
+            exit = cond $1 ? jump @4 : jump @5
+        }
+        @4: {
+            exit = jump @7
+        }
+        @5: {
+            exit = jump @6
+        }
+        @6: {
+            exit = jump @0
+        }
+        @7: {
+            $2 = 999
+            $3 = undefined
+            exit = return $3
+        }
+        "###,
+        );
+
+        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        Loop(
+            [BasicBlockRef(0), BasicBlockRef(1), Branch 0 {
+                [Block(
+                    [BasicBlockRef(2), BasicBlockRef(3), Branch 1 {
+                        [Block(
+                            [BasicBlockRef(4), Break(0)]
+                        )]
+                        [Block(
+                            [BasicBlockRef(5), BasicBlockRef(6), Continue(7)]
+                        )]
+                    }]
+                )]
+                [Break(0)]
+            }, BasicBlockRef(7), Return]
+        )
+        "###);
+    }
 
     #[test]
     fn mk_stats() {
@@ -248,20 +450,14 @@ mod tests {
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), Block(
+            [BasicBlockRef(0), BasicBlockRef(1), Branch 4 {
                 [Block(
-                    [BasicBlockRef(1), Branch 4 {
-                        [Block(
-                            [BasicBlockRef(2), Break(0)]
-                        )]
-                        [Block(
-                            [BasicBlockRef(3), Break(0)]
-                        )]
-                    }]
-                ), Block(
-                    [BasicBlockRef(4), Return]
+                    [BasicBlockRef(2), Break(0)]
                 )]
-            )]
+                [Block(
+                    [BasicBlockRef(3), Break(0)]
+                )]
+            }, BasicBlockRef(4), Return]
         )
         "###);
     }
@@ -373,9 +569,7 @@ mod tests {
                                 )]
                             }]
                         ), Block(
-                            [BasicBlockRef(4), Block(
-                                [BasicBlockRef(5), Break(0)]
-                            )]
+                            [BasicBlockRef(4), BasicBlockRef(5), Break(0)]
                         )]
                     )]
                     [Block(
@@ -433,31 +627,17 @@ mod tests {
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), Block(
+            [BasicBlockRef(0), BasicBlockRef(1), Branch 0 {
                 [Block(
-                    [BasicBlockRef(1), Branch 0 {
-                        [Block(
-                            [BasicBlockRef(2), Block(
-                                [BasicBlockRef(3), Break(3)]
-                            )]
-                        )]
-                        [Break(3)]
-                    }]
-                ), Block(
-                    [BasicBlockRef(4), Block(
-                        [Block(
-                            [BasicBlockRef(5), Branch 3 {
-                                [Block(
-                                    [BasicBlockRef(6), Break(0)]
-                                )]
-                                [Break(0)]
-                            }]
-                        ), Block(
-                            [BasicBlockRef(7), Return]
-                        )]
-                    )]
+                    [BasicBlockRef(2), BasicBlockRef(3), Break(3)]
                 )]
-            )]
+                [Break(3)]
+            }, BasicBlockRef(4), BasicBlockRef(5), Branch 3 {
+                [Block(
+                    [BasicBlockRef(6), Break(0)]
+                )]
+                [Break(0)]
+            }, BasicBlockRef(7), Return]
         )
         "###);
     }
@@ -512,31 +692,19 @@ mod tests {
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
         Loop(
-            [Block(
-                [BasicBlockRef(0), Block(
-                    [Block(
-                        [BasicBlockRef(1), Branch 0 {
-                            [Block(
-                                [BasicBlockRef(2), Block(
-                                    [BasicBlockRef(3), Branch 1 {
-                                        [Block(
-                                            [BasicBlockRef(4), Break(0)]
-                                        )]
-                                        [Block(
-                                            [BasicBlockRef(5), Block(
-                                                [BasicBlockRef(6), Continue(7)]
-                                            )]
-                                        )]
-                                    }]
-                                )]
-                            )]
-                            [Break(0)]
-                        }]
-                    ), Block(
-                        [BasicBlockRef(7), Return]
-                    )]
+            [BasicBlockRef(0), BasicBlockRef(1), Branch 0 {
+                [Block(
+                    [BasicBlockRef(2), BasicBlockRef(3), Branch 1 {
+                        [Block(
+                            [BasicBlockRef(4), Break(0)]
+                        )]
+                        [Block(
+                            [BasicBlockRef(5), BasicBlockRef(6), Continue(7)]
+                        )]
+                    }]
                 )]
-            )]
+                [Break(0)]
+            }, BasicBlockRef(7), Return]
         )
         "###);
     }
@@ -594,18 +762,10 @@ mod tests {
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
             [BasicBlockRef(0), TryCatch(
-                [Block(
-                    [BasicBlockRef(2), BasicBlockRef(3)]
-                )]
-                [Block(
-                    [BasicBlockRef(4), BasicBlockRef(5)]
-                )]
-                [Block(
-                    [BasicBlockRef(6), BasicBlockRef(7)]
-                )]
-                [Block(
-                    [BasicBlockRef(8), Return]
-                )]
+                [BasicBlockRef(2), BasicBlockRef(3)]
+                [BasicBlockRef(4), BasicBlockRef(5)]
+                [BasicBlockRef(6), BasicBlockRef(7)]
+                [BasicBlockRef(8), Return]
             )]
         )
         "###);
@@ -667,18 +827,10 @@ mod tests {
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
             [BasicBlockRef(0), TryCatch(
-                [Block(
-                    [BasicBlockRef(2), BasicBlockRef(3)]
-                )]
-                [Block(
-                    [BasicBlockRef(4), BasicBlockRef(5)]
-                )]
-                [Block(
-                    [BasicBlockRef(6), BasicBlockRef(7)]
-                )]
-                [Block(
-                    [BasicBlockRef(8), Return]
-                )]
+                [BasicBlockRef(2), BasicBlockRef(3)]
+                [BasicBlockRef(4), BasicBlockRef(5)]
+                [BasicBlockRef(6), BasicBlockRef(7)]
+                [BasicBlockRef(8), Return]
             )]
         )
         "###);
@@ -747,31 +899,15 @@ mod tests {
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
             [BasicBlockRef(0), TryCatch(
-                [Block(
-                    [BasicBlockRef(2), Block(
-                        [Block(
-                            [BasicBlockRef(3), Branch 0 {
-                                [Block(
-                                    [BasicBlockRef(4), Block(
-                                        [BasicBlockRef(5), Break(6)]
-                                    )]
-                                )]
-                                [Break(6)]
-                            }]
-                        ), Block(
-                            [BasicBlockRef(6), BasicBlockRef(7)]
-                        )]
+                [BasicBlockRef(2), BasicBlockRef(3), Branch 0 {
+                    [Block(
+                        [BasicBlockRef(4), BasicBlockRef(5), Break(6)]
                     )]
-                )]
-                [Block(
-                    [BasicBlockRef(8), BasicBlockRef(9)]
-                )]
-                [Block(
-                    [BasicBlockRef(10), BasicBlockRef(11)]
-                )]
-                [Block(
-                    [BasicBlockRef(12), Return]
-                )]
+                    [Break(6)]
+                }, BasicBlockRef(6), BasicBlockRef(7)]
+                [BasicBlockRef(8), BasicBlockRef(9)]
+                [BasicBlockRef(10), BasicBlockRef(11)]
+                [BasicBlockRef(12), Return]
             )]
         )
         "###);
@@ -795,6 +931,19 @@ impl StructuredFlow {
             StructuredFlow::Catch(_) => "Catch".to_string(),
             StructuredFlow::Finally(_) => "Finally".to_string(),
             StructuredFlow::TryCatch(_, _, _, _) => "TryCatch".to_string(),
+        }
+    }
+    fn into_flat_vec(self) -> Vec<StructuredFlow> {
+        let flat_in = |items: Vec<StructuredFlow>| {
+            items
+                .into_iter()
+                .flat_map(StructuredFlow::into_flat_vec)
+                .collect::<Vec<_>>()
+        };
+
+        match self {
+            StructuredFlow::Block(items) => flat_in(items),
+            other => vec![other],
         }
     }
     fn children(&self) -> Vec<Vec<StructuredFlow>> {
