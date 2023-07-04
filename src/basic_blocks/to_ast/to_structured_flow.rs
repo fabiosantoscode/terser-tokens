@@ -63,14 +63,7 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
 
     let tree = do_tree_inner(&dom, 0, Default::default());
 
-    let flat_tree = tree.into_flat_vec();
-
-    let flat_tree = match flat_tree {
-        flat_tree if flat_tree.len() == 1 => flat_tree[0].clone(),
-        flat_tree => StructuredFlow::Block(flat_tree),
-    };
-
-    flat_tree
+    tree.flatten()
 }
 
 fn do_tree_inner(graph: &Graph, node: usize, context: Ctx) -> StructuredFlow {
@@ -85,7 +78,7 @@ fn do_tree_inner(graph: &Graph, node: usize, context: Ctx) -> StructuredFlow {
 
     if is_loop_header(graph, node) {
         let inner_context = context.pushed(ContainingSyntax::LoopHeadedBy(node));
-        StructuredFlow::Loop(code_for_node(inner_context).into_flat_vec())
+        StructuredFlow::Loop(vec![code_for_node(inner_context)])
     } else {
         code_for_node(context)
     }
@@ -103,10 +96,10 @@ fn node_within(graph: &Graph, node: usize, ys: &[usize], context: Ctx) -> Struct
                 ) => {
                     let inner = context.pushed(ContainingSyntax::TryCatch);
                     return StructuredFlow::TryCatch(
-                        do_branch(graph, node, *try_block, inner.clone()).into_flat_vec(),
-                        do_branch(graph, node, *catch_block, inner.clone()).into_flat_vec(),
-                        do_branch(graph, node, *finally_block, inner.clone()).into_flat_vec(),
-                        do_branch(graph, node, *after_block, inner.clone()).into_flat_vec(),
+                        vec![do_branch(graph, node, *try_block, inner.clone())],
+                        vec![do_branch(graph, node, *catch_block, inner.clone())],
+                        vec![do_branch(graph, node, *finally_block, inner.clone())],
+                        vec![do_branch(graph, node, *after_block, inner.clone())],
                     );
                 }
                 BasicBlockExit::PopCatch(catch_block, _finally_or_after) => {
@@ -123,32 +116,28 @@ fn node_within(graph: &Graph, node: usize, ys: &[usize], context: Ctx) -> Struct
 
             let mut block_contents: Vec<StructuredFlow> = vec![StructuredFlow::BasicBlock(node)];
 
-            block_contents.extend(
-                match &graph.nodes[node].basic_block.exit {
-                    BasicBlockExit::Jump(to) | BasicBlockExit::EndFinally(to) => {
-                        do_branch(graph, node, *to, context)
-                    }
-
-                    BasicBlockExit::Cond(e, t, f) => {
-                        let inner = context.pushed(ContainingSyntax::IfThenElse);
-                        StructuredFlow::Branch(
-                            *e,
-                            vec![do_branch(graph, node, *t, inner.clone())],
-                            vec![do_branch(graph, node, *f, inner.clone())],
-                        )
-                    }
-                    BasicBlockExit::ExitFn(exit, ret) => {
-                        StructuredFlow::Return(exit.clone(), Some(*ret))
-                    }
-                    BasicBlockExit::SetTryAndCatch(_, _, _, _)
-                    | BasicBlockExit::PopCatch(_, _)
-                    | BasicBlockExit::PopFinally(_, _) => {
-                        unreachable!("handled above")
-                    }
+            block_contents.push(match &graph.nodes[node].basic_block.exit {
+                BasicBlockExit::Jump(to) | BasicBlockExit::EndFinally(to) => {
+                    do_branch(graph, node, *to, context)
                 }
-                .into_flat_vec()
-                .into_iter(),
-            );
+
+                BasicBlockExit::Cond(e, t, f) => {
+                    let inner = context.pushed(ContainingSyntax::IfThenElse);
+                    StructuredFlow::Branch(
+                        *e,
+                        vec![do_branch(graph, node, *t, inner.clone())],
+                        vec![do_branch(graph, node, *f, inner.clone())],
+                    )
+                }
+                BasicBlockExit::ExitFn(exit, ret) => {
+                    StructuredFlow::Return(exit.clone(), Some(*ret))
+                }
+                BasicBlockExit::SetTryAndCatch(_, _, _, _)
+                | BasicBlockExit::PopCatch(_, _)
+                | BasicBlockExit::PopFinally(_, _) => {
+                    unreachable!("handled above")
+                }
+            });
             StructuredFlow::Block(block_contents)
         }
         Some((y, ys)) => {
@@ -951,38 +940,42 @@ impl StructuredFlow {
             StructuredFlow::TryCatch(_, _, _, _) => "TryCatch".to_string(),
         }
     }
-    fn into_flat_vec(self) -> Vec<StructuredFlow> {
-        let spread_out = |items: Vec<StructuredFlow>| {
+    fn flatten(self) -> StructuredFlow {
+        let map = fix_fn::fix_fn!(|spread_out,
+                                          items: Vec<StructuredFlow>|
+         -> Vec<StructuredFlow> {
             items
                 .into_iter()
-                .flat_map(StructuredFlow::into_flat_vec)
+                .flat_map(|item| match item {
+                    StructuredFlow::Block(items) => spread_out(items),
+                    _ => vec![item.flatten()],
+                })
                 .collect::<Vec<_>>()
-        };
+        });
 
         match self {
-            StructuredFlow::Block(items) => spread_out(items),
+            StructuredFlow::Block(items) => {
+                let items = map(items);
+                if items.len() == 1 {
+                    items.into_iter().next().unwrap()
+                } else {
+                    StructuredFlow::Block(items)
+                }
+            }
             StructuredFlow::Branch(cond, cons, alt) => {
-                vec![StructuredFlow::Branch(
-                    cond,
-                    spread_out(cons),
-                    spread_out(alt),
-                )]
+                StructuredFlow::Branch(cond, map(cons), map(alt))
             }
-            StructuredFlow::TryCatch(try_, catch, finally, after) => {
-                vec![StructuredFlow::TryCatch(
-                    spread_out(try_),
-                    spread_out(catch),
-                    spread_out(finally),
-                    spread_out(after),
-                )]
-            }
-            StructuredFlow::Loop(items) => vec![StructuredFlow::Loop(spread_out(items))],
-            StructuredFlow::Try(items) => vec![StructuredFlow::Try(spread_out(items))],
-            StructuredFlow::Catch(items) => vec![StructuredFlow::Catch(spread_out(items))],
-            StructuredFlow::Finally(items) => {
-                vec![StructuredFlow::Finally(spread_out(items))]
-            }
-            other => vec![other],
+            StructuredFlow::TryCatch(try_, catch, finally, after) => StructuredFlow::TryCatch(
+                map(try_),
+                map(catch),
+                map(finally),
+                map(after),
+            ),
+            StructuredFlow::Loop(items) => StructuredFlow::Loop(map(items)),
+            StructuredFlow::Try(items) => StructuredFlow::Try(map(items)),
+            StructuredFlow::Catch(items) => StructuredFlow::Catch(map(items)),
+            StructuredFlow::Finally(items) => StructuredFlow::Finally(map(items)),
+            no_children => no_children,
         }
     }
     fn children(&self) -> Vec<Vec<StructuredFlow>> {
