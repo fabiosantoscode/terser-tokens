@@ -1,141 +1,18 @@
-use fix_fn::fix_fn;
-use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
+use std::borrow::Borrow;
 
-use crate::basic_blocks::basic_block::{
-    ArrayElement, BasicBlockExit, BasicBlockInstruction, TempExitType,
-};
-use crate::scope::scope::Scope;
 use swc_ecma_ast::{
     AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Pat, PatOrExpr, Stmt,
     ThrowStmt, YieldExpr,
 };
 
-use super::super::basic_block::ExitType;
+use super::super::basic_block::{
+    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
+};
 use super::super::normalize::normalize_basic_blocks;
 use super::super::{basic_block::BasicBlock, basic_block_group::BasicBlockGroup};
+use super::convert_context::{ConvertContext, NestedIntoStatement};
 
-enum NestedIntoStatement {
-    Labelled(String),
-    Unlabelled,
-}
-
-struct ConvertContext {
-    pub basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
-    pub exits: Vec<Option<BasicBlockExit>>,
-    pub var_index: usize,
-    pub conditionals: Vec<HashMap<String, Vec<usize>>>,
-    pub scope: Scope,
-    pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
-}
-
-impl ConvertContext {
-    pub fn new() -> Self {
-        Self {
-            basic_blocks: vec![vec![]],
-            exits: vec![None],
-            var_index: 0,
-            conditionals: vec![],
-            scope: Scope::new(false),
-            label_tracking: vec![],
-        }
-    }
-
-    pub fn push_instruction(&mut self, node: BasicBlockInstruction) -> usize {
-        let id = self.var_index;
-        self.var_index += 1;
-        self.basic_blocks.last_mut().unwrap().push((id, node));
-        id
-    }
-
-    pub fn push_instruction_to_nth_block(
-        &mut self,
-        node: BasicBlockInstruction,
-        n: usize,
-    ) -> usize {
-        let id = self.var_index;
-        self.var_index += 1;
-        self.basic_blocks[n].push((id, node));
-        id
-    }
-
-    pub fn set_exit(&mut self, at: usize, new_exit: BasicBlockExit) {
-        self.exits[at] = Some(new_exit)
-    }
-
-    pub fn assign_maybe_conditionally(&mut self, name: &str, value: usize) {
-        let mut conditionals = self.conditionals.last_mut();
-        match conditionals {
-            Some(ref mut conditionals) => {
-                if let Some(conditional) = conditionals.get_mut(name) {
-                    conditional.push(value);
-                } else {
-                    conditionals.insert(name.to_string(), vec![value]);
-                }
-            }
-            None => {}
-        };
-
-        self.scope.insert(name.into(), value);
-    }
-
-    pub fn push_conditionals_context(&mut self) {
-        self.conditionals.push(HashMap::new())
-    }
-
-    pub fn pop_conditionals_context(&mut self) -> Option<HashMap<String, Vec<usize>>> {
-        self.conditionals.pop()
-    }
-
-    pub fn push_phi_assignments(
-        &mut self,
-        conditionally_assigned: Option<HashMap<String, Vec<usize>>>,
-    ) {
-        // phi nodes for conditionally assigned variables
-        let to_phi = conditionally_assigned.unwrap();
-        let mut to_phi = to_phi
-            .iter()
-            .filter(|(_name, phies)| phies.len() > 1)
-            .collect::<Vec<_>>();
-        if to_phi.len() > 0 {
-            to_phi.sort_by_key(|(name, _)| *name);
-            for (varname, phies) in to_phi {
-                let phi = BasicBlockInstruction::Phi(phies.clone());
-                let phi_idx = self.push_instruction(phi);
-                self.scope.insert(varname.clone(), phi_idx);
-            }
-        }
-    }
-
-    pub fn current_block_index(&self) -> usize {
-        self.basic_blocks.len() - 1
-    }
-
-    pub fn wrap_up_block(&mut self) -> usize {
-        self.basic_blocks.push(vec![]);
-        self.exits.push(None);
-        self.current_block_index()
-    }
-
-    pub fn create_gapped_block(&mut self, expr: &Expr) -> (usize, usize, usize) {
-        let block_idx = self.current_block_index();
-        let expr_idx = expr_to_basic_blocks(self, expr);
-        let next_block_idx = self.current_block_index();
-        self.wrap_up_block();
-
-        (block_idx, expr_idx, next_block_idx)
-    }
-
-    pub fn push_label(&mut self, label: NestedIntoStatement) {
-        self.label_tracking.push((label, vec![]));
-    }
-
-    pub fn pop_label(&mut self) -> Vec<usize> {
-        let (_, block_indices) = self.label_tracking.pop().unwrap();
-        block_indices
-    }
-}
-
-fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
+pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
     let node = match exp {
         Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
         Expr::Bin(bin) => {

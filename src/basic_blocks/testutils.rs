@@ -9,7 +9,7 @@ use super::{
         ArrayElement, BasicBlock, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
     },
     basic_block_group::BasicBlockGroup,
-    convert::convert::statements_to_basic_blocks,
+    convert::statements_to_basic_blocks,
 };
 use crate::parser::{parse_asyncgen, parse_expression};
 
