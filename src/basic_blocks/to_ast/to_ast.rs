@@ -93,7 +93,7 @@ fn to_stat_ast(
     };
 
     match node {
-        StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
+        StructuredFlow::Block(_, stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(block_idx) => {
             let stats = &block_group.blocks[*block_idx].instructions;
 
@@ -134,7 +134,7 @@ fn to_stat_ast(
 
             vec![throw_stmt]
         }
-        StructuredFlow::Branch(branch_expr, cons, alt) => {
+        StructuredFlow::Branch(_, branch_expr, cons, alt) => {
             let branch_expr = get_identifier(get_variable(*branch_expr));
             let cons = to_stat_vec(ctx, cons);
             let alt = to_stat_vec(ctx, alt);
@@ -148,7 +148,7 @@ fn to_stat_ast(
 
             vec![if_stmt]
         }
-        StructuredFlow::Break(nest_count) => {
+        StructuredFlow::Break(to_id) => {
             let break_stmt = Stmt::Break(swc_ecma_ast::BreakStmt {
                 span: Default::default(),
                 label: None, /* TODO */
@@ -156,7 +156,7 @@ fn to_stat_ast(
 
             vec![break_stmt]
         }
-        StructuredFlow::Continue(nest_count) => {
+        StructuredFlow::Continue(to_id) => {
             let break_stmt = Stmt::Continue(swc_ecma_ast::ContinueStmt {
                 span: Default::default(),
                 label: None, /* TODO */
@@ -164,7 +164,7 @@ fn to_stat_ast(
 
             vec![break_stmt]
         }
-        StructuredFlow::Loop(body) => {
+        StructuredFlow::Loop(id, body) => {
             let body = to_stat_vec(ctx, body);
 
             let while_stmt = Stmt::While(swc_ecma_ast::WhileStmt {
