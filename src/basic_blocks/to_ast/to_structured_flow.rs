@@ -88,50 +88,58 @@ enum ContainingSyntax {
     BlockFollowedBy(usize),
 }
 
+contextual!(Context(CONTEXT): Option<Rc<Ctx>> = None);
+
+fn context() -> Rc<Ctx> {
+    Context::clone().unwrap()
+}
+
 pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
     let dom = func.get_dom_graph();
 
-    let tree = do_tree_inner(&Ctx::from_graph(dom), 0);
+    Context::replace_within(Some(Rc::new(Ctx::from_graph(dom))), || {
+        let tree = do_tree_inner(0);
 
-    tree.flatten()
+        tree.flatten()
+    })
 }
 
-fn do_tree_inner(context: &Ctx, node: usize) -> StructuredFlow {
-    let code_for_node = |context: &Ctx| {
-        let ys = context
+fn do_tree_inner(node: usize) -> StructuredFlow {
+    let code_for_node = || {
+        let ys = context()
             .graph
             .direct_subs(node)
             .into_iter()
-            .filter(|child| is_merge_node(context, *child))
+            .filter(|child| is_merge_node(*child))
             .collect::<Vec<_>>();
-        node_within(context, node, &ys)
+        node_within(node, &ys)
     };
 
-    if is_loop_header(context, node) {
-        context.push_within(ContainingSyntax::LoopHeadedBy(node), || {
-            StructuredFlow::Loop(vec![code_for_node(&context)])
+    if is_loop_header(node) {
+        context().push_within(ContainingSyntax::LoopHeadedBy(node), || {
+            StructuredFlow::Loop(vec![code_for_node()])
         })
     } else {
-        code_for_node(context)
+        code_for_node()
     }
 }
 
-fn node_within(context: &Ctx, node: usize, ys: &[usize]) -> StructuredFlow {
+fn node_within(node: usize, ys: &[usize]) -> StructuredFlow {
     match ys.split_first() {
         None => {
-            match &context.graph.nodes[node].basic_block.exit {
+            match &context().graph.nodes[node].basic_block.exit {
                 BasicBlockExit::SetTryAndCatch(
                     try_block,
                     catch_block,
                     finally_block,
                     after_block,
                 ) => {
-                    return context.push_within(ContainingSyntax::TryCatch, || {
+                    return context().push_within(ContainingSyntax::TryCatch, || {
                         StructuredFlow::TryCatch(
-                            vec![do_branch(&context, node, *try_block)],
-                            vec![do_branch(&context, node, *catch_block)],
-                            vec![do_branch(&context, node, *finally_block)],
-                            vec![do_branch(&context, node, *after_block)],
+                            vec![do_branch(node, *try_block)],
+                            vec![do_branch(node, *catch_block)],
+                            vec![do_branch(node, *finally_block)],
+                            vec![do_branch(node, *after_block)],
                         )
                     });
                 }
@@ -149,17 +157,15 @@ fn node_within(context: &Ctx, node: usize, ys: &[usize]) -> StructuredFlow {
 
             let mut block_contents: Vec<StructuredFlow> = vec![StructuredFlow::BasicBlock(node)];
 
-            block_contents.push(match &context.graph.nodes[node].basic_block.exit {
-                BasicBlockExit::Jump(to) | BasicBlockExit::EndFinally(to) => {
-                    do_branch(&context, node, *to)
-                }
+            block_contents.push(match &context().graph.nodes[node].basic_block.exit {
+                BasicBlockExit::Jump(to) | BasicBlockExit::EndFinally(to) => do_branch(node, *to),
 
                 BasicBlockExit::Cond(e, t, f) => {
-                    context.push_within(ContainingSyntax::IfThenElse, || {
+                    context().push_within(ContainingSyntax::IfThenElse, || {
                         StructuredFlow::Branch(
                             *e,
-                            vec![do_branch(&context, node, *t)],
-                            vec![do_branch(&context, node, *f)],
+                            vec![do_branch(node, *t)],
+                            vec![do_branch(node, *f)],
                         )
                     })
                 }
@@ -176,19 +182,19 @@ fn node_within(context: &Ctx, node: usize, ys: &[usize]) -> StructuredFlow {
         }
         Some((y, ys)) => {
             let inner = vec![
-                context.push_within(ContainingSyntax::BlockFollowedBy(*y), || {
-                    node_within(&context, node, ys)
+                context().push_within(ContainingSyntax::BlockFollowedBy(*y), || {
+                    node_within(node, ys)
                 }),
-                do_tree_inner(context, *y),
+                do_tree_inner(*y),
             ];
             StructuredFlow::Block(inner)
         }
     }
 }
 
-fn do_branch(context: &Ctx, source: usize, target: usize) -> StructuredFlow {
-    let index_source = context.node_index_in_reverse_postorder(source);
-    let index_target = context.node_index_in_reverse_postorder(target);
+fn do_branch(source: usize, target: usize) -> StructuredFlow {
+    let index_source = context().node_index_in_reverse_postorder(source);
+    let index_target = context().node_index_in_reverse_postorder(target);
 
     if
     /* is backwards, so this must be a continuation of an enclosing loop */
@@ -196,24 +202,24 @@ fn do_branch(context: &Ctx, source: usize, target: usize) -> StructuredFlow {
         StructuredFlow::Continue(index_target) // continue the loop
     } else if
     /* a forward branch to a merge node exits a block */
-    is_merge_node(context, target) {
+    is_merge_node(target) {
         StructuredFlow::Break(index_target) // break the loop
     } else {
         /* plain goto next */
-        do_tree_inner(context, target)
+        do_tree_inner(target)
     }
 }
 
 // A node 𝑋 that has two or more forward inedges is a merge node. Being a merge node doesn’t
 // affect how 𝑋 is translated, but it does affect the placement of 𝑋 ’s translation: the translation
 // will follow a block form.
-fn is_merge_node(context: &Ctx, child: usize) -> bool {
-    let forward_inedges = context.graph.nodes[child]
+fn is_merge_node(child: usize) -> bool {
+    let forward_inedges = context().graph.nodes[child]
         .incoming_edges
         .iter()
         .filter(|&&edge| {
-            context.node_index_in_reverse_postorder(edge)
-                > context.node_index_in_reverse_postorder(child)
+            context().node_index_in_reverse_postorder(edge)
+                > context().node_index_in_reverse_postorder(child)
         })
         .count();
 
@@ -222,14 +228,14 @@ fn is_merge_node(context: &Ctx, child: usize) -> bool {
 
 // A node 𝑋 that has a back inedge is a loop header, and its translation is wrapped in a loop
 // form. The translation of the subtree rooted at 𝑋 is placed into the body of the loop.
-fn is_loop_header(context: &Ctx, node: usize) -> bool {
-    let node_index = context.node_index_in_reverse_postorder(node);
-    let g_node = &context.graph.nodes[node];
+fn is_loop_header(node: usize) -> bool {
+    let node_index = context().node_index_in_reverse_postorder(node);
+    let g_node = &context().graph.nodes[node];
 
     g_node
         .incoming_edges
         .iter()
-        .any(|&edge| context.node_index_in_reverse_postorder(edge) < node_index)
+        .any(|&edge| context().node_index_in_reverse_postorder(edge) < node_index)
 }
 
 #[cfg(test)]
