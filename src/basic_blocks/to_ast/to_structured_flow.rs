@@ -671,29 +671,32 @@ mod tests {
         );
         insta::assert_debug_snapshot!(func, @r###"
         @0: {
-            $0 = 777
             exit = jump @1
         }
         @1: {
-            exit = cond $0 ? jump @2 : jump @7
+            $0 = 777
+            exit = jump @2
         }
         @2: {
-            $1 = 888
-            exit = jump @3
+            exit = cond $0 ? jump @3 : jump @8
         }
         @3: {
-            exit = cond $1 ? jump @4 : jump @5
+            $1 = 888
+            exit = jump @4
         }
         @4: {
-            exit = jump @7
+            exit = cond $1 ? jump @5 : jump @6
         }
         @5: {
-            exit = jump @6
+            exit = jump @8
         }
         @6: {
-            exit = jump @0
+            exit = jump @7
         }
         @7: {
+            exit = jump @1
+        }
+        @8: {
             $2 = 999
             $3 = undefined
             exit = return $3
@@ -706,14 +709,16 @@ mod tests {
 
         let stats = do_tree(&func);
         insta::assert_debug_snapshot!(stats, @r###"
-        Loop(
-            [BasicBlockRef(0), BasicBlockRef(1), Branch 0 {
-                [BasicBlockRef(2), BasicBlockRef(3), Branch 1 {
-                    [BasicBlockRef(4), Break(0)]
-                    [BasicBlockRef(5), BasicBlockRef(6), Continue(7)]
-                }]
-                [Break(0)]
-            }, BasicBlockRef(7), Return]
+        Block(
+            [BasicBlockRef(0), Loop(
+                [BasicBlockRef(1), BasicBlockRef(2), Branch 0 {
+                    [BasicBlockRef(3), BasicBlockRef(4), Branch 1 {
+                        [BasicBlockRef(5), Break(0)]
+                        [BasicBlockRef(6), BasicBlockRef(7), Continue(7)]
+                    }]
+                    [Break(0)]
+                }, BasicBlockRef(8), Return]
+            )]
         )
         "###);
     }

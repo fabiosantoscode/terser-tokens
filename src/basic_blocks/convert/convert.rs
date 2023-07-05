@@ -299,7 +299,7 @@ fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
         Stmt::ForIn(_) => todo!(),
         Stmt::ForOf(_) => todo!(),
         Stmt::While(whil) => {
-            let blockidx_start = ctx.current_block_index();
+            let blockidx_start = ctx.wrap_up_block();
             ctx.push_label(NestedIntoStatement::Unlabelled);
 
             let test = expr_to_basic_blocks(ctx, &whil.test);
@@ -770,20 +770,23 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            $1 = 123
             exit = jump @2
         }
         @2: {
-            exit = cond $1 ? jump @3 : jump @5
+            $1 = 123
+            exit = jump @3
         }
         @3: {
-            $2 = 456
-            exit = jump @4
+            exit = cond $1 ? jump @4 : jump @6
         }
         @4: {
-            exit = jump @1
+            $2 = 456
+            exit = jump @5
         }
         @5: {
+            exit = jump @2
+        }
+        @6: {
             $3 = undefined
             exit = return $3
         }
@@ -795,16 +798,19 @@ mod tests {
         let s = test_basic_blocks("while (123) { break }");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            $0 = 123
             exit = jump @1
         }
         @1: {
-            exit = cond $0 ? jump @2 : jump @3
+            $0 = 123
+            exit = jump @2
         }
         @2: {
-            exit = jump @3
+            exit = cond $0 ? jump @3 : jump @4
         }
         @3: {
+            exit = jump @4
+        }
+        @4: {
             $1 = undefined
             exit = return $1
         }
