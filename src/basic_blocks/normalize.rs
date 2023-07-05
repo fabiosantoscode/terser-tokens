@@ -75,15 +75,22 @@ fn get_blocks_jumped_to(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
         .enumerate()
         .flat_map(|(i, e)| match e {
             BasicBlockExit::Jump(j) => {
-                if  *j != i + 1 {vec![*j]} else {vec![]}
-            },
+                if *j != i + 1 {
+                    vec![*j]
+                } else {
+                    vec![]
+                }
+            }
             BasicBlockExit::Cond(_, cons, alt) => vec![*cons, *alt],
-            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after) => vec![*try_block, *catch_block, *finally_block, *after],
-            BasicBlockExit::PopCatch(catch_block, finally_or_after) => vec![*catch_block, *finally_or_after],
+            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after) => {
+                vec![*try_block, *catch_block, *finally_block, *after]
+            }
+            BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
+                vec![*catch_block, *finally_or_after]
+            }
             BasicBlockExit::PopFinally(finally_block, _after_finally) => vec![*finally_block],
             BasicBlockExit::EndFinally(after) => vec![*after],
             BasicBlockExit::ExitFn(_, _) => vec![],
-            
         })
         .collect::<HashSet<_>>()
 }

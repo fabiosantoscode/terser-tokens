@@ -947,7 +947,7 @@ impl StructuredFlow {
     }
     fn flatten(self) -> StructuredFlow {
         let map = fix_fn::fix_fn!(|spread_out,
-                                          items: Vec<StructuredFlow>|
+                                   items: Vec<StructuredFlow>|
          -> Vec<StructuredFlow> {
             items
                 .into_iter()
@@ -970,12 +970,9 @@ impl StructuredFlow {
             StructuredFlow::Branch(cond, cons, alt) => {
                 StructuredFlow::Branch(cond, map(cons), map(alt))
             }
-            StructuredFlow::TryCatch(try_, catch, finally, after) => StructuredFlow::TryCatch(
-                map(try_),
-                map(catch),
-                map(finally),
-                map(after),
-            ),
+            StructuredFlow::TryCatch(try_, catch, finally, after) => {
+                StructuredFlow::TryCatch(map(try_), map(catch), map(finally), map(after))
+            }
             StructuredFlow::Loop(items) => StructuredFlow::Loop(map(items)),
             StructuredFlow::Try(items) => StructuredFlow::Try(map(items)),
             StructuredFlow::Catch(items) => StructuredFlow::Catch(map(items)),
