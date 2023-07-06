@@ -26,6 +26,7 @@ impl std::fmt::Display for BreakableId {
 
 #[derive(Clone)]
 pub enum StructuredFlow {
+    Noop,
     Block(BreakableId, Vec<StructuredFlow>),
     Loop(BreakableId, Vec<StructuredFlow>),
     Branch(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
@@ -114,6 +115,22 @@ impl Ctx {
         let index = if is_brk { index + 1 } else { index };
 
         containing_syntax[index].0.clone()
+    }
+
+    /// According to our current context, where will we fall through to?
+    /// do_branch calls this so it can omit spurious break/continue
+    pub fn get_fall_through_target(&self) -> Option<usize> {
+        let containing_syntax = self.containing_syntax.borrow();
+
+        containing_syntax
+            .iter()
+            .rev()
+            .find_map(|(_, item)| match item {
+                ContainingSyntax::LoopHeadedBy(x) | ContainingSyntax::BlockFollowedBy(x) => {
+                    Some(x.clone())
+                }
+                _ => None,
+            })
     }
 }
 
@@ -250,13 +267,27 @@ fn do_branch(source: usize, target: usize) -> StructuredFlow {
     let index_source = context().node_index_in_reverse_postorder(source);
     let index_target = context().node_index_in_reverse_postorder(target);
 
+    let emit_jump_if_needed = |jump: StructuredFlow| {
+        // when doBranch is given a target label that immediately follows the
+        // hole in its context, it omits the br instruction.
+        if context().get_fall_through_target() == Some(target) {
+            StructuredFlow::Noop
+        } else {
+            jump
+        }
+    };
+
     if index_target > index_source {
         /* is backwards, so this must be a continuation of an enclosing loop */
-        StructuredFlow::Continue(context().containing_syntax_index(target, false))
+        emit_jump_if_needed(StructuredFlow::Continue(
+            context().containing_syntax_index(target, false),
+        ))
     // continue the loop
     } else if is_merge_node(target) {
         /* a forward branch to a merge node exits a block */
-        StructuredFlow::Break(context().containing_syntax_index(target, true)) // break the loop
+        emit_jump_if_needed(StructuredFlow::Break(
+            context().containing_syntax_index(target, true),
+        ))
     } else {
         /* plain goto next */
         do_tree_inner(target)
@@ -346,10 +377,10 @@ mod tests {
         Block #2(
             [BasicBlockRef(0), Branch #3 ($0) {
                 [Block #4(
-                    [BasicBlockRef(1), Break #3]
+                    [BasicBlockRef(1), Noop]
                 )]
                 [Block #5(
-                    [BasicBlockRef(2), Break #3]
+                    [BasicBlockRef(2), Noop]
                 )]
             }, BasicBlockRef(3), Return]
         )
@@ -388,10 +419,10 @@ mod tests {
             [BasicBlockRef(0), Block #6(
                 [BasicBlockRef(1), Branch #3 ($0) {
                     [Block #4(
-                        [BasicBlockRef(2), Break #3]
+                        [BasicBlockRef(2), Noop]
                     )]
                     [Block #5(
-                        [BasicBlockRef(3), Break #3]
+                        [BasicBlockRef(3), Noop]
                     )]
                 }]
             ), Block #7(
@@ -424,7 +455,7 @@ mod tests {
         Loop #2(
             [BasicBlockRef(0), Branch #3 ($0) {
                 [Block #4(
-                    [BasicBlockRef(1), Continue #2]
+                    [BasicBlockRef(1), Noop]
                 )]
                 [Block #5(
                     [BasicBlockRef(2), Return]
@@ -463,13 +494,13 @@ mod tests {
                 [BasicBlockRef(0), Branch #4 ($0) {
                     [Block #7(
                         [BasicBlockRef(1), Branch #5 ($1) {
-                            [Break #4]
+                            [Noop]
                             [Block #6(
                                 [BasicBlockRef(2), Continue #2]
                             )]
                         }]
                     )]
-                    [Break #4]
+                    [Noop]
                 }]
             ), Block #9(
                 [BasicBlockRef(3), Return]
@@ -522,7 +553,7 @@ mod tests {
                             [BasicBlockRef(2), Block #9(
                                 [BasicBlockRef(3), Branch #5 ($1) {
                                     [Block #6(
-                                        [BasicBlockRef(4), Break #4]
+                                        [BasicBlockRef(4), Noop]
                                     )]
                                     [Block #8(
                                         [BasicBlockRef(5), Block #7(
@@ -532,7 +563,7 @@ mod tests {
                                 }]
                             )]
                         )]
-                        [Break #4]
+                        [Noop]
                     }]
                 ), Block #12(
                     [BasicBlockRef(7), Return]
@@ -591,7 +622,7 @@ mod tests {
                                 [BasicBlockRef(3), Block #9(
                                     [BasicBlockRef(4), Branch #5 ($1) {
                                         [Block #6(
-                                            [BasicBlockRef(5), Break #4]
+                                            [BasicBlockRef(5), Noop]
                                         )]
                                         [Block #8(
                                             [BasicBlockRef(6), Block #7(
@@ -601,7 +632,7 @@ mod tests {
                                     }]
                                 )]
                             )]
-                            [Break #4]
+                            [Noop]
                         }]
                     ), Block #12(
                         [BasicBlockRef(8), Return]
@@ -652,10 +683,10 @@ mod tests {
             [BasicBlockRef(0), Block #6(
                 [BasicBlockRef(1), Branch #3 ($4) {
                     [Block #4(
-                        [BasicBlockRef(2), Break #3]
+                        [BasicBlockRef(2), Noop]
                     )]
                     [Block #5(
-                        [BasicBlockRef(3), Break #3]
+                        [BasicBlockRef(3), Noop]
                     )]
                 }]
             ), Block #7(
@@ -700,10 +731,10 @@ mod tests {
         Block #2(
             [BasicBlockRef(0), Branch #3 ($1) {
                 [Block #4(
-                    [BasicBlockRef(1), Break #3]
+                    [BasicBlockRef(1), Noop]
                 )]
                 [Block #5(
-                    [BasicBlockRef(2), Break #3]
+                    [BasicBlockRef(2), Noop]
                 )]
             }, BasicBlockRef(3), Return]
         )
@@ -760,20 +791,20 @@ mod tests {
                     [Block #8(
                         [BasicBlockRef(1), Branch #5 ($1) {
                             [Block #6(
-                                [BasicBlockRef(2), Break #5]
+                                [BasicBlockRef(2), Noop]
                             )]
                             [Block #7(
-                                [BasicBlockRef(3), Break #5]
+                                [BasicBlockRef(3), Noop]
                             )]
                         }]
                     ), Block #10(
                         [BasicBlockRef(4), Block #9(
-                            [BasicBlockRef(5), Break #3]
+                            [BasicBlockRef(5), Noop]
                         )]
                     )]
                 )]
                 [Block #11(
-                    [BasicBlockRef(6), Break #3]
+                    [BasicBlockRef(6), Noop]
                 )]
             }, BasicBlockRef(7), Return]
         )
@@ -828,19 +859,19 @@ mod tests {
                 [BasicBlockRef(1), Branch #3 ($0) {
                     [Block #5(
                         [BasicBlockRef(2), Block #4(
-                            [BasicBlockRef(3), Break #3]
+                            [BasicBlockRef(3), Noop]
                         )]
                     )]
-                    [Break #3]
+                    [Noop]
                 }]
             ), Block #12(
                 [BasicBlockRef(4), Block #7(
                     [Block #10(
                         [BasicBlockRef(5), Branch #8 ($3) {
                             [Block #9(
-                                [BasicBlockRef(6), Break #8]
+                                [BasicBlockRef(6), Noop]
                             )]
-                            [Break #8]
+                            [Noop]
                         }]
                     ), Block #11(
                         [BasicBlockRef(7), Return]
@@ -912,7 +943,7 @@ mod tests {
                                 [BasicBlockRef(3), Block #9(
                                     [BasicBlockRef(4), Branch #5 ($1) {
                                         [Block #6(
-                                            [BasicBlockRef(5), Break #4]
+                                            [BasicBlockRef(5), Noop]
                                         )]
                                         [Block #8(
                                             [BasicBlockRef(6), Block #7(
@@ -922,7 +953,7 @@ mod tests {
                                     }]
                                 )]
                             )]
-                            [Break #4]
+                            [Noop]
                         }]
                     ), Block #12(
                         [BasicBlockRef(8), Return]
@@ -1128,10 +1159,10 @@ mod tests {
                         [BasicBlockRef(3), Branch #4 ($0) {
                             [Block #6(
                                 [BasicBlockRef(4), Block #5(
-                                    [BasicBlockRef(5), Break #4]
+                                    [BasicBlockRef(5), Noop]
                                 )]
                             )]
-                            [Break #4]
+                            [Noop]
                         }]
                     ), Block #8(
                         [BasicBlockRef(6), BasicBlockRef(7)]
@@ -1151,6 +1182,7 @@ mod tests {
 impl StructuredFlow {
     fn str_head(&self) -> String {
         match self {
+            StructuredFlow::Noop => "Noop".to_string(),
             StructuredFlow::Branch(_, _, _, _) => "Branch".to_string(),
             StructuredFlow::Break(_) => "Break".to_string(),
             StructuredFlow::Continue(_) => "Continue".to_string(),
@@ -1208,6 +1240,7 @@ impl StructuredFlow {
     }
     fn children(&self) -> Vec<Vec<StructuredFlow>> {
         match self {
+            StructuredFlow::Noop => vec![],
             StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y.clone(), z.clone()],
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
@@ -1270,6 +1303,7 @@ impl StructuredFlow {
     }
     fn index_for_formatting(&self) -> Option<usize> {
         match self {
+            StructuredFlow::Noop => None,
             StructuredFlow::Branch(_, _, _, _) => None,
             StructuredFlow::Break(x) => Some(x.0),
             StructuredFlow::Continue(x) => Some(x.0),

@@ -93,6 +93,7 @@ fn to_stat_ast(
     };
 
     match node {
+        StructuredFlow::Noop => vec![],
         StructuredFlow::Block(_, stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(block_idx) => {
             let stats = &block_group.blocks[*block_idx].instructions;
@@ -322,10 +323,8 @@ mod tests {
         var $0 = 1;
         if ($0) {
             var $3 = 2;
-            break;
         } else {
             var $3 = 3;
-            break;
         }
         var $4 = undefined;
         return $4;
@@ -342,14 +341,10 @@ mod tests {
             var $0 = 123;
             if ($0) {
                 var $1 = 456;
-                if ($1) {
-                    break;
-                } else {
+                if ($1) {} else {
                     continue;
                 }
-            } else {
-                break;
-            }
+            } else {}
             var $2 = undefined;
             return $2;
         }
@@ -370,10 +365,8 @@ mod tests {
         var $1 = 123;
         if ($1) {
             var $4 = 456;
-            break;
         } else {
             var $4 = 789;
-            break;
         }
         var $5 = $4;
         var $6 = 1;
