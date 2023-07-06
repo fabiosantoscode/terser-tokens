@@ -93,7 +93,6 @@ fn to_stat_ast(
     };
 
     match node {
-        StructuredFlow::Noop => vec![],
         StructuredFlow::Block(_, stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(block_idx) => {
             let stats = &block_group.blocks[*block_idx].instructions;
@@ -176,7 +175,7 @@ fn to_stat_ast(
 
             vec![while_stmt]
         }
-        StructuredFlow::TryCatch(try_block, catch_block, finally_block, after_block) => {
+        StructuredFlow::TryCatch(_id, try_block, catch_block, finally_block, after_block) => {
             let try_block = to_stat_vec(ctx, try_block);
 
             let catch_handler = ctx.set_caught_error();
