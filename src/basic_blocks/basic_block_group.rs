@@ -1,10 +1,10 @@
-use std::{fmt::Debug, iter::Enumerate};
+use std::fmt::Debug;
 
-use super::basic_block::{self, BasicBlock};
+use super::basic_block::BasicBlock;
 
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
-    pub blocks: Vec<BasicBlock>,
+    pub blocks: Vec<(usize, BasicBlock)>,
 }
 
 impl BasicBlockGroup {
@@ -15,11 +15,17 @@ impl BasicBlockGroup {
     }
 
     pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {
-        Self { blocks }
+        Self {
+            blocks: blocks
+                .into_iter()
+                .enumerate()
+                .map(|(i, block)| (i, block))
+                .collect::<Vec<_>>(),
+        }
     }
 
-    pub fn iter<'a>(&'a self) -> Enumerate<std::slice::Iter<'_, basic_block::BasicBlock>> {
-        self.blocks.iter().enumerate()
+    pub fn iter<'a>(&'a self) -> core::slice::Iter<'_, (usize, BasicBlock)> {
+        self.blocks.iter()
     }
 }
 

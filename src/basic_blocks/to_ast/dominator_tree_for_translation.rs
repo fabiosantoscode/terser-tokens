@@ -181,7 +181,7 @@ impl BasicBlockGroup {
                 all_incoming
                     .entry(target)
                     .or_insert_with(Vec::new)
-                    .push(tag);
+                    .push(*tag);
             }
         }
 
@@ -189,7 +189,7 @@ impl BasicBlockGroup {
             nodes: self
                 .iter()
                 .map(|(tag, node)| Node {
-                    tag: tag,
+                    tag: *tag,
                     dom: None,
                     frontiers: UnsafeCell::new(HashMemberSet(std::collections::HashSet::new())),
                     incoming_edges: all_incoming.get(&tag).cloned().unwrap_or_default(),
@@ -222,7 +222,7 @@ fn test_dominance() {
     println!("{:#?}", block);
 
     for (id, _node) in block.iter() {
-        for dom in g.dom_iter(id) {
+        for dom in g.dom_iter(*id) {
             println!("{} doms {:?}", id, dom);
         }
     }

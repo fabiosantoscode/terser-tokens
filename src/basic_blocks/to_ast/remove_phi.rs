@@ -12,7 +12,7 @@ use crate::basic_blocks::{
 pub fn remove_phi(group: &mut BasicBlockGroup) {
     let mut phies_to_final_name: HashMap<usize, usize> = collect_phi(group);
 
-    for block in group.blocks.iter_mut() {
+    for (_, block) in group.blocks.iter_mut() {
         remove_phi_inner(block, &mut phies_to_final_name);
     }
 }
@@ -21,7 +21,7 @@ fn collect_phi(group: &BasicBlockGroup) -> HashMap<usize, usize> {
     let mut phies_to_final_name: HashMap<usize, usize> = Default::default();
 
     for block in group.blocks.iter() {
-        for (varname, ins) in block.instructions.iter() {
+        for (varname, ins) in block.1.instructions.iter() {
             if let BasicBlockInstruction::Phi(phies) = ins {
                 for phi in phies {
                     phies_to_final_name.insert(*phi, *varname);

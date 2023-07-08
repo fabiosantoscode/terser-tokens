@@ -341,7 +341,7 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
 
     assert_eq!(input, "");
 
-    Ok((input, BasicBlockGroup { blocks }))
+    Ok((input, BasicBlockGroup::from_asts(blocks)))
 }
 
 #[test]

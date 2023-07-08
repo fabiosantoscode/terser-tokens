@@ -95,7 +95,7 @@ fn to_stat_ast(
     match node {
         StructuredFlow::Block(_, stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(block_idx) => {
-            let stats = &block_group.blocks[*block_idx].instructions;
+            let stats = &block_group.blocks[*block_idx].1.instructions;
 
             stats
                 .iter()
