@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
 use crate::scope::scope::Scope;
-use swc_ecma_ast::Expr;
+use swc_ecma_ast::{Expr, Ident};
 
 use super::convert::expr_to_basic_blocks;
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum NestedIntoStatement {
     Labelled(String),
     Unlabelled,
@@ -122,7 +123,31 @@ impl ConvertContext {
     }
 
     pub fn pop_label(&mut self) -> Vec<usize> {
-        let (_, block_indices) = self.label_tracking.pop().unwrap();
-        block_indices
+        self.label_tracking.pop().unwrap().1
+    }
+
+    pub fn register_break(&mut self, label: &Option<Ident>) {
+        let jump_from = self.wrap_up_block();
+
+        match label {
+            Some(l) => {
+                let needle = NestedIntoStatement::Labelled(l.sym.to_string());
+                let position = self
+                    .label_tracking
+                    .iter_mut()
+                    .rev()
+                    .find(|(target, _)| target == &needle)
+                    .expect("parse step does not allow `break` to jump to a non-existent label");
+
+                (*position).1.push(jump_from);
+            }
+            None => {
+                self.label_tracking
+                    .last_mut()
+                    .expect("parse step does not allow `break` when there's nothing to break from")
+                    .1
+                    .push(jump_from);
+            }
+        }
     }
 }

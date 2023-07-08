@@ -766,13 +766,16 @@ mod tests {
             exit = jump @5
         }
         @5: {
-            exit = cond $3 ? jump @6 : jump @7
+            exit = cond $3 ? jump @6 : jump @8
         }
         @6: {
             $4 = 2
             exit = jump @7
         }
         @7: {
+            exit = jump @8
+        }
+        @8: {
             $5 = undefined
             exit = return $5
         }
@@ -789,9 +792,9 @@ mod tests {
                 [BasicBlockRef(2), BasicBlockRef(3)]
                 []
             }, BasicBlockRef(4), BasicBlockRef(5), Branch  ($3) {
-                [BasicBlockRef(6)]
+                [BasicBlockRef(6), BasicBlockRef(7)]
                 []
-            }, BasicBlockRef(7), Return]
+            }, BasicBlockRef(8), Return]
         )
         "###);
     }
@@ -827,7 +830,7 @@ mod tests {
             exit = cond $1 ? jump @5 : jump @6
         }
         @5: {
-            exit = jump @8
+            exit = jump @10
         }
         @6: {
             exit = jump @7
@@ -836,6 +839,12 @@ mod tests {
             exit = jump @1
         }
         @8: {
+            exit = jump @9
+        }
+        @9: {
+            exit = jump @10
+        }
+        @10: {
             $2 = 999
             $3 = undefined
             exit = return $3
@@ -855,8 +864,8 @@ mod tests {
                         [BasicBlockRef(5)]
                         [BasicBlockRef(6), BasicBlockRef(7), Continue #3]
                     }]
-                    []
-                }, BasicBlockRef(8), Return]
+                    [BasicBlockRef(8), BasicBlockRef(9)]
+                }, BasicBlockRef(10), Return]
             )]
         )
         "###);
@@ -910,7 +919,7 @@ mod tests {
             exit = cond $3 ? jump @9 : jump @10
         }
         @9: {
-            exit = jump @12
+            exit = jump @14
         }
         @10: {
             exit = jump @11
@@ -919,6 +928,12 @@ mod tests {
             exit = jump @1
         }
         @12: {
+            exit = jump @13
+        }
+        @13: {
+            exit = jump @14
+        }
+        @14: {
             $4 = 999
             $5 = undefined
             exit = return $5
@@ -941,8 +956,8 @@ mod tests {
                         [BasicBlockRef(9)]
                         [BasicBlockRef(10), BasicBlockRef(11), Continue #3]
                     }]
-                    []
-                }, BasicBlockRef(12), Return]
+                    [BasicBlockRef(12), BasicBlockRef(13)]
+                }, BasicBlockRef(14), Return]
             )]
         )
         "###);

@@ -1,8 +1,9 @@
 use std::borrow::Borrow;
 
+use deep_bind::contextual;
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Pat, PatOrExpr, Stmt,
-    ThrowStmt, YieldExpr,
+    AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat,
+    PatOrExpr, Stmt, ThrowStmt, YieldExpr,
 };
 
 use super::super::basic_block::{
@@ -159,7 +160,40 @@ pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
     ctx.push_instruction(node)
 }
 
+/// Turn a statement into basic blocks.
+/// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
 fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
+    let might_break = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
+        if is_loop(body) {
+            ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
+            stat_to_basic_blocks_inner(ctx, body);
+            true
+        } else {
+            todo!()
+        }
+    } else if is_loop(stat) {
+        ctx.push_label(NestedIntoStatement::Unlabelled);
+        stat_to_basic_blocks_inner(ctx, stat);
+        true
+    } else {
+        stat_to_basic_blocks_inner(ctx, stat);
+        false
+    };
+
+    ctx.wrap_up_block();
+
+    if might_break {
+        let jumpers_towards_me = ctx.pop_label();
+        if jumpers_towards_me.len() > 0 {
+            for jumper in jumpers_towards_me {
+                ctx.set_exit(jumper, BasicBlockExit::Jump(ctx.current_block_index()))
+            }
+        }
+    }
+}
+
+/// Turn a statement into basic blocks. Wrapped by `stat_to_basic_blocks` to handle labels.
+fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
     match stat {
         Stmt::Expr(expr) => {
             let _exprid = expr_to_basic_blocks(ctx, &expr.expr);
@@ -177,7 +211,6 @@ fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
         Stmt::ForOf(_) => todo!(),
         Stmt::While(whil) => {
             let blockidx_start = ctx.wrap_up_block();
-            ctx.push_label(NestedIntoStatement::Unlabelled);
 
             let test = expr_to_basic_blocks(ctx, &whil.test);
 
@@ -198,13 +231,6 @@ fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
                 test_after_idx,
                 BasicBlockExit::Cond(test, blockidx_before_body, blockidx_after_body),
             );
-
-            let jumpers_towards_me = ctx.pop_label();
-            if jumpers_towards_me.len() > 0 {
-                for jumper in jumpers_towards_me {
-                    ctx.set_exit(jumper, BasicBlockExit::Jump(ctx.current_block_index()))
-                }
-            }
 
             ctx.wrap_up_block();
         }
@@ -269,22 +295,11 @@ fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
                 ctx.wrap_up_block();
             }
         }
-        Stmt::Break(br) => match br.label {
-            Some(_) => {
-                todo!("statements_to_ssa: stat_to_ssa: break with label not implemented")
-            }
-            None => {
-                assert!(!ctx.label_tracking.is_empty());
-
-                let this_block = ctx.wrap_up_block();
-                let (_, last) = ctx.label_tracking.last_mut().unwrap();
-                last.push(this_block);
-            }
-        },
+        Stmt::Break(br) => ctx.register_break(&br.label),
+        Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
+        Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
         Stmt::Debugger(_) => todo!(),
         Stmt::With(_) => todo!(),
-        Stmt::Labeled(_) => todo!(),
-        Stmt::Continue(_) => todo!(),
         Stmt::Switch(_) => todo!(),
         Stmt::Throw(ThrowStmt { arg, .. }) => {
             ctx.wrap_up_block();
@@ -402,6 +417,13 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
         .collect::<Vec<_>>();
 
     BasicBlockGroup::from_asts(asts)
+}
+
+fn is_loop(stat: &Stmt) -> bool {
+    match stat {
+        Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::ForIn(_) | Stmt::ForOf(_) => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -685,11 +707,63 @@ mod tests {
             exit = cond $0 ? jump @3 : jump @4
         }
         @3: {
+            exit = jump @6
+        }
+        @4: {
+            exit = jump @5
+        }
+        @5: {
+            exit = jump @6
+        }
+        @6: {
+            $1 = undefined
+            exit = return $1
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_labelled_break() {
+        let s = test_basic_blocks("outer: while (123) { while (456) { break outer } }");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            exit = jump @1
+        }
+        @1: {
+            $0 = 123
+            exit = jump @2
+        }
+        @2: {
+            exit = cond $0 ? jump @3 : jump @9
+        }
+        @3: {
             exit = jump @4
         }
         @4: {
-            $1 = undefined
-            exit = return $1
+            $1 = 456
+            exit = jump @5
+        }
+        @5: {
+            exit = cond $1 ? jump @6 : jump @7
+        }
+        @6: {
+            exit = jump @11
+        }
+        @7: {
+            exit = jump @8
+        }
+        @8: {
+            exit = jump @1
+        }
+        @9: {
+            exit = jump @10
+        }
+        @10: {
+            exit = jump @11
+        }
+        @11: {
+            $2 = undefined
+            exit = return $2
         }
         "###);
     }
