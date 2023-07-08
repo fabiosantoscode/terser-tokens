@@ -1,6 +1,5 @@
 use std::borrow::Borrow;
 
-use deep_bind::contextual;
 use swc_ecma_ast::{
     AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat,
     PatOrExpr, Stmt, ThrowStmt, YieldExpr,
@@ -13,156 +12,14 @@ use super::super::normalize::normalize_basic_blocks;
 use super::super::{basic_block::BasicBlock, basic_block_group::BasicBlockGroup};
 use super::convert_context::{ConvertContext, NestedIntoStatement};
 
-pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
-    let node = match exp {
-        Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
-        Expr::Bin(bin) => {
-            let l = expr_to_basic_blocks(ctx, &bin.left);
-            let r = expr_to_basic_blocks(ctx, &bin.right);
-
-            BasicBlockInstruction::BinOp("+".into(), l, r)
-        }
-        Expr::Assign(assign) => match &assign.left {
-            PatOrExpr::Pat(e) => match e.borrow() {
-                Pat::Ident(ident) => {
-                    let sym = ident.sym.to_string();
-                    let Some(_old_idx) = ctx.scope.borrow().get(&sym) else {todo!()};
-
-                    let expr_idx = expr_to_basic_blocks(ctx, &assign.right);
-                    ctx.assign_maybe_conditionally(&sym, expr_idx);
-
-                    return expr_idx;
-                }
-                _ => todo!(),
-            },
-            _ => todo!(),
-        },
-        Expr::Paren(paren) => return expr_to_basic_blocks(ctx, &paren.expr),
-        Expr::Seq(seq) => {
-            let mut last = None;
-            for expr in &seq.exprs {
-                last = Some(expr_to_basic_blocks(ctx, expr));
-            }
-            return last.expect("Seq must have 1+ exprs");
-        }
-        Expr::Cond(CondExpr {
-            test, cons, alt, ..
-        }) => {
-            let (_, test, blockidx_before) = ctx.create_gapped_block(&test);
-
-            ctx.push_conditionals_context();
-
-            let (blockidx_consequent_before, cons, blockidx_consequent_after) =
-                ctx.create_gapped_block(&cons);
-
-            let blockidx_alternate_before = ctx.current_block_index();
-            let alt = expr_to_basic_blocks(ctx, &alt);
-            ctx.wrap_up_block();
-            let blockidx_after = ctx.current_block_index();
-
-            // block before gets a Cond node added
-            ctx.set_exit(
-                blockidx_before,
-                BasicBlockExit::Cond(test, blockidx_consequent_before, blockidx_alternate_before),
-            );
-
-            // block starting with cons gets a Jump node added, to the current block
-            ctx.set_exit(
-                blockidx_consequent_after,
-                BasicBlockExit::Jump(blockidx_after),
-            );
-
-            let conditionally_assigned = ctx.pop_conditionals_context();
-
-            ctx.push_phi_assignments(conditionally_assigned);
-            ctx.wrap_up_block();
-
-            // the retval of our ternary is a phi node
-            BasicBlockInstruction::Phi(vec![cons, alt])
-        }
-        Expr::Ident(ident) => {
-            let Some(var_idx) = ctx.scope.borrow().get(&ident.sym.to_string()) else {todo!("{} not found in scope", ident.sym.to_string())};
-
-            BasicBlockInstruction::Ref(var_idx)
-        }
-        Expr::This(_) => BasicBlockInstruction::This,
-        Expr::Array(array_lit) => {
-            let mut elements = vec![];
-
-            for elem in &array_lit.elems {
-                let elem = match elem {
-                    Some(ExprOrSpread { spread, expr }) => {
-                        if spread.is_none() {
-                            ArrayElement::Item(expr_to_basic_blocks(ctx, expr))
-                        } else {
-                            ArrayElement::Spread(expr_to_basic_blocks(ctx, expr))
-                        }
-                    }
-                    None => ArrayElement::Hole,
-                };
-
-                elements.push(elem);
-            }
-
-            BasicBlockInstruction::Array(elements)
-        }
-        Expr::Object(_) => todo!(),
-        Expr::Fn(_) => todo!(),
-        Expr::Unary(_) => todo!(),
-        Expr::Update(_) => todo!(),
-        Expr::Member(_) => todo!(),
-        Expr::SuperProp(_) => todo!(),
-        Expr::Call(_) => todo!(),
-        Expr::New(_) => todo!(),
-        Expr::Tpl(_) => todo!(),
-        Expr::TaggedTpl(_) => todo!(),
-        Expr::Arrow(_) => todo!(),
-        Expr::Class(_) => todo!(),
-        Expr::MetaProp(_) => todo!(),
-        Expr::Yield(YieldExpr { arg, delegate, .. }) => {
-            let typ = if *delegate {
-                TempExitType::YieldStar
-            } else {
-                TempExitType::Yield
-            };
-
-            let arg = match arg {
-                Some(arg) => expr_to_basic_blocks(ctx, arg),
-                None => ctx.current_block_index(),
-            };
-
-            BasicBlockInstruction::TempExit(typ, arg)
-        }
-        Expr::Await(AwaitExpr { arg, .. }) => {
-            let arg = expr_to_basic_blocks(ctx, arg);
-
-            BasicBlockInstruction::TempExit(TempExitType::Await, arg)
-        }
-        Expr::OptChain(_) => todo!(),
-        Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
-        Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
-        Expr::JSXMember(_)
-        | Expr::JSXNamespacedName(_)
-        | Expr::JSXEmpty(_)
-        | Expr::JSXElement(_)
-        | Expr::JSXFragment(_) => unreachable!("Expr::JSX from SWC should be impossible"),
-        Expr::TsTypeAssertion(_)
-        | Expr::TsConstAssertion(_)
-        | Expr::TsNonNull(_)
-        | Expr::TsAs(_)
-        | Expr::TsInstantiation(_)
-        | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
-        _ => {
-            todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
-        }
-    };
-
-    ctx.push_instruction(node)
-}
-
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
 fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
+    let is_loop = |stat: &Stmt| match stat {
+        Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::ForIn(_) | Stmt::ForOf(_) => true,
+        _ => false,
+    };
+
     let might_break = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
         if is_loop(body) {
             ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
@@ -419,11 +276,148 @@ pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
     BasicBlockGroup::from_asts(asts)
 }
 
-fn is_loop(stat: &Stmt) -> bool {
-    match stat {
-        Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::ForIn(_) | Stmt::ForOf(_) => true,
-        _ => false,
-    }
+pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
+    let node = match exp {
+        Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
+        Expr::Bin(bin) => {
+            let l = expr_to_basic_blocks(ctx, &bin.left);
+            let r = expr_to_basic_blocks(ctx, &bin.right);
+
+            BasicBlockInstruction::BinOp("+".into(), l, r)
+        }
+        Expr::Assign(assign) => match &assign.left {
+            PatOrExpr::Pat(e) => match e.borrow() {
+                Pat::Ident(ident) => {
+                    let sym = ident.sym.to_string();
+                    let Some(_old_idx) = ctx.scope.borrow().get(&sym) else {todo!()};
+
+                    let expr_idx = expr_to_basic_blocks(ctx, &assign.right);
+                    ctx.assign_maybe_conditionally(&sym, expr_idx);
+
+                    return expr_idx;
+                }
+                _ => todo!(),
+            },
+            _ => todo!(),
+        },
+        Expr::Paren(paren) => return expr_to_basic_blocks(ctx, &paren.expr),
+        Expr::Seq(seq) => {
+            let mut last = None;
+            for expr in &seq.exprs {
+                last = Some(expr_to_basic_blocks(ctx, expr));
+            }
+            return last.expect("Seq must have 1+ exprs");
+        }
+        Expr::Cond(CondExpr {
+            test, cons, alt, ..
+        }) => {
+            let (_, test, blockidx_before) = ctx.create_gapped_block(&test);
+
+            ctx.push_conditionals_context();
+
+            let (blockidx_consequent_before, cons, blockidx_consequent_after) =
+                ctx.create_gapped_block(&cons);
+
+            let blockidx_alternate_before = ctx.current_block_index();
+            let alt = expr_to_basic_blocks(ctx, &alt);
+            ctx.wrap_up_block();
+            let blockidx_after = ctx.current_block_index();
+
+            // block before gets a Cond node added
+            ctx.set_exit(
+                blockidx_before,
+                BasicBlockExit::Cond(test, blockidx_consequent_before, blockidx_alternate_before),
+            );
+
+            // block starting with cons gets a Jump node added, to the current block
+            ctx.set_exit(
+                blockidx_consequent_after,
+                BasicBlockExit::Jump(blockidx_after),
+            );
+
+            let conditionally_assigned = ctx.pop_conditionals_context();
+
+            ctx.push_phi_assignments(conditionally_assigned);
+            ctx.wrap_up_block();
+
+            // the retval of our ternary is a phi node
+            BasicBlockInstruction::Phi(vec![cons, alt])
+        }
+        Expr::Ident(ident) => {
+            let Some(var_idx) = ctx.scope.borrow().get(&ident.sym.to_string()) else {todo!("{} not found in scope", ident.sym.to_string())};
+
+            BasicBlockInstruction::Ref(var_idx)
+        }
+        Expr::This(_) => BasicBlockInstruction::This,
+        Expr::Array(array_lit) => {
+            let mut elements = vec![];
+
+            for elem in &array_lit.elems {
+                let elem = match elem {
+                    Some(ExprOrSpread { spread, expr }) => match spread {
+                        None => ArrayElement::Item(expr_to_basic_blocks(ctx, expr)),
+                        Some(_) => ArrayElement::Spread(expr_to_basic_blocks(ctx, expr)),
+                    },
+                    None => ArrayElement::Hole,
+                };
+
+                elements.push(elem);
+            }
+
+            BasicBlockInstruction::Array(elements)
+        }
+        Expr::Object(_) => todo!(),
+        Expr::Fn(_) => todo!(),
+        Expr::Unary(_) => todo!(),
+        Expr::Update(_) => todo!(),
+        Expr::Member(_) => todo!(),
+        Expr::SuperProp(_) => todo!(),
+        Expr::Call(_) => todo!(),
+        Expr::New(_) => todo!(),
+        Expr::Tpl(_) => todo!(),
+        Expr::TaggedTpl(_) => todo!(),
+        Expr::Arrow(_) => todo!(),
+        Expr::Class(_) => todo!(),
+        Expr::MetaProp(_) => todo!(),
+        Expr::Yield(YieldExpr { arg, delegate, .. }) => {
+            let typ = if *delegate {
+                TempExitType::YieldStar
+            } else {
+                TempExitType::Yield
+            };
+
+            let arg = match arg {
+                Some(arg) => expr_to_basic_blocks(ctx, arg),
+                None => ctx.current_block_index(),
+            };
+
+            BasicBlockInstruction::TempExit(typ, arg)
+        }
+        Expr::Await(AwaitExpr { arg, .. }) => {
+            let arg = expr_to_basic_blocks(ctx, arg);
+
+            BasicBlockInstruction::TempExit(TempExitType::Await, arg)
+        }
+        Expr::OptChain(_) => todo!(),
+        Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
+        Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
+        Expr::JSXMember(_)
+        | Expr::JSXNamespacedName(_)
+        | Expr::JSXEmpty(_)
+        | Expr::JSXElement(_)
+        | Expr::JSXFragment(_) => unreachable!("Expr::JSX from SWC should be impossible"),
+        Expr::TsTypeAssertion(_)
+        | Expr::TsConstAssertion(_)
+        | Expr::TsNonNull(_)
+        | Expr::TsAs(_)
+        | Expr::TsInstantiation(_)
+        | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
+        _ => {
+            todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
+        }
+    };
+
+    ctx.push_instruction(node)
 }
 
 #[cfg(test)]
