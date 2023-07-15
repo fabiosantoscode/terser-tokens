@@ -1,9 +1,8 @@
-mod basic_block;
-mod basic_block_group;
-mod normalize;
-mod swc_parse;
-mod to_ast;
-mod to_basic_blocks;
+pub mod basic_block;
+pub mod basic_block_group;
+pub mod normalize;
+pub mod to_ast;
+pub mod to_basic_blocks;
 
 #[cfg(test)]
-mod testutils;
+pub mod testutils;

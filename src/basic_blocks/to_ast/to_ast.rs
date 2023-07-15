@@ -1,11 +1,12 @@
 use swc_ecma_ast::{
-    AwaitExpr, BindingIdent, Decl, Expr, ExprOrSpread, Ident, ReturnStmt, Stmt, ThrowStmt,
-    YieldExpr,
+    AwaitExpr, BindingIdent, Decl, Expr, ExprOrSpread, Ident, Module, ModuleItem, ReturnStmt, Stmt,
+    ThrowStmt, YieldExpr,
 };
 
 use crate::basic_blocks::{
     basic_block::{ArrayElement, BasicBlockInstruction, ExitType, TempExitType},
     basic_block_group::BasicBlockGroup,
+    to_basic_blocks::convert_module::BasicBlockModule,
 };
 
 use super::{
@@ -13,7 +14,18 @@ use super::{
     to_structured_flow::{do_tree, StructuredFlow},
 };
 
-fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
+pub fn module_to_ast(block_module: &BasicBlockModule) -> Module {
+    Module {
+        span: Default::default(),
+        body: to_ast(&block_module.top_level_stats)
+            .into_iter()
+            .map(|stat| ModuleItem::Stmt(stat))
+            .collect::<Vec<_>>(),
+        shebang: None,
+    }
+}
+
+pub fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
     let mut block_group: BasicBlockGroup = block_group.clone();
 
     remove_phi(&mut block_group);

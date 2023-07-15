@@ -15,6 +15,7 @@ use tokenizer::tokens::{Comment, JsToken};
 mod basic_blocks;
 mod parser;
 mod scope;
+mod swc_parse;
 mod tokenizer;
 
 #[derive(Serialize, Deserialize)]

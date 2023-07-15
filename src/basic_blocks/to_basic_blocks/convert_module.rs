@@ -53,7 +53,7 @@ pub struct BasicBlockModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::swc_parse::swc_parse;
+    use crate::swc_parse::swc_parse;
 
     #[test]
     fn test_basic_blocks_module() {
