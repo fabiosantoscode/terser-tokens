@@ -17,11 +17,6 @@ impl BasicBlock {
         }
     }
 
-    pub fn extend(&mut self, other: Self) {
-        self.instructions.extend(other.instructions);
-        self.exit = other.exit;
-    }
-
     pub fn jump_targets(&self) -> Vec<usize> {
         self.exit.jump_targets()
     }
@@ -88,7 +83,7 @@ impl BasicBlockExit {
             BasicBlockExit::PopCatch(catch_target, finally_target) => {
                 vec![*catch_target, *finally_target]
             }
-            BasicBlockExit::PopFinally(finally_target, after_finally_target) => {
+            BasicBlockExit::PopFinally(finally_target, _after_finally_target) => {
                 vec![*finally_target]
             }
             BasicBlockExit::EndFinally(after_finally_target) => vec![*after_finally_target],

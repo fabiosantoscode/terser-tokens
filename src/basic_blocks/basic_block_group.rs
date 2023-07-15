@@ -8,12 +8,6 @@ pub struct BasicBlockGroup {
 }
 
 impl BasicBlockGroup {
-    pub fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
-    }
-
     pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {
         Self {
             blocks: blocks

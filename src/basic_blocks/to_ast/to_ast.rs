@@ -6,7 +6,7 @@ use swc_ecma_ast::{
 use crate::basic_blocks::{
     basic_block::{ArrayElement, BasicBlockInstruction, ExitType, TempExitType},
     basic_block_group::BasicBlockGroup,
-    to_basic_blocks::convert_module::BasicBlockModule,
+    basic_block_module::BasicBlockModule,
 };
 
 use super::{
@@ -160,7 +160,7 @@ fn to_stat_ast(
 
             vec![if_stmt]
         }
-        StructuredFlow::Break(to_id) => {
+        StructuredFlow::Break(_to_id) => {
             let break_stmt = Stmt::Break(swc_ecma_ast::BreakStmt {
                 span: Default::default(),
                 label: None, /* TODO */
@@ -168,7 +168,7 @@ fn to_stat_ast(
 
             vec![break_stmt]
         }
-        StructuredFlow::Continue(to_id) => {
+        StructuredFlow::Continue(_to_id) => {
             let break_stmt = Stmt::Continue(swc_ecma_ast::ContinueStmt {
                 span: Default::default(),
                 label: None, /* TODO */
@@ -176,7 +176,7 @@ fn to_stat_ast(
 
             vec![break_stmt]
         }
-        StructuredFlow::Loop(id, body) => {
+        StructuredFlow::Loop(_id, body) => {
             let body = to_stat_vec(ctx, body);
 
             let while_stmt = Stmt::While(swc_ecma_ast::WhileStmt {
@@ -240,7 +240,7 @@ fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         BasicBlockInstruction::Undefined => {
             Expr::Ident(Ident::new("undefined".into(), Default::default()))
         }
-        BasicBlockInstruction::BinOp(name, left, right) => {
+        BasicBlockInstruction::BinOp(_name, left, right) => {
             let left = get_identifier(get_variable(*left));
             let right = get_identifier(get_variable(*right));
 

@@ -21,7 +21,7 @@ pub struct BreakableId(Option<usize>);
 impl std::fmt::Display for BreakableId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(brk) = self.0 {
-            write!(f, "#{}", brk);
+            write!(f, "#{}", brk)?;
         }
 
         Ok(())
@@ -55,7 +55,6 @@ pub enum StructuredFlow {
 struct Ctx {
     pub graph: Rc<Graph>,
     pub containing_syntax: RefCell<Vec<(BreakableId, ContainingSyntax)>>,
-    pub reverse_postorder: Vec<usize>,
     pub positions_in_reverse_postorder: Vec<usize>,
 }
 
@@ -71,7 +70,6 @@ impl Ctx {
         Ctx {
             graph: Rc::new(graph),
             containing_syntax: Default::default(),
-            reverse_postorder,
             positions_in_reverse_postorder,
         }
     }
@@ -98,7 +96,7 @@ impl Ctx {
             .iter()
             .enumerate()
             .rev()
-            .find_map(|(index, (id, item))| match item {
+            .find_map(|(index, (_id, item))| match item {
                 ContainingSyntax::LoopHeadedBy(x) | ContainingSyntax::BlockFollowedBy(x) => {
                     if x == &target_id {
                         Some(index)
@@ -211,13 +209,13 @@ fn node_within(node: usize, ys: &[usize]) -> StructuredFlow {
                         )
                     });
                 }
-                BasicBlockExit::PopCatch(catch_block, _finally_or_after) => {
+                BasicBlockExit::PopCatch(_catch_block, _finally_or_after) => {
                     return StructuredFlow::BasicBlock(node);
                 }
-                BasicBlockExit::PopFinally(finally_block, _after) => {
+                BasicBlockExit::PopFinally(_finally_block, _after) => {
                     return StructuredFlow::BasicBlock(node);
                 }
-                BasicBlockExit::EndFinally(after_block) => {
+                BasicBlockExit::EndFinally(_after_block) => {
                     return StructuredFlow::BasicBlock(node);
                 }
                 _ => { /* handled below */ }

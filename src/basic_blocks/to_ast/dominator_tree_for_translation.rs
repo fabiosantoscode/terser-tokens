@@ -160,13 +160,13 @@ fn to_structured_flow_jump_targets(node: &BasicBlock) -> Vec<usize> {
         BasicBlockExit::SetTryAndCatch(t, c, f, a) => {
             vec![t, c, f, a]
         }
-        BasicBlockExit::PopCatch(c, f) => {
+        BasicBlockExit::PopCatch(_c, _f) => {
             vec![]
         }
-        BasicBlockExit::PopFinally(c, f) => {
+        BasicBlockExit::PopFinally(_c, _f) => {
             vec![]
         }
-        BasicBlockExit::EndFinally(f) => {
+        BasicBlockExit::EndFinally(_f) => {
             vec![]
         }
         _ => node.jump_targets(),

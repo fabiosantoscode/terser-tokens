@@ -1,4 +1,4 @@
-use super::super::basic_block_group::BasicBlockGroup;
+use super::super::basic_block_module::{BasicBlockModule, ModuleSummary};
 use super::convert::statements_to_basic_blocks;
 
 use swc_ecma_ast::{Module, ModuleItem, Stmt};
@@ -30,24 +30,13 @@ pub fn module_to_basic_blocks(
 }
 
 pub fn get_module_summary(
-    ctx: &mut ConvertModuleCtx,
+    _ctx: &mut ConvertModuleCtx,
     filename: &str,
-    module: &swc_ecma_ast::Module,
+    _module: &swc_ecma_ast::Module,
 ) -> ModuleSummary {
     ModuleSummary {
         filename: filename.into(),
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ModuleSummary {
-    pub filename: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct BasicBlockModule {
-    pub summary: ModuleSummary,
-    pub top_level_stats: BasicBlockGroup,
 }
 
 #[cfg(test)]

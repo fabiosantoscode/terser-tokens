@@ -3,7 +3,6 @@ use std::io::Read;
 
 mod basic_blocks;
 mod compress;
-mod parser;
 mod scope;
 mod swc_parse;
 mod swc_stringify;
