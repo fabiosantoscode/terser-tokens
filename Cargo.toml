@@ -32,6 +32,7 @@ swc_ecma_ast = "0.106.0"
 swc_common = "0.31.12"
 deep-bind = "0.1.0"
 map-macro = "0.2.6"
+hamt = "0.2.0"
 
 
 [dev-dependencies]
