@@ -7,3 +7,5 @@ pub mod to_basic_blocks;
 
 #[cfg(test)]
 pub mod testutils;
+
+pub use to_basic_blocks::module_to_basic_blocks;

@@ -5,7 +5,23 @@ use super::basic_block::BasicBlock;
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
     pub blocks: Vec<(usize, BasicBlock)>,
+    pub environment: BasicBlockEnvironment,
 }
+
+#[derive(Default, Clone)]
+pub enum BasicBlockEnvironmentType {
+    #[default]
+    Module,
+}
+
+#[derive(Default, Clone)]
+pub struct BasicBlockEnvironment {
+    pub env_type: BasicBlockEnvironmentType,
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
+pub struct FunctionId(pub usize);
 
 impl BasicBlockGroup {
     pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {
@@ -15,6 +31,7 @@ impl BasicBlockGroup {
                 .enumerate()
                 .map(|(i, block)| (i, block))
                 .collect::<Vec<_>>(),
+            ..Default::default()
         }
     }
 

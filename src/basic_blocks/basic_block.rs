@@ -1,3 +1,4 @@
+use super::basic_block_group::FunctionId;
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
@@ -114,6 +115,8 @@ pub enum BasicBlockInstruction {
     Array(Vec<ArrayElement>),
     TempExit(TempExitType, usize),
     Phi(Vec<usize>),
+    Function(FunctionId),
+    Call(usize, Vec<usize>),
 }
 
 #[derive(Clone, PartialEq)]
@@ -147,6 +150,12 @@ impl BasicBlockInstruction {
                     ArrayElement::Spread(id) => Some(id),
                 })
                 .collect(),
+            BasicBlockInstruction::Function(_) => vec![],
+            BasicBlockInstruction::Call(callee, args) => {
+                let mut res = vec![callee];
+                res.extend(args);
+                res
+            }
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
             BasicBlockInstruction::CaughtError => vec![],
         }
@@ -202,6 +211,20 @@ impl Debug for BasicBlockInstruction {
                         })
                         .collect::<Vec<_>>()
                         .join(" ")
+                )
+            }
+            BasicBlockInstruction::Function(id) => {
+                write!(f, "{:?}", id)
+            }
+            BasicBlockInstruction::Call(callee, args) => {
+                write!(
+                    f,
+                    "call ${}({})",
+                    callee,
+                    args.iter()
+                        .map(|a| format!("${}", a))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             }
             BasicBlockInstruction::TempExit(exit_type, arg) => {

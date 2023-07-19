@@ -2,56 +2,24 @@ use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 
-use nom::IResult;
-
 use super::{
     basic_block::{
         ArrayElement, BasicBlock, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
     },
     basic_block_group::BasicBlockGroup,
-    to_basic_blocks::statements_to_basic_blocks,
+    basic_block_module::BasicBlockModule,
+    to_basic_blocks::{
+        convert_context::ConvertContext, module_to_basic_blocks, statements_to_basic_blocks,
+    },
 };
+use crate::swc_parse::swc_parse;
 
+use nom::IResult;
 use swc_common::SourceMap;
 use swc_common::{BytePos, SourceFile};
-use swc_ecma_ast::{ExprStmt, ModuleItem, Script, Stmt};
+use swc_ecma_ast::{ExprStmt, Script, Stmt};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
-use swc_ecma_parser::{parse_file_as_expr, parse_file_as_module, EsConfig};
-
-pub fn parse_asyncgen(source: &str) -> swc_ecma_ast::FnDecl {
-    let file = SourceFile::new(
-        swc_common::FileName::Anon,
-        false,
-        swc_common::FileName::Anon,
-        format!(
-            "async function* wrapper() {{
-            {source}
-        }}"
-        )
-        .into(),
-        BytePos(1),
-    );
-    let module = parse_file_as_module(
-        &file,
-        swc_ecma_parser::Syntax::Es(EsConfig {
-            jsx: true,
-            ..Default::default()
-        }),
-        Default::default(),
-        None,
-        &mut vec![],
-    )
-    .unwrap();
-
-    module.body[0]
-        .as_stmt()
-        .unwrap()
-        .as_decl()
-        .unwrap()
-        .as_fn_decl()
-        .unwrap()
-        .clone()
-}
+use swc_ecma_parser::{parse_file_as_expr, EsConfig};
 
 pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
     let file = SourceFile::new(
@@ -76,15 +44,23 @@ pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
 
 pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
     let m = parse_expression(source);
-    statements_to_basic_blocks(&vec![&Stmt::Expr(ExprStmt {
-        span: Default::default(),
-        expr: Box::new(m),
-    })])
+    statements_to_basic_blocks(
+        &mut ConvertContext::new(),
+        &vec![&Stmt::Expr(ExprStmt {
+            span: Default::default(),
+            expr: Box::new(m),
+        })],
+    )
 }
 
 pub fn test_basic_blocks(source: &str) -> BasicBlockGroup {
-    let m = parse_asyncgen(source);
-    statements_to_basic_blocks(&m.function.body.unwrap().stmts.iter().collect::<Vec<_>>())
+    let m = test_basic_blocks_module(source);
+    m.top_level_stats
+}
+
+pub fn test_basic_blocks_module(source: &str) -> BasicBlockModule {
+    let m = swc_parse(source);
+    module_to_basic_blocks("test.js", &m).unwrap()
 }
 
 pub fn stats_to_string(stats: Vec<Stmt>) -> String {

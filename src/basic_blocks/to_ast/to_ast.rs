@@ -1,6 +1,6 @@
 use swc_ecma_ast::{
-    AwaitExpr, BindingIdent, Decl, Expr, ExprOrSpread, Ident, Module, ModuleItem, ReturnStmt, Stmt,
-    ThrowStmt, YieldExpr,
+    AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee, Decl, Expr, ExprOrSpread, FnExpr,
+    Function, Ident, Module, ModuleItem, ReturnStmt, Stmt, ThrowStmt, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -17,7 +17,7 @@ use super::{
 pub fn module_to_ast(block_module: &BasicBlockModule) -> Module {
     Module {
         span: Default::default(),
-        body: to_ast(&block_module.top_level_stats)
+        body: to_ast_inner(block_module, &block_module.top_level_stats)
             .into_iter()
             .map(|stat| ModuleItem::Stmt(stat))
             .collect::<Vec<_>>(),
@@ -25,20 +25,28 @@ pub fn module_to_ast(block_module: &BasicBlockModule) -> Module {
     }
 }
 
-pub fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
+fn to_ast_inner(block_module: &BasicBlockModule, block_group: &BasicBlockGroup) -> Vec<Stmt> {
     let mut block_group: BasicBlockGroup = block_group.clone();
 
     remove_phi(&mut block_group);
 
     let tree = do_tree(&block_group);
 
-    to_stat_ast(&mut Default::default(), &tree, &block_group)
+    to_stat_ast(
+        &mut ToAstContext {
+            caught_error: None,
+            error_counter: 0,
+            module: block_module.clone(),
+        },
+        &tree,
+        &block_group,
+    )
 }
 
-#[derive(Default)]
 struct ToAstContext {
-    caught_error: Option<String>,
-    error_counter: usize,
+    pub caught_error: Option<String>,
+    pub error_counter: usize,
+    pub module: BasicBlockModule,
 }
 
 impl ToAstContext {
@@ -112,7 +120,7 @@ fn to_stat_ast(
             stats
                 .iter()
                 .map(|(variable, instruction)| {
-                    let expression: Expr = to_expr_ast(ctx, instruction);
+                    let expression: Expr = to_expr_ast(ctx, block_group, instruction);
 
                     var_decl(&format!("${}", variable), expression)
                 })
@@ -234,7 +242,11 @@ fn to_stat_ast(
     }
 }
 
-fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
+fn to_expr_ast(
+    ctx: &mut ToAstContext,
+    block_group: &BasicBlockGroup,
+    expr: &BasicBlockInstruction,
+) -> Expr {
     match expr {
         BasicBlockInstruction::LitNumber(num) => (*num).into(),
         BasicBlockInstruction::Undefined => {
@@ -277,6 +289,43 @@ fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 elems: items,
             })
         }
+        BasicBlockInstruction::Function(id) => {
+            let func = ctx.module.get_function(*id).unwrap().clone();
+
+            let stmts = to_stat_ast(ctx, &do_tree(&func), &func);
+
+            Expr::Fn(FnExpr {
+                ident: None,
+                function: Box::new(Function {
+                    span: Default::default(),
+                    decorators: Default::default(),
+                    params: Default::default(),
+                    body: Some(BlockStmt {
+                        span: Default::default(),
+                        stmts,
+                    }),
+                    is_generator: false,
+                    is_async: false,
+                    type_params: None,
+                    return_type: None,
+                }),
+            })
+        }
+        BasicBlockInstruction::Call(func_idx, args) => {
+            let func = get_identifier(get_variable(*func_idx));
+
+            let args = args
+                .iter()
+                .map(|arg| ExprOrSpread::from(get_identifier(get_variable(*arg))))
+                .collect();
+
+            Expr::Call(CallExpr {
+                span: Default::default(),
+                callee: Callee::Expr(Box::new(func)),
+                args,
+                type_args: None,
+            })
+        }
 
         BasicBlockInstruction::TempExit(typ, arg) => match typ {
             TempExitType::Yield => Expr::Yield(YieldExpr {
@@ -307,7 +356,22 @@ fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::testutils::{stats_to_string, test_basic_blocks};
+    use crate::basic_blocks::basic_block_module::ModuleSummary;
+    use crate::basic_blocks::testutils::{
+        stats_to_string, test_basic_blocks, test_basic_blocks_module,
+    };
+
+    fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
+        let mut module = BasicBlockModule {
+            summary: ModuleSummary {
+                filename: "test.js".into(),
+            },
+            top_level_stats: block_group.clone(),
+            functions: Default::default(),
+        };
+
+        to_ast_inner(&module, block_group)
+    }
 
     #[test]
     fn to_tree() {
@@ -339,6 +403,44 @@ mod tests {
         }
         var $4 = undefined;
         return $4;
+        "###);
+    }
+
+    #[test]
+    fn to_functions() {
+        let block_group = test_basic_blocks_module(
+            "var foo = function foo() {
+                var foo_inner = function foo_inner() {
+                    return 123;
+                }
+                return foo_inner();
+            }
+            var bar = function bar() { return 456; }
+            foo() + bar()",
+        );
+
+        let tree = to_ast_inner(&block_group, &block_group.top_level_stats);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var $0 = function() {
+            var $0 = function() {
+                var $0 = 123;
+                return $0;
+            };
+            var $1 = $0;
+            var $2 = $1();
+            return $2;
+        };
+        var $1 = function() {
+            var $0 = 456;
+            return $0;
+        };
+        var $2 = $0;
+        var $3 = $2();
+        var $4 = $1;
+        var $5 = $4();
+        var $6 = $3 + $5;
+        var $7 = undefined;
+        return $7;
         "###);
     }
 

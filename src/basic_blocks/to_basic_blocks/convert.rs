@@ -11,6 +11,7 @@ use super::super::basic_block::{
 use super::super::normalize::normalize_basic_blocks;
 use super::super::{basic_block::BasicBlock, basic_block_group::BasicBlockGroup};
 use super::convert_context::{ConvertContext, NestedIntoStatement};
+use super::convert_function::function_to_basic_blocks;
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
@@ -238,11 +239,12 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
     }
 }
 
-pub fn statements_to_basic_blocks(statements: &[&Stmt]) -> BasicBlockGroup {
-    let mut ctx = ConvertContext::new();
-
+pub fn statements_to_basic_blocks(
+    ctx: &mut ConvertContext,
+    statements: &[&Stmt],
+) -> BasicBlockGroup {
     for stat in statements {
-        stat_to_basic_blocks(&mut ctx, stat);
+        stat_to_basic_blocks(ctx, stat);
         ctx.wrap_up_block();
     }
 
@@ -367,12 +369,29 @@ pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
             BasicBlockInstruction::Array(elements)
         }
         Expr::Object(_) => todo!(),
-        Expr::Fn(_) => todo!(),
         Expr::Unary(_) => todo!(),
         Expr::Update(_) => todo!(),
         Expr::Member(_) => todo!(),
         Expr::SuperProp(_) => todo!(),
-        Expr::Call(_) => todo!(),
+        Expr::Fn(function) => {
+            let id = function_to_basic_blocks(ctx, function.function.as_ref())
+                .expect("todo error handling");
+            BasicBlockInstruction::Function(id)
+        }
+        Expr::Call(call) => {
+            // TODO non-expr callees (super, import)
+            let callee = expr_to_basic_blocks(ctx, &call.callee.clone().expect_expr());
+
+            let mut args = vec![];
+            for arg in &call.args {
+                match arg.spread {
+                    Some(_) => todo!("spread args"),
+                    None => args.push(expr_to_basic_blocks(ctx, arg.expr.as_ref())),
+                }
+            }
+
+            BasicBlockInstruction::Call(callee, args)
+        }
         Expr::New(_) => todo!(),
         Expr::Tpl(_) => todo!(),
         Expr::TaggedTpl(_) => todo!(),
@@ -455,6 +474,7 @@ mod tests {
         "###);
     }
 
+    /* TODO
     #[test]
     fn yield_await() {
         let s = test_basic_blocks("yield (await (yield* 1))");
@@ -466,6 +486,21 @@ mod tests {
             $3 = Yield $2
             $4 = undefined
             exit = return $4
+        }
+        "###);
+    }
+    */
+
+    #[test]
+    fn simple_await() {
+        let s = test_basic_blocks("await (await 1)");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            $1 = Await $0
+            $2 = Await $1
+            $3 = undefined
+            exit = return $3
         }
         "###);
     }

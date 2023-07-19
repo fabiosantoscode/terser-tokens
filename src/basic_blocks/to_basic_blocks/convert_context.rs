@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
+use crate::basic_blocks::basic_block_group::{BasicBlockGroup, FunctionId};
 use crate::scope::scope::Scope;
 use swc_ecma_ast::{Expr, Ident};
 
@@ -19,6 +20,8 @@ pub struct ConvertContext {
     pub conditionals: Vec<HashMap<String, Vec<usize>>>,
     pub scope: Scope,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
+    function_index: FunctionId,
+    pub functions: HashMap<FunctionId, BasicBlockGroup>,
 }
 
 impl ConvertContext {
@@ -30,7 +33,44 @@ impl ConvertContext {
             conditionals: vec![],
             scope: Scope::new(false),
             label_tracking: vec![],
+            function_index: FunctionId(0),
+            functions: HashMap::new(),
         }
+    }
+
+    pub fn go_into_function<C>(&mut self, cb: C) -> Result<FunctionId, String>
+    where
+        C: FnOnce(&mut Self) -> Result<BasicBlockGroup, String>,
+    {
+        let function_index = self.function_index;
+        self.function_index.0 += 1;
+
+        let mut ctx = Self {
+            basic_blocks: vec![vec![]],
+            exits: vec![None],
+            var_index: 0,
+            conditionals: vec![],
+            scope: self.scope.go_into_function(),
+            label_tracking: vec![],
+            function_index: self.function_index,
+            functions: self.functions.clone(),
+        };
+
+        let blocks = cb(&mut ctx)?;
+
+        self.functions.insert(function_index, blocks);
+
+        for new_functions in self.function_index.0..ctx.function_index.0 {
+            self.functions.insert(
+                FunctionId(new_functions),
+                ctx.functions
+                    .remove(&FunctionId(new_functions))
+                    .expect("function should be in context"),
+            );
+        }
+        self.function_index = ctx.function_index;
+
+        Ok(function_index)
     }
 
     pub fn push_instruction(&mut self, node: BasicBlockInstruction) -> usize {
@@ -149,5 +189,11 @@ impl ConvertContext {
                     .push(jump_from);
             }
         }
+    }
+
+    pub fn insert_function(&mut self, function: BasicBlockGroup) -> FunctionId {
+        self.functions.insert(self.function_index, function);
+        self.function_index.0 += 1;
+        FunctionId(self.function_index.0 - 1)
     }
 }

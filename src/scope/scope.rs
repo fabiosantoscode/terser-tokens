@@ -36,4 +36,10 @@ impl Scope {
         new_scope.parent = Some(Box::new(self.clone()));
         new_scope
     }
+
+    pub fn go_into_function(&self) -> Self {
+        let mut new_scope = Self::new(false);
+        new_scope.parent = Some(Box::new(self.clone()));
+        new_scope
+    }
 }
