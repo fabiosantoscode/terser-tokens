@@ -83,18 +83,18 @@ mod tests {
                     filename: "index.js",
                 },
                 top_level_stats: @0: {
-                    $0 = FunctionId(0)
-                    $1 = undefined
-                    exit = return $1
+                    $6 = FunctionId(0)
+                    $7 = undefined
+                    exit = return $7
                 }
                 ,
                 functions: [
                     function():
                     @0: {
-                        $0 = FunctionId(1)
-                        $1 = $0
-                        $2 = call $1()
-                        exit = return $2
+                        $2 = FunctionId(1)
+                        $3 = $2
+                        $4 = call $3()
+                        exit = return $4
                     }
                     ,
                     function():

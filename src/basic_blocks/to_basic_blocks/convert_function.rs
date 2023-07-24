@@ -29,12 +29,12 @@ pub fn function_to_basic_blocks(
             .for_each(|(i, param)| match &param.pat {
                 swc_ecma_ast::Pat::Ident(ident) => {
                     let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
-                    ctx.assign_maybe_conditionally(&ident.id.sym.to_string(), arg);
+                    ctx.assign_name(&ident.id.sym.to_string(), arg);
                 }
                 swc_ecma_ast::Pat::Rest(ident) => {
                     let name = ident.arg.clone().expect_ident().id.sym.to_string();
                     let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
-                    ctx.assign_maybe_conditionally(&name, arg);
+                    ctx.assign_name(&name, arg);
                 }
                 _ => todo!("non-ident function param"),
             });

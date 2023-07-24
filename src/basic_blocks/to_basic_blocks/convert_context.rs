@@ -38,7 +38,11 @@ impl ConvertContext {
         }
     }
 
-    pub fn go_into_function<C>(&mut self, arg_count: usize, cb: C) -> Result<FunctionId, String>
+    pub fn go_into_function<C>(
+        &mut self,
+        arg_count: usize,
+        convert_in_function: C,
+    ) -> Result<FunctionId, String>
     where
         C: FnOnce(&mut Self) -> Result<BasicBlockGroup, String>,
     {
@@ -48,7 +52,7 @@ impl ConvertContext {
         let mut ctx = Self {
             basic_blocks: vec![vec![]],
             exits: vec![None],
-            var_index: 0,
+            var_index: self.var_index,
             conditionals: vec![],
             scope: self.scope.go_into_function(),
             label_tracking: vec![],
@@ -56,9 +60,12 @@ impl ConvertContext {
             functions: self.functions.clone(),
         };
 
-        let blocks = cb(&mut ctx)?;
+        let blocks = convert_in_function(&mut ctx)?;
 
         self.functions.insert(function_index, blocks);
+
+        // collect global function registry, global var numbering
+        self.var_index = ctx.var_index;
 
         for new_functions in self.function_index.0..ctx.function_index.0 {
             self.functions.insert(
@@ -95,7 +102,7 @@ impl ConvertContext {
         self.exits[at] = Some(new_exit)
     }
 
-    pub fn assign_maybe_conditionally(&mut self, name: &str, value: usize) {
+    pub fn assign_name(&mut self, name: &str, value: usize) {
         let mut conditionals = self.conditionals.last_mut();
         match conditionals {
             Some(ref mut conditionals) => {

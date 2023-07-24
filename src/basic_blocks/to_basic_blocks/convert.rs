@@ -60,7 +60,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
             for decl in &var.decls {
                 let Pat::Ident(ident) = &decl.name else {todo!()};
                 let expr = expr_to_basic_blocks(ctx, decl.init.as_ref().unwrap().borrow());
-                ctx.assign_maybe_conditionally(&ident.sym.to_string(), expr);
+                ctx.assign_name(&ident.sym.to_string(), expr);
             }
         }
         Stmt::DoWhile(_) => todo!(),
@@ -294,7 +294,7 @@ pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
                     let Some(_old_idx) = ctx.scope.borrow().get(&sym) else {todo!()};
 
                     let expr_idx = expr_to_basic_blocks(ctx, &assign.right);
-                    ctx.assign_maybe_conditionally(&sym, expr_idx);
+                    ctx.assign_name(&sym, expr_idx);
 
                     return expr_idx;
                 }

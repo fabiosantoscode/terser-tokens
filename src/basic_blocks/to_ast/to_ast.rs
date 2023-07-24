@@ -459,28 +459,28 @@ mod tests {
 
         let tree = to_ast_inner(&block_group, &block_group.top_level_stats);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = function() {
-            var $0 = function() {
+        var $8 = function() {
+            var $3 = function() {
                 var $0 = arguments[0];
                 var $1 = $0;
                 return $1;
             };
-            var $1 = $0;
-            var $2 = 123;
-            var $3 = $1($2);
-            return $3;
+            var $4 = $3;
+            var $5 = 123;
+            var $6 = $4($5);
+            return $6;
         };
-        var $1 = function() {
-            var $0 = 456;
-            return $0;
+        var $11 = function() {
+            var $9 = 456;
+            return $9;
         };
-        var $2 = $0;
-        var $3 = $2();
-        var $4 = $1;
-        var $5 = $4();
-        var $6 = $3 + $5;
-        var $7 = undefined;
-        return $7;
+        var $12 = $8;
+        var $13 = $12();
+        var $14 = $11;
+        var $15 = $14();
+        var $16 = $13 + $15;
+        var $17 = undefined;
+        return $17;
         "###);
     }
 
