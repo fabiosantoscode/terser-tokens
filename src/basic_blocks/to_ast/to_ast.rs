@@ -1,6 +1,7 @@
 use swc_ecma_ast::{
-    AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee, Decl, Expr, ExprOrSpread, FnExpr,
-    Function, Ident, Module, ModuleItem, ReturnStmt, Stmt, ThrowStmt, YieldExpr,
+    ArrayLit, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee, ComputedPropName, Decl, Expr,
+    ExprOrSpread, FnExpr, Function, Ident, Lit, MemberExpr, MemberProp, Module, ModuleItem,
+    ReturnStmt, Stmt, ThrowStmt, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -327,6 +328,43 @@ fn to_expr_ast(
             })
         }
 
+        BasicBlockInstruction::ArgumentRead(idx) => Expr::Member(MemberExpr {
+            span: Default::default(),
+            obj: Box::new(Expr::Ident(Ident::new(
+                "arguments".into(),
+                Default::default(),
+            ))),
+            prop: MemberProp::Computed(ComputedPropName {
+                span: Default::default(),
+                expr: Box::new(Expr::Lit(Lit::Num((*idx).into()))),
+            }),
+        }),
+        BasicBlockInstruction::ArgumentRest(from_idx) => {
+            // [...arguments].slice(from_idx)
+            Expr::Call(CallExpr {
+                span: Default::default(),
+                callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                    span: Default::default(),
+                    obj: Box::new(Expr::Array(ArrayLit {
+                        span: Default::default(),
+                        elems: vec![Some(ExprOrSpread {
+                            spread: Some(Default::default()),
+                            expr: Box::new(Expr::Ident(Ident::new(
+                                "arguments".into(),
+                                Default::default(),
+                            ))),
+                        })],
+                    })),
+                    prop: MemberProp::Ident(Ident::new("slice".into(), Default::default())),
+                }))),
+                args: vec![ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Lit(Lit::Num((*from_idx).into()))),
+                }],
+                type_args: None,
+            })
+        }
+
         BasicBlockInstruction::TempExit(typ, arg) => match typ {
             TempExitType::Yield => Expr::Yield(YieldExpr {
                 span: Default::default(),
@@ -410,10 +448,10 @@ mod tests {
     fn to_functions() {
         let block_group = test_basic_blocks_module(
             "var foo = function foo() {
-                var foo_inner = function foo_inner() {
-                    return 123;
+                var foo_inner = function foo_inner(arg) {
+                    return arg;
                 }
-                return foo_inner();
+                return foo_inner(123);
             }
             var bar = function bar() { return 456; }
             foo() + bar()",
@@ -423,12 +461,14 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = function() {
             var $0 = function() {
-                var $0 = 123;
-                return $0;
+                var $0 = arguments[0];
+                var $1 = $0;
+                return $1;
             };
             var $1 = $0;
-            var $2 = $1();
-            return $2;
+            var $2 = 123;
+            var $3 = $1($2);
+            return $3;
         };
         var $1 = function() {
             var $0 = 456;

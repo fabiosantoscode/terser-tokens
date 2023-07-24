@@ -38,7 +38,7 @@ impl ConvertContext {
         }
     }
 
-    pub fn go_into_function<C>(&mut self, cb: C) -> Result<FunctionId, String>
+    pub fn go_into_function<C>(&mut self, arg_count: usize, cb: C) -> Result<FunctionId, String>
     where
         C: FnOnce(&mut Self) -> Result<BasicBlockGroup, String>,
     {
@@ -195,5 +195,9 @@ impl ConvertContext {
         self.functions.insert(self.function_index, function);
         self.function_index.0 += 1;
         FunctionId(self.function_index.0 - 1)
+    }
+
+    pub fn get_function(&self, id: FunctionId) -> Option<&BasicBlockGroup> {
+        self.functions.get(&id)
     }
 }

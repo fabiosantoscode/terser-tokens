@@ -89,6 +89,7 @@ mod tests {
                 }
                 ,
                 functions: [
+                    function():
                     @0: {
                         $0 = FunctionId(1)
                         $1 = $0
@@ -96,6 +97,7 @@ mod tests {
                         exit = return $2
                     }
                     ,
+                    function():
                     @0: {
                         $0 = 2
                         exit = return $0

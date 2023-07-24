@@ -117,6 +117,8 @@ pub enum BasicBlockInstruction {
     Phi(Vec<usize>),
     Function(FunctionId),
     Call(usize, Vec<usize>),
+    ArgumentRead(usize),
+    ArgumentRest(usize),
 }
 
 #[derive(Clone, PartialEq)]
@@ -156,6 +158,8 @@ impl BasicBlockInstruction {
                 res.extend(args);
                 res
             }
+            BasicBlockInstruction::ArgumentRead(_) => vec![],
+            BasicBlockInstruction::ArgumentRest(_) => vec![],
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
             BasicBlockInstruction::CaughtError => vec![],
         }
@@ -226,6 +230,12 @@ impl Debug for BasicBlockInstruction {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
+            }
+            BasicBlockInstruction::ArgumentRead(idx) => {
+                write!(f, "arguments[{}]", idx)
+            }
+            BasicBlockInstruction::ArgumentRest(idx) => {
+                write!(f, "arguments[{}...]", idx)
             }
             BasicBlockInstruction::TempExit(exit_type, arg) => {
                 write!(f, "{:?} ${}", exit_type, arg)
