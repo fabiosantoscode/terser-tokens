@@ -8,9 +8,9 @@ use super::{
     },
     basic_block_group::BasicBlockGroup,
     basic_block_module::BasicBlockModule,
-    to_basic_blocks::{
-        convert_context::ConvertContext, module_to_basic_blocks, statements_to_basic_blocks,
-    },
+};
+use crate::from_ast::{
+    convert_context::ConvertContext, module_to_basic_blocks, statements_to_basic_blocks,
 };
 use crate::swc_parse::swc_parse;
 

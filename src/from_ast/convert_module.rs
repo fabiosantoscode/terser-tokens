@@ -1,6 +1,6 @@
-use super::super::basic_block_module::{BasicBlockModule, Export, Import, ModuleSummary};
 use super::convert::statements_to_basic_blocks;
 use super::convert_context::ConvertContext;
+use crate::basic_blocks::basic_block_module::{BasicBlockModule, Export, Import, ModuleSummary};
 
 use swc_ecma_ast::{
     ExportSpecifier, ImportSpecifier, Module, ModuleDecl, ModuleExportName, ModuleItem, Stmt,

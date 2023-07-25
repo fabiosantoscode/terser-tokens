@@ -1,4 +1,4 @@
-use crate::basic_blocks::module_to_basic_blocks;
+use crate::from_ast::module_to_basic_blocks;
 use crate::swc_parse::swc_parse;
 use crate::swc_stringify::swc_stringify;
 use crate::to_ast::module_to_ast;
