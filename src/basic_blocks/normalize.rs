@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::basic_blocks::basic_block::BasicBlock;
-use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
-use crate::basic_blocks::basic_block_group::BasicBlockGroup;
+use crate::basic_blocks::{BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction};
 
 pub fn normalize_basic_blocks(
     exits: &Vec<BasicBlockExit>,

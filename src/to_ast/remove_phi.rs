@@ -4,10 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::basic_blocks::{
-    basic_block::{BasicBlock, BasicBlockInstruction},
-    basic_block_group::BasicBlockGroup,
-};
+use crate::basic_blocks::{BasicBlock, BasicBlockGroup, BasicBlockInstruction};
 
 pub fn remove_phi(group: &mut BasicBlockGroup) {
     let mut phies_to_final_name: HashMap<usize, usize> = collect_phi(group);

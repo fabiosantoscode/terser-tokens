@@ -1,11 +1,13 @@
-use super::dominator_tree_for_translation::Graph;
-use crate::basic_blocks::basic_block::{BasicBlockExit, ExitType};
-use crate::basic_blocks::basic_block_group::BasicBlockGroup;
-use deep_bind::contextual;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
+
+use deep_bind::contextual;
+
+use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup, ExitType};
+
+use super::dominator_tree_for_translation::Graph;
 
 // https://dl.acm.org/doi/pdf/10.1145/3547621
 // This paper really unlocked this project.

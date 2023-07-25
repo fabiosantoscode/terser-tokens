@@ -5,9 +5,7 @@ use swc_ecma_ast::{
 };
 
 use crate::basic_blocks::{
-    basic_block::{ArrayElement, BasicBlockInstruction, ExitType, TempExitType},
-    basic_block_group::BasicBlockGroup,
-    basic_block_module::BasicBlockModule,
+    ArrayElement, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, TempExitType,
 };
 
 use super::{

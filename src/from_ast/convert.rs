@@ -7,11 +7,10 @@ use swc_ecma_ast::{
 
 use super::convert_context::{ConvertContext, NestedIntoStatement};
 use super::convert_function::function_to_basic_blocks;
-use crate::basic_blocks::basic_block::{
-    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
+use crate::basic_blocks::{
+    normalize_basic_blocks, ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup,
+    BasicBlockInstruction, ExitType, TempExitType,
 };
-use crate::basic_blocks::normalize::normalize_basic_blocks;
-use crate::basic_blocks::{basic_block::BasicBlock, basic_block_group::BasicBlockGroup};
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement

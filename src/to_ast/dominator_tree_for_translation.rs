@@ -1,4 +1,7 @@
-use std::{cell::UnsafeCell, collections::HashMap, hash::Hash, iter::Cloned};
+use std::cell::UnsafeCell;
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::iter::Cloned;
 
 use domtree::{
     dfs::DFSGraph,
@@ -7,10 +10,7 @@ use domtree::{
     DomTree,
 };
 
-use crate::basic_blocks::{
-    basic_block::{BasicBlock, BasicBlockExit},
-    basic_block_group::BasicBlockGroup,
-};
+use crate::basic_blocks::{BasicBlock, BasicBlockExit, BasicBlockGroup};
 
 #[derive(Clone)]
 pub struct VecSet<Y>(Vec<Y>);

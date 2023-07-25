@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
-use crate::basic_blocks::basic_block_group::{BasicBlockGroup, FunctionId};
-use crate::basic_blocks::basic_block_module::{Export, Import};
-use crate::scope::scope::Scope;
 use swc_ecma_ast::{Expr, Ident};
+
+use crate::basic_blocks::{
+    BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, Export, FunctionId, Import,
+};
+use crate::scope::Scope;
 
 use super::convert::expr_to_basic_blocks;
 

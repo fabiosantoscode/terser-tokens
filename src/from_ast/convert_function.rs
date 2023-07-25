@@ -1,7 +1,6 @@
 use super::convert::statements_to_basic_blocks;
 use super::convert_context::ConvertContext;
-use crate::basic_blocks::basic_block::BasicBlockInstruction;
-use crate::basic_blocks::basic_block_group::{BasicBlockEnvironmentType, FunctionId};
+use crate::basic_blocks::{BasicBlockEnvironmentType, BasicBlockInstruction, FunctionId};
 
 use swc_ecma_ast::Function;
 
