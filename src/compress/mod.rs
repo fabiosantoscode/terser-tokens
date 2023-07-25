@@ -8,7 +8,7 @@ pub fn compress(input: &str) -> String {
 
     let module = module_to_basic_blocks("input.js", &module).unwrap();
 
-    let module = module_to_ast(&module);
+    let module = module_to_ast(module);
 
     swc_stringify(module)
 }

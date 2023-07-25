@@ -99,9 +99,8 @@ fn get_reachable_blocks(
 ) -> HashSet<usize> {
     let func = BasicBlockGroup::from_asts(
         basic_blocks
-            .iter()
-            .cloned()
-            .zip(exits.iter().cloned())
+            .into_iter()
+            .zip(exits.into_iter())
             .map(|(block, exit)| BasicBlock::new(block.clone(), exit.clone()))
             .collect(),
     );

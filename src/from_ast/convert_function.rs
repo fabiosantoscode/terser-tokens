@@ -30,7 +30,7 @@ pub fn function_to_basic_blocks(
                     ctx.assign_name(&ident.id.sym.to_string(), arg);
                 }
                 swc_ecma_ast::Pat::Rest(ident) => {
-                    let name = ident.arg.clone().expect_ident().id.sym.to_string();
+                    let name = ident.arg.as_ident().as_ref().unwrap().id.sym.to_string();
                     let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
                     ctx.assign_name(&name, arg);
                 }
@@ -41,7 +41,7 @@ pub fn function_to_basic_blocks(
             ctx,
             function
                 .body
-                .clone()
+                .as_ref()
                 .expect("function body")
                 .stmts
                 .iter()
@@ -78,7 +78,7 @@ mod tests {
         )
         .expect("function_to_basic_blocks");
 
-        ctx.get_function(idx).expect("get_function").clone()
+        ctx.functions.get(&idx).expect("get function").clone()
     }
 
     #[test]

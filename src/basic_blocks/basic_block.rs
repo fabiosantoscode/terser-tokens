@@ -42,7 +42,7 @@ pub enum BasicBlockExit {
 
 impl BasicBlockExit {
     pub(crate) fn swap_labels(&self, swap_key: &HashMap<usize, usize>) -> BasicBlockExit {
-        let swap = |x: &usize| swap_key.get(&x).unwrap_or(&x).clone();
+        let swap = |x: &usize| *swap_key.get(&x).unwrap_or(&x);
 
         match self {
             BasicBlockExit::Jump(target) => BasicBlockExit::Jump(swap(target)),

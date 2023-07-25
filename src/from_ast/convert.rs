@@ -5,12 +5,13 @@ use swc_ecma_ast::{
     PatOrExpr, Stmt, ThrowStmt, YieldExpr,
 };
 
-use super::convert_context::{ConvertContext, NestedIntoStatement};
-use super::convert_function::function_to_basic_blocks;
 use crate::basic_blocks::{
     normalize_basic_blocks, ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup,
     BasicBlockInstruction, ExitType, TempExitType,
 };
+
+use super::convert_context::{ConvertContext, NestedIntoStatement};
+use super::convert_function::function_to_basic_blocks;
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
@@ -47,6 +48,13 @@ fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
             }
         }
     }
+}
+
+fn block_scoped_to_basic_blocks(ctx: &mut ConvertContext, stats: &[Stmt]) {
+    for stat in stats {
+        stat_to_basic_blocks(ctx, stat);
+    }
+    ctx.wrap_up_block();
 }
 
 /// Turn a statement into basic blocks. Wrapped by `stat_to_basic_blocks` to handle labels.
@@ -146,12 +154,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
                 );
             }
         }
-        Stmt::Block(block) => {
-            for stat in &block.stmts {
-                stat_to_basic_blocks(ctx, stat);
-                ctx.wrap_up_block();
-            }
-        }
+        Stmt::Block(block) => block_scoped_to_basic_blocks(ctx, &block.stmts),
         Stmt::Break(br) => ctx.register_break(&br.label),
         Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
@@ -180,8 +183,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
             let catch_pusher_idx = ctx.wrap_up_block();
             let try_idx = ctx.wrap_up_block();
 
-            stat_to_basic_blocks(ctx, &Stmt::Block(stmt.block.clone()));
-            ctx.wrap_up_block();
+            block_scoped_to_basic_blocks(ctx, &stmt.block.stmts);
 
             let before_catch_idx = ctx.wrap_up_block();
             let catch_idx = ctx.wrap_up_block();
@@ -192,19 +194,14 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
                     let catcherr = ctx.push_instruction(BasicBlockInstruction::CaughtError);
                     ctx.scope.insert(sym.sym.to_string(), catcherr);
                 }
-                let body = handler.body.clone();
-                stat_to_basic_blocks(ctx, &Stmt::Block(body));
+                block_scoped_to_basic_blocks(ctx, &handler.body.stmts);
             }
 
             let after_catch_idx = ctx.wrap_up_block();
             let finally_idx = ctx.wrap_up_block();
 
             if let Some(ref finalizer) = stmt.finalizer {
-                let finalizer = BlockStmt {
-                    span: Default::default(),
-                    stmts: finalizer.stmts.clone(),
-                };
-                stat_to_basic_blocks(ctx, &Stmt::Block(finalizer));
+                block_scoped_to_basic_blocks(ctx, &finalizer.stmts);
             }
 
             let after_finally_idx = ctx.wrap_up_block();
@@ -251,9 +248,9 @@ pub fn statements_to_basic_blocks(
     let mut exits = vec![];
 
     for i in 0..exit_count {
-        let e = ctx.exits[i].clone();
+        let e = &ctx.exits[i];
         match e {
-            Some(exit) => exits.push(exit),
+            Some(exit) => exits.push(exit.clone()),
             None => {
                 if i + 1 >= exit_count {
                     let undef_ret =
@@ -269,9 +266,9 @@ pub fn statements_to_basic_blocks(
     let (exits, basic_blocks) = normalize_basic_blocks(&exits, &ctx.basic_blocks);
 
     let asts = exits
-        .iter()
-        .zip(basic_blocks.iter())
-        .map(|(exit, block)| BasicBlock::new(block.clone(), exit.clone()))
+        .into_iter()
+        .zip(basic_blocks.into_iter())
+        .map(|(exit, block)| BasicBlock::new(block, exit))
         .collect::<Vec<_>>();
 
     BasicBlockGroup::from_asts(asts)

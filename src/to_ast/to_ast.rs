@@ -13,10 +13,10 @@ use super::{
     to_structured_flow::{do_tree, StructuredFlow},
 };
 
-pub fn module_to_ast(block_module: &BasicBlockModule) -> Module {
+pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {
         span: Default::default(),
-        body: to_ast_inner(block_module, &block_module.top_level_stats)
+        body: to_ast_inner(block_module)
             .into_iter()
             .map(|stat| ModuleItem::Stmt(stat))
             .collect::<Vec<_>>(),
@@ -24,31 +24,34 @@ pub fn module_to_ast(block_module: &BasicBlockModule) -> Module {
     }
 }
 
-fn to_ast_inner(block_module: &BasicBlockModule, block_group: &BasicBlockGroup) -> Vec<Stmt> {
-    let mut block_group: BasicBlockGroup = block_group.clone();
+fn to_ast_inner(block_module: BasicBlockModule) -> Vec<Stmt> {
+    let mut block_module = block_module;
 
-    remove_phi(&mut block_group);
+    remove_phi(&mut block_module.top_level_stats);
+    for mut func in block_module.functions.values_mut() {
+        remove_phi(&mut func);
+    }
 
-    let tree = do_tree(&block_group);
+    let tree = do_tree(&block_module.top_level_stats);
 
     to_stat_ast(
         &mut ToAstContext {
             caught_error: None,
             error_counter: 0,
-            module: block_module.clone(),
+            module: &block_module,
         },
         &tree,
-        &block_group,
+        &block_module.top_level_stats,
     )
 }
 
-struct ToAstContext {
+struct ToAstContext<'a> {
     pub caught_error: Option<String>,
     pub error_counter: usize,
-    pub module: BasicBlockModule,
+    pub module: &'a BasicBlockModule,
 }
 
-impl ToAstContext {
+impl ToAstContext<'_> {
     pub fn get_caught_error(&mut self) -> String {
         self.caught_error
             .take()
@@ -130,11 +133,7 @@ fn to_stat_ast(
 
             let return_stmt = Stmt::Return(ReturnStmt {
                 span: Default::default(),
-                arg: Some(Box::new(Expr::Ident(Ident {
-                    span: Default::default(),
-                    sym: varname.sym.clone(),
-                    optional: false,
-                }))),
+                arg: Some(Box::new(Expr::Ident(varname))),
             });
 
             vec![return_stmt]
@@ -144,11 +143,7 @@ fn to_stat_ast(
 
             let throw_stmt = Stmt::Throw(ThrowStmt {
                 span: Default::default(),
-                arg: (Box::new(Expr::Ident(Ident {
-                    span: Default::default(),
-                    sym: varname.sym.clone(),
-                    optional: false,
-                }))),
+                arg: (Box::new(Expr::Ident(varname))),
             });
 
             vec![throw_stmt]
@@ -289,9 +284,9 @@ fn to_expr_ast(
             })
         }
         BasicBlockInstruction::Function(id) => {
-            let func = ctx.module.get_function(*id).unwrap().clone();
+            let func = ctx.module.get_function(*id).unwrap();
 
-            let stmts = to_stat_ast(ctx, &do_tree(&func), &func);
+            let stmts = to_stat_ast(ctx, &do_tree(&func), func);
 
             Expr::Fn(FnExpr {
                 ident: None,
@@ -392,30 +387,13 @@ fn to_expr_ast(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::basic_block_module::ModuleSummary;
-    use crate::basic_blocks::testutils::{
-        stats_to_string, test_basic_blocks, test_basic_blocks_module,
-    };
-
-    fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
-        let module = BasicBlockModule {
-            summary: ModuleSummary {
-                filename: "test.js".into(),
-            },
-            top_level_stats: block_group.clone(),
-            functions: Default::default(),
-            imports: vec![],
-            exports: vec![],
-        };
-
-        to_ast_inner(&module, block_group)
-    }
+    use crate::basic_blocks::testutils::{stats_to_string, test_basic_blocks_module};
 
     #[test]
     fn to_tree() {
-        let block_group = test_basic_blocks("1 + 2 + 3");
+        let block_group = test_basic_blocks_module("1 + 2 + 3");
 
-        let tree = to_ast(&block_group);
+        let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = 1;
         var $1 = 2;
@@ -429,9 +407,9 @@ mod tests {
 
     #[test]
     fn to_tree_cond() {
-        let block_group = test_basic_blocks("1 ? 2 : 3");
+        let block_group = test_basic_blocks_module("1 ? 2 : 3");
 
-        let tree = to_ast(&block_group);
+        let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = 1;
         if ($0) {
@@ -457,7 +435,7 @@ mod tests {
             foo() + bar()",
         );
 
-        let tree = to_ast_inner(&block_group, &block_group.top_level_stats);
+        let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $8 = function() {
             var $3 = function() {
@@ -486,9 +464,9 @@ mod tests {
 
     #[test]
     fn to_loop() {
-        let block_group = test_basic_blocks("while (123) { if (456) { break; } }");
+        let block_group = test_basic_blocks_module("while (123) { if (456) { break; } }");
 
-        let tree = to_ast(&block_group);
+        let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         while(true){
             var $0 = 123;
@@ -506,13 +484,13 @@ mod tests {
 
     #[test]
     fn to_conditional_var() {
-        let block_group = test_basic_blocks(
+        let block_group = test_basic_blocks_module(
             "var x = 10;
             if (123) { x = 456; } else { x = 789; }
             x + 1",
         );
 
-        let tree = to_ast(&block_group);
+        let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = 10;
         var $1 = 123;
@@ -531,7 +509,7 @@ mod tests {
 
     #[test]
     fn to_trycatch() {
-        let block_group = test_basic_blocks(
+        let block_group = test_basic_blocks_module(
             "var x = 10;
             try {
                 if (x > 10) {
@@ -543,7 +521,7 @@ mod tests {
             return x;",
         );
 
-        let tree = to_ast(&block_group);
+        let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = 10;
         try {
@@ -565,7 +543,7 @@ mod tests {
 
     #[test]
     fn to_trycatch_nested() {
-        let block_group = test_basic_blocks(
+        let block_group = test_basic_blocks_module(
             "var x = 10;
             try {
                 if (x > 10) {
@@ -581,7 +559,7 @@ mod tests {
             return x;",
         );
 
-        let tree = to_ast(&block_group);
+        let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = 10;
         try {

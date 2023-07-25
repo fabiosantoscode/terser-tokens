@@ -36,8 +36,10 @@ pub fn swc_stringify(module: Module) -> String {
         body: stats,
         shebang: None,
     };
-    let str = Rc::new(RefCell::new(String::new()));
-    let buf = Buf { buf: str.clone() };
+    let out_str = Rc::new(RefCell::new(String::new()));
+    let buf = Buf {
+        buf: out_str.clone(),
+    };
     let writer = Box::new(buf);
     let sourcemapper: Rc<SourceMap> = Default::default();
     let mut emitter = Emitter {
@@ -49,5 +51,5 @@ pub fn swc_stringify(module: Module) -> String {
 
     emitter.emit_script(&script).unwrap();
 
-    str.clone().borrow().clone()
+    out_str.take()
 }

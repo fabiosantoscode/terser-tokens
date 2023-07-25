@@ -51,6 +51,9 @@ impl ConvertContext {
         let function_index = self.function_index;
         self.function_index.0 += 1;
 
+        // functions are shared between contexts
+        let functions = std::mem::replace(&mut self.functions, HashMap::new());
+
         let mut ctx = Self {
             basic_blocks: vec![vec![]],
             exits: vec![None],
@@ -59,27 +62,21 @@ impl ConvertContext {
             scope: self.scope.go_into_function(),
             label_tracking: vec![],
             function_index: self.function_index,
-            functions: self.functions.clone(),
+            functions,
             imports: vec![],
             exports: vec![],
         };
 
         let blocks = convert_in_function(&mut ctx)?;
 
-        self.functions.insert(function_index, blocks);
+        self.functions = std::mem::replace(&mut ctx.functions, HashMap::new());
 
         // collect global function registry, global var numbering
         self.var_index = ctx.var_index;
-
-        for new_functions in self.function_index.0..ctx.function_index.0 {
-            self.functions.insert(
-                FunctionId(new_functions),
-                ctx.functions
-                    .remove(&FunctionId(new_functions))
-                    .expect("function should be in context"),
-            );
-        }
         self.function_index = ctx.function_index;
+
+        // Add the new function
+        self.functions.insert(function_index, blocks);
 
         Ok(function_index)
     }
@@ -137,15 +134,16 @@ impl ConvertContext {
         // phi nodes for conditionally assigned variables
         let to_phi = conditionally_assigned.unwrap();
         let mut to_phi = to_phi
-            .iter()
+            .into_iter()
             .filter(|(_name, phies)| phies.len() > 1)
             .collect::<Vec<_>>();
+
         if to_phi.len() > 0 {
-            to_phi.sort_by_key(|(name, _)| *name);
-            for (varname, phies) in to_phi {
-                let phi = BasicBlockInstruction::Phi(phies.clone());
+            to_phi.sort_by(|(a, _), (b, _)| a.cmp(b));
+            for (varname, phies) in to_phi.into_iter() {
+                let phi = BasicBlockInstruction::Phi(phies);
                 let phi_idx = self.push_instruction(phi);
-                self.scope.insert(varname.clone(), phi_idx);
+                self.scope.insert(varname, phi_idx);
             }
         }
     }
@@ -200,10 +198,6 @@ impl ConvertContext {
                     .push(jump_from);
             }
         }
-    }
-
-    pub fn get_function(&self, id: FunctionId) -> Option<&BasicBlockGroup> {
-        self.functions.get(&id)
     }
 
     pub fn register_import(&mut self, import: Import) {

@@ -97,7 +97,7 @@ pub fn stats_to_string(stats: Vec<Stmt>) -> String {
 
     emitter.emit_script(&script).unwrap();
 
-    str.clone().borrow().clone()
+    str.take()
 }
 
 macro_rules! whitespace {

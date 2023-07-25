@@ -109,12 +109,11 @@ impl Ctx {
                 ContainingSyntax::IfThenElse => None, // TODO what do?
                 _ => todo!("break indices? {item:?}"),
             })
-            .expect("break/continue without matching to a container")
-            .clone();
+            .expect("break/continue without matching to a container");
 
         let index = if is_brk { index + 1 } else { index };
 
-        containing_syntax[index].0.clone()
+        containing_syntax[index].0
     }
 
     /// According to our current context, where will we fall through to?
@@ -127,7 +126,7 @@ impl Ctx {
             .rev()
             .find_map(|(_, item)| match item {
                 ContainingSyntax::LoopHeadedBy(x) | ContainingSyntax::BlockFollowedBy(x) => {
-                    Some(x.clone())
+                    Some(*x)
                 }
                 _ => None,
             })
@@ -152,7 +151,7 @@ fn context() -> Rc<Ctx> {
 fn get_breakable_id() -> BreakableId {
     BREAKABLE_ID.with(|id| {
         *id.borrow_mut() += 1;
-        BreakableId(Some(id.borrow().clone()))
+        BreakableId(Some(*id.borrow()))
     })
 }
 
@@ -1237,17 +1236,18 @@ impl StructuredFlow {
             }
         }
     }
-    fn children(&self) -> Vec<Vec<StructuredFlow>> {
+
+    fn children(&self) -> Vec<&Vec<StructuredFlow>> {
         match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y.clone(), z.clone()],
+            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y, z],
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => vec![x.clone()],
-            StructuredFlow::Block(_, x) => vec![x.clone()],
+            StructuredFlow::Loop(_, x) => vec![x],
+            StructuredFlow::Block(_, x) => vec![x],
             StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, t, v, els, after) => {
-                vec![t.clone(), v.clone(), els.clone(), after.clone()]
+                vec![t, v, els, after]
             }
         }
     }
@@ -1286,7 +1286,7 @@ impl StructuredFlow {
 
     fn breaks_to_id(&self) -> Option<BreakableId> {
         match self {
-            StructuredFlow::Break(id) | StructuredFlow::Continue(id) => Some(id.clone()),
+            StructuredFlow::Break(id) | StructuredFlow::Continue(id) => Some(*id),
             _ => None,
         }
     }
@@ -1306,7 +1306,7 @@ impl StructuredFlow {
             | StructuredFlow::Break(id)
             | StructuredFlow::Continue(id)
             | StructuredFlow::Loop(id, _)
-            | StructuredFlow::TryCatch(id, _, _, _, _) => Some(id.clone()),
+            | StructuredFlow::TryCatch(id, _, _, _, _) => Some(*id),
             _ => None,
         }
     }
