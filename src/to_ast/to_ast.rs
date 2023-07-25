@@ -27,10 +27,9 @@ pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
 fn to_ast_inner(block_module: BasicBlockModule) -> Vec<Stmt> {
     let mut block_module = block_module;
 
-    remove_phi(&mut block_module.top_level_stats);
-    for mut func in block_module.functions.values_mut() {
-        remove_phi(&mut func);
-    }
+    block_module.mutate_all_block_groups(&mut |block_group| {
+        remove_phi(block_group);
+    });
 
     let tree = do_tree(&block_module.top_level_stats);
 

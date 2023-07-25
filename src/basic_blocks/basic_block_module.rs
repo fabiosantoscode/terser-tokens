@@ -34,6 +34,16 @@ impl BasicBlockModule {
     pub fn get_function(&self, id: FunctionId) -> Option<&BasicBlockGroup> {
         self.functions.get(&id)
     }
+
+    pub fn mutate_all_block_groups<Mutator>(&mut self, mutator: &mut Mutator)
+    where
+        Mutator: FnMut(&mut BasicBlockGroup),
+    {
+        mutator(&mut self.top_level_stats);
+        for (_, function) in self.functions.iter_mut() {
+            mutator(function);
+        }
+    }
 }
 
 impl Debug for BasicBlockModule {

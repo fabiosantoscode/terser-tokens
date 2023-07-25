@@ -56,8 +56,39 @@ fn remove_phi_inner(block: &mut BasicBlock, phies_to_final_name: &mut HashMap<us
         for used_var in ins.used_vars_mut() {
             if let Some(final_name) = phies_to_final_name.get(used_var) {
                 *used_var = *final_name;
-                todo!("test this case")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::basic_blocks::testutils::parse_basic_blocks;
+
+    #[test]
+    fn test_remove_phi() {
+        let mut blocks = parse_basic_blocks(
+            r###"
+            @0: {
+                $0 = 777
+                $1 = $0
+                $2 = either($0, $1)
+                exit = return $2
+            }
+            "###,
+        );
+
+        remove_phi(&mut blocks);
+
+        insta::assert_debug_snapshot!(blocks,
+        @r###"
+        @0: {
+            $2 = 777
+            $2 = $2
+            exit = return $2
+        }
+        "###
+        );
     }
 }

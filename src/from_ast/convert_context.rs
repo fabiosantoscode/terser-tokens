@@ -119,32 +119,26 @@ impl ConvertContext {
         self.scope.insert(name.into(), value);
     }
 
-    pub fn push_conditionals_context(&mut self) {
+    pub fn enter_conditional_branch(&mut self) {
         self.conditionals.push(HashMap::new())
     }
 
-    pub fn pop_conditionals_context(&mut self) -> Option<HashMap<String, Vec<usize>>> {
-        self.conditionals.pop()
-    }
-
-    pub fn push_phi_assignments(
-        &mut self,
-        conditionally_assigned: Option<HashMap<String, Vec<usize>>>,
-    ) {
+    pub fn leave_conditional_branch(&mut self) {
         // phi nodes for conditionally assigned variables
-        let to_phi = conditionally_assigned.unwrap();
+        let to_phi = self
+            .conditionals
+            .pop()
+            .expect("unbalanced conditional branch");
         let mut to_phi = to_phi
             .into_iter()
-            .filter(|(_name, phies)| phies.len() > 1)
+            .filter(|(_, phies)| phies.len() > 1)
             .collect::<Vec<_>>();
+        to_phi.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        if to_phi.len() > 0 {
-            to_phi.sort_by(|(a, _), (b, _)| a.cmp(b));
-            for (varname, phies) in to_phi.into_iter() {
-                let phi = BasicBlockInstruction::Phi(phies);
-                let phi_idx = self.push_instruction(phi);
-                self.scope.insert(varname, phi_idx);
-            }
+        for (varname, phies) in to_phi.into_iter() {
+            let phi = BasicBlockInstruction::Phi(phies);
+            let phi_idx = self.push_instruction(phi);
+            self.scope.insert(varname, phi_idx);
         }
     }
 

@@ -123,7 +123,7 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
 
         fn ins_ref(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // $123
-            let (input, _) = nom::bytes::complete::tag("@")(input)?;
+            let (input, _) = nom::bytes::complete::tag("$")(input)?;
             let (input, n) = nom::character::complete::digit1(input)?;
             let n_usize: usize = n.parse().unwrap();
             Ok((input, BasicBlockInstruction::Ref(n_usize)))
@@ -211,7 +211,6 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
                 nom::bytes::complete::tag(","),
                 nom::sequence::preceded(nom::character::complete::multispace0, parse_ref),
             )(input)?;
-            println!("here {input}");
             let (input, _paren) = nom::bytes::complete::tag(")")(input)?;
 
             Ok((input, BasicBlockInstruction::Phi(items)))

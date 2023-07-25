@@ -1,8 +1,8 @@
 use std::borrow::Borrow;
 
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmt, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat,
-    PatOrExpr, Stmt, ThrowStmt, YieldExpr,
+    AwaitExpr, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt,
+    ThrowStmt, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -51,6 +51,7 @@ fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
 }
 
 fn block_scoped_to_basic_blocks(ctx: &mut ConvertContext, stats: &[Stmt]) {
+    // TODO actually implement block scope
     for stat in stats {
         stat_to_basic_blocks(ctx, stat);
     }
@@ -108,7 +109,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
             let blockidx_before = ctx.current_block_index();
             ctx.wrap_up_block();
 
-            ctx.push_conditionals_context();
+            ctx.enter_conditional_branch();
 
             let blockidx_consequent_before = ctx.current_block_index();
             stat_to_basic_blocks(ctx, &cons);
@@ -125,9 +126,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
                 None
             };
 
-            let conditionally_assigned = ctx.pop_conditionals_context();
-
-            ctx.push_phi_assignments(conditionally_assigned);
+            ctx.leave_conditional_branch();
             ctx.wrap_up_block();
 
             if let Some((blockidx_alternate_before, blockidx_alternate_after)) = alt {
@@ -311,7 +310,7 @@ pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
         }) => {
             let (_, test, blockidx_before) = ctx.create_gapped_block(&test);
 
-            ctx.push_conditionals_context();
+            ctx.enter_conditional_branch();
 
             let (blockidx_consequent_before, cons, blockidx_consequent_after) =
                 ctx.create_gapped_block(&cons);
@@ -333,9 +332,7 @@ pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
                 BasicBlockExit::Jump(blockidx_after),
             );
 
-            let conditionally_assigned = ctx.pop_conditionals_context();
-
-            ctx.push_phi_assignments(conditionally_assigned);
+            ctx.leave_conditional_branch();
             ctx.wrap_up_block();
 
             // the retval of our ternary is a phi node
