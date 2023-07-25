@@ -245,7 +245,7 @@ fn to_stat_ast(
 
 fn to_expr_ast(
     ctx: &mut ToAstContext,
-    block_group: &BasicBlockGroup,
+    _block_group: &BasicBlockGroup,
     expr: &BasicBlockInstruction,
 ) -> Expr {
     match expr {
@@ -400,12 +400,14 @@ mod tests {
     };
 
     fn to_ast(block_group: &BasicBlockGroup) -> Vec<Stmt> {
-        let mut module = BasicBlockModule {
+        let module = BasicBlockModule {
             summary: ModuleSummary {
                 filename: "test.js".into(),
             },
             top_level_stats: block_group.clone(),
             functions: Default::default(),
+            imports: vec![],
+            exports: vec![],
         };
 
         to_ast_inner(&module, block_group)

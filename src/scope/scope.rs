@@ -83,7 +83,7 @@ mod tests {
         assert_eq!(scope.get("c"), Some(2));
         assert_eq!(scope.get("d"), None);
 
-        let mut scope = scope.leave();
+        let scope = scope.leave();
 
         assert_eq!(scope.get("a"), Some(0));
         assert_eq!(scope.get("b"), None);

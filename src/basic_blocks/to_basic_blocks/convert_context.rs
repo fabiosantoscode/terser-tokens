@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::basic_blocks::basic_block::{BasicBlockExit, BasicBlockInstruction};
 use crate::basic_blocks::basic_block_group::{BasicBlockGroup, FunctionId};
+use crate::basic_blocks::basic_block_module::{Export, Import};
 use crate::scope::scope::Scope;
 use swc_ecma_ast::{Expr, Ident};
 
@@ -22,6 +23,8 @@ pub struct ConvertContext {
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     function_index: FunctionId,
     pub functions: HashMap<FunctionId, BasicBlockGroup>,
+    pub imports: Vec<Import>,
+    pub exports: Vec<Export>,
 }
 
 impl ConvertContext {
@@ -35,6 +38,8 @@ impl ConvertContext {
             label_tracking: vec![],
             function_index: FunctionId(0),
             functions: HashMap::new(),
+            imports: vec![],
+            exports: vec![],
         }
     }
 
@@ -58,6 +63,8 @@ impl ConvertContext {
             label_tracking: vec![],
             function_index: self.function_index,
             functions: self.functions.clone(),
+            imports: vec![],
+            exports: vec![],
         };
 
         let blocks = convert_in_function(&mut ctx)?;
@@ -206,5 +213,13 @@ impl ConvertContext {
 
     pub fn get_function(&self, id: FunctionId) -> Option<&BasicBlockGroup> {
         self.functions.get(&id)
+    }
+
+    pub fn register_import(&mut self, import: Import) {
+        self.imports.push(import);
+    }
+
+    pub fn register_export(&mut self, export: Export) {
+        self.exports.push(export);
     }
 }

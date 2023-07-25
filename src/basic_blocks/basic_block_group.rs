@@ -45,7 +45,7 @@ impl Debug for BasicBlockGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.environment.env_type {
             BasicBlockEnvironmentType::Module => {}
-            BasicBlockEnvironmentType::Function(argc) => writeln!(f, "function():")?,
+            BasicBlockEnvironmentType::Function(_argc) => writeln!(f, "function():")?,
         }
         for (k, v) in self.iter() {
             writeln!(f, "@{}: {:?}", k, v)?;

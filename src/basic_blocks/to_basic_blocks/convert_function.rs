@@ -51,10 +51,10 @@ pub fn function_to_basic_blocks(
                 .as_slice(),
         );
         func.environment.env_type = BasicBlockEnvironmentType::Function(arg_count);
-        /// TODO refactor note:
-        /// because statements_to_basic_blocks is not a method of `ctx`, it doesn't know if it's
-        /// supposed to be a function. We should make it a method of `ctx` so it returns the
-        /// correct type. Same for function_to_basic_blocks probably.
+        // TODO refactor note:
+        // because statements_to_basic_blocks is not a method of `ctx`, it doesn't know if it's
+        // supposed to be a function. We should make it a method of `ctx` so it returns the
+        // correct type. Same for function_to_basic_blocks probably.
         Ok(func)
     })
 }
