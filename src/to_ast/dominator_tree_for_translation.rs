@@ -7,7 +7,7 @@ use domtree::{
     DomTree,
 };
 
-use super::super::{
+use crate::basic_blocks::{
     basic_block::{BasicBlock, BasicBlockExit},
     basic_block_group::BasicBlockGroup,
 };

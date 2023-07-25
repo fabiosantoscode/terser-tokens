@@ -1,6 +1,6 @@
-use super::super::basic_block::{BasicBlockExit, ExitType};
-use super::super::basic_block_group::BasicBlockGroup;
 use super::dominator_tree_for_translation::Graph;
+use crate::basic_blocks::basic_block::{BasicBlockExit, ExitType};
+use crate::basic_blocks::basic_block_group::BasicBlockGroup;
 use deep_bind::contextual;
 use std::cell::RefCell;
 use std::collections::HashSet;

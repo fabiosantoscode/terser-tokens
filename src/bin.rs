@@ -6,6 +6,7 @@ mod compress;
 mod scope;
 mod swc_parse;
 mod swc_stringify;
+mod to_ast;
 
 pub fn main() {
     let mut input = String::new();
