@@ -21,7 +21,7 @@ pub fn function_to_basic_blocks(
         })
         .count();
 
-    ctx.go_into_function(arg_count, |ctx| {
+    ctx.go_into_function(|ctx| {
         function
             .params
             .iter()

@@ -43,19 +43,6 @@ impl<T: PartialEq + Eq + Hash + Clone> MemberSet<T> for HashMemberSet<T> {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct DomTreeable {
-    nodes: Vec<BasicBlock>,
-}
-
-impl From<BasicBlockGroup> for DomTreeable {
-    fn from(value: BasicBlockGroup) -> Self {
-        DomTreeable {
-            nodes: value.iter().map(|(_, node)| node.clone()).collect(),
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Node {
     pub tag: usize,                                  // node's identifier
