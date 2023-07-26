@@ -2,7 +2,7 @@ use nom::IResult;
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, ExitType,
-    TempExitType,
+    NonLocalId, TempExitType,
 };
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
@@ -129,6 +129,26 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             Ok((input, BasicBlockInstruction::Phi(items)))
         }
 
+        fn ins_read_non_local(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // read_non_local {ref}
+            let (input, _) = tag("read_non_local")(input)?;
+            let input = whitespace!(input);
+            let (input, nonloc) = parse_nonlocal_ref(input)?;
+
+            Ok((input, BasicBlockInstruction::ReadNonLocal(nonloc)))
+        }
+
+        fn ins_write_non_local(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // write_non_local {ref} {ref}
+            let (input, _) = tag("write_non_local")(input)?;
+            let input = whitespace!(input);
+            let (input, nonloc) = parse_nonlocal_ref(input)?;
+            let input = whitespace!(input);
+            let (input, value) = parse_ref(input)?;
+
+            Ok((input, BasicBlockInstruction::WriteNonLocal(nonloc, value)))
+        }
+
         // $123 =
         let input = whitespace!(input);
 
@@ -147,6 +167,8 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             ins_array,
             ins_tempexit,
             ins_phi,
+            ins_read_non_local,
+            ins_write_non_local,
         )))(input)
         .expect("bad instruction");
 
@@ -310,6 +332,11 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         let (input, n) = digit1(input)?;
         Ok((input, n.parse().unwrap()))
     }
+    fn parse_nonlocal_ref(input: &str) -> IResult<&str, NonLocalId> {
+        let (input, _) = tag("$$")(input)?;
+        let (input, n) = digit1(input)?;
+        Ok((input, NonLocalId(n.parse().unwrap())))
+    }
     fn parse_blockref(input: &str) -> IResult<&str, usize> {
         let (input, _) = tag("@")(input)?;
         let (input, n) = digit1(input)?;
@@ -384,41 +411,51 @@ mod tests {
                 $3 = undefined
                 exit = return $3
             }
+            @8: {
+                $4 = read_non_local $$2
+                $5 = write_non_local $$2 $4
+                exit = jump @9
+            }
             "###,
         )
         .unwrap()
         .1;
 
         insta::assert_debug_snapshot!(blocks, @r###"
-            @0: {
-                $0 = 777
-                exit = jump @1
-            }
-            @1: {
-                exit = cond $0 ? jump @2 : jump @7
-            }
-            @2: {
-                $1 = 888
-                exit = jump @3
-            }
-            @3: {
-                exit = cond $1 ? jump @4 : jump @5
-            }
-            @4: {
-                exit = jump @7
-            }
-            @5: {
-                exit = jump @6
-            }
-            @6: {
-                exit = jump @0
-            }
-            @7: {
-                $2 = 999
-                $3 = undefined
-                exit = return $3
-            }
-            "###
+        @0: {
+            $0 = 777
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $0 ? jump @2 : jump @7
+        }
+        @2: {
+            $1 = 888
+            exit = jump @3
+        }
+        @3: {
+            exit = cond $1 ? jump @4 : jump @5
+        }
+        @4: {
+            exit = jump @7
+        }
+        @5: {
+            exit = jump @6
+        }
+        @6: {
+            exit = jump @0
+        }
+        @7: {
+            $2 = 999
+            $3 = undefined
+            exit = return $3
+        }
+        @8: {
+            $4 = read_non_local $$2
+            $5 = write_non_local $$2 $4
+            exit = jump @9
+        }
+        "###
         );
     }
 }

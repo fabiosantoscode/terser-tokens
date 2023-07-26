@@ -2,7 +2,7 @@ use std::fmt::{Debug, Error, Formatter};
 
 use super::{
     ArrayElement, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup,
-    BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId,
+    BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, NonLocalId,
 };
 
 impl Debug for BasicBlock {
@@ -69,6 +69,14 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::ArgumentRest(idx) => {
                 write!(f, "arguments[{}...]", idx)
             }
+
+            BasicBlockInstruction::ReadNonLocal(id) => {
+                write!(f, "read_non_local $${}", id.0)
+            }
+            BasicBlockInstruction::WriteNonLocal(id, val) => {
+                write!(f, "write_non_local $${} ${}", id.0, val)
+            }
+
             BasicBlockInstruction::TempExit(exit_type, arg) => {
                 write!(f, "{:?} ${}", exit_type, arg)
             }
@@ -167,6 +175,12 @@ impl Debug for BasicBlockModule {
 impl Debug for FunctionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "FunctionId({})", self.0)
+    }
+}
+
+impl Debug for NonLocalId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NonLocalId({})", self.0)
     }
 }
 

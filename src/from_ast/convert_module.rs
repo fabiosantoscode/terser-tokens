@@ -102,7 +102,7 @@ fn find_importexport(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::swc_parse::swc_parse;
+    use crate::{basic_blocks::FunctionId, swc_parse::swc_parse};
 
     #[test]
     fn test_basic_blocks_module() {
@@ -138,37 +138,67 @@ mod tests {
                     return bar()
                 }",
             ),
-        );
+        )
+        .unwrap();
         insta::assert_debug_snapshot!(module, @r###"
-        Ok(
-            BasicBlockModule {
-                summary: ModuleSummary {
-                    filename: "index.js",
-                },
-                top_level_stats: @0: {
-                    $6 = FunctionId(0)
-                    $7 = undefined
-                    exit = return $7
+        BasicBlockModule {
+            summary: ModuleSummary {
+                filename: "index.js",
+            },
+            top_level_stats: @0: {
+                $6 = FunctionId(0)
+                $7 = undefined
+                exit = return $7
+            }
+            ,
+            functions: [
+                function():
+                @0: {
+                    $2 = FunctionId(1)
+                    $3 = $2
+                    $4 = call $3()
+                    exit = return $4
                 }
                 ,
-                functions: [
-                    function():
-                    @0: {
-                        $2 = FunctionId(1)
-                        $3 = $2
-                        $4 = call $3()
-                        exit = return $4
+                function():
+                @0: {
+                    $0 = 2
+                    exit = return $0
+                }
+                ,
+            ],
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_closure() {
+        let module = module_to_basic_blocks(
+            "index.js",
+            &swc_parse(
+                "var foo = function() {
+                    var bar = 1
+                    return function() {
+                        return bar
                     }
-                    ,
-                    function():
-                    @0: {
-                        $0 = 2
-                        exit = return $0
-                    }
-                    ,
-                ],
-            },
+                }",
+            ),
         )
+        .unwrap();
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
+        function(nonlocals=[NonLocalId(0)]):
+        @0: {
+            $0 = 1
+            $3 = FunctionId(1)
+            exit = return $3
+        }
+        "###);
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
+        function(nonlocals=[NonLocalId(0)]):
+        @0: {
+            $1 = read_non_local $$0
+            exit = return $1
+        }
         "###);
     }
 

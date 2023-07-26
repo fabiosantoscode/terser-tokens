@@ -1,4 +1,4 @@
-use super::BasicBlock;
+use super::{BasicBlock, NonLocalId};
 
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
@@ -7,15 +7,17 @@ pub struct BasicBlockGroup {
 }
 
 #[derive(Default, Clone)]
+pub struct BasicBlockEnvironment {
+    pub env_type: BasicBlockEnvironmentType,
+    pub provided_nonlocals: Vec<NonLocalId>,
+    pub used_nonlocals: Vec<NonLocalId>,
+}
+
+#[derive(Default, Clone)]
 pub enum BasicBlockEnvironmentType {
     #[default]
     Module,
     Function(usize),
-}
-
-#[derive(Default, Clone)]
-pub struct BasicBlockEnvironment {
-    pub env_type: BasicBlockEnvironmentType,
 }
 
 impl BasicBlockGroup {

@@ -15,7 +15,13 @@ pub enum BasicBlockInstruction {
     Call(usize, Vec<usize>),
     ArgumentRead(usize),
     ArgumentRest(usize),
+    ReadNonLocal(NonLocalId),
+    WriteNonLocal(NonLocalId, usize),
 }
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NonLocalId(pub usize);
 
 #[derive(Clone, PartialEq)]
 pub enum ArrayElement {
@@ -48,6 +54,8 @@ impl BasicBlockInstruction {
                     ArrayElement::Spread(id) => Some(id),
                 })
                 .collect(),
+            BasicBlockInstruction::TempExit(_, arg) => vec![arg],
+            BasicBlockInstruction::CaughtError => vec![],
             BasicBlockInstruction::Function(_) => vec![],
             BasicBlockInstruction::Call(callee, args) => {
                 let mut res = vec![callee];
@@ -56,8 +64,8 @@ impl BasicBlockInstruction {
             }
             BasicBlockInstruction::ArgumentRead(_) => vec![],
             BasicBlockInstruction::ArgumentRest(_) => vec![],
-            BasicBlockInstruction::TempExit(_, arg) => vec![arg],
-            BasicBlockInstruction::CaughtError => vec![],
+            BasicBlockInstruction::ReadNonLocal(_) => vec![],
+            BasicBlockInstruction::WriteNonLocal(_, val) => vec![val],
         }
     }
 

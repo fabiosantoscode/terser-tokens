@@ -377,6 +377,13 @@ fn to_expr_ast(
         )),
 
         BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
+
+        BasicBlockInstruction::ReadNonLocal(id) => {
+            todo!()
+        }
+        BasicBlockInstruction::WriteNonLocal(id, value) => {
+            todo!()
+        }
     }
 }
 
