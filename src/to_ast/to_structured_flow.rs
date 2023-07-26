@@ -192,7 +192,7 @@ fn do_tree_inner(node: usize) -> StructuredFlow {
 fn node_within(node: usize, ys: &[usize]) -> StructuredFlow {
     match ys.split_first() {
         None => {
-            match &context().graph.nodes[node].basic_block.exit {
+            match &context().graph.nodes[node].basic_block_exit {
                 BasicBlockExit::SetTryAndCatch(
                     try_block,
                     catch_block,
@@ -227,7 +227,7 @@ fn node_within(node: usize, ys: &[usize]) -> StructuredFlow {
                 unused_id,
                 vec![
                     vec![StructuredFlow::BasicBlock(node)],
-                    (match &context().graph.nodes[node].basic_block.exit {
+                    (match &context().graph.nodes[node].basic_block_exit {
                         BasicBlockExit::Jump(to) | BasicBlockExit::EndFinally(to) => {
                             do_branch(node, *to)
                         }

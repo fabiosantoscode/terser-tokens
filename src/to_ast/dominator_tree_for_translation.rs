@@ -10,7 +10,7 @@ use domtree::{
     DomTree,
 };
 
-use crate::basic_blocks::{BasicBlock, BasicBlockExit, BasicBlockGroup};
+use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup};
 
 #[derive(Clone)]
 pub struct VecSet<Y>(Vec<Y>);
@@ -50,7 +50,7 @@ pub struct Node {
     pub frontiers: UnsafeCell<HashMemberSet<usize>>, // node's dominance frontiers
     pub incoming_edges: Vec<usize>,                  // node's in-edges
     pub outgoing_edges: Vec<usize>,                  // node's out-edges
-    pub basic_block: BasicBlock,                     // node's blocks AST
+    pub basic_block_exit: BasicBlockExit,            // node's blocks AST
 }
 
 #[derive(Debug)]
@@ -142,10 +142,10 @@ impl DominanceFrontier for Graph {
     }
 }
 
-fn to_structured_flow_jump_targets(node: &BasicBlock) -> Vec<usize> {
-    match node.exit {
+fn to_structured_flow_jump_targets(exit: &BasicBlockExit) -> Vec<usize> {
+    match exit {
         BasicBlockExit::SetTryAndCatch(t, c, f, a) => {
-            vec![t, c, f, a]
+            vec![*t, *c, *f, *a]
         }
         BasicBlockExit::PopCatch(_c, _f) => {
             vec![]
@@ -156,7 +156,7 @@ fn to_structured_flow_jump_targets(node: &BasicBlock) -> Vec<usize> {
         BasicBlockExit::EndFinally(_f) => {
             vec![]
         }
-        _ => node.jump_targets(),
+        _ => exit.jump_targets(),
     }
 }
 
@@ -164,7 +164,7 @@ impl BasicBlockGroup {
     pub fn get_dom_graph(&self) -> Graph {
         let mut all_incoming = HashMap::new();
         for (tag, node) in self.iter() {
-            for target in to_structured_flow_jump_targets(node) {
+            for target in to_structured_flow_jump_targets(&node.exit) {
                 all_incoming
                     .entry(target)
                     .or_insert_with(Vec::new)
@@ -180,8 +180,8 @@ impl BasicBlockGroup {
                     dom: None,
                     frontiers: UnsafeCell::new(HashMemberSet(std::collections::HashSet::new())),
                     incoming_edges: all_incoming.get(&tag).cloned().unwrap_or_default(),
-                    outgoing_edges: to_structured_flow_jump_targets(node),
-                    basic_block: node.clone(),
+                    outgoing_edges: to_structured_flow_jump_targets(&node.exit),
+                    basic_block_exit: node.exit.clone(),
                 })
                 .collect(),
         };

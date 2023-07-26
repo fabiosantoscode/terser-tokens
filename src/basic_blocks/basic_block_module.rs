@@ -1,6 +1,5 @@
-use super::basic_block_group::{BasicBlockGroup, FunctionId};
+use super::basic_block_group::BasicBlockGroup;
 use std::collections::HashMap;
-use std::fmt::{Debug, Error, Formatter};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleSummary {
@@ -46,35 +45,6 @@ impl BasicBlockModule {
     }
 }
 
-impl Debug for BasicBlockModule {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let BasicBlockModule {
-            summary,
-            top_level_stats,
-            functions,
-            imports,
-            exports,
-        } = self;
-
-        let mut functions: Vec<_> = functions.iter().map(|(k, v)| (k.0, v)).collect();
-        functions.sort_unstable_by_key(|(k, _)| *k);
-        let functions: Vec<_> = functions.iter().map(|(_, v)| v).collect();
-
-        let mut d = f.debug_struct("BasicBlockModule");
-
-        d.field("summary", &summary);
-        d.field("top_level_stats", &top_level_stats);
-
-        if !functions.is_empty() {
-            d.field("functions", &functions);
-        }
-        if !imports.is_empty() {
-            d.field("imports", &self.imports);
-        }
-        if !exports.is_empty() {
-            d.field("exports", &self.exports);
-        }
-
-        d.finish()
-    }
-}
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Hash, Eq)]
+pub struct FunctionId(pub usize);

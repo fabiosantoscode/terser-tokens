@@ -1,0 +1,183 @@
+use super::{
+    ArrayElement, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup,
+    BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId,
+};
+use std::fmt::{Debug, Error, Formatter};
+
+impl Debug for BasicBlock {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{\n")?;
+        for (id, node) in &self.instructions {
+            write!(f, "    ${} = {:?}\n", id, node)?;
+        }
+        write!(f, "    exit = {:?}\n", &self.exit)?;
+        write!(f, "}}")
+    }
+}
+
+impl Debug for BasicBlockInstruction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BasicBlockInstruction::LitNumber(num) => {
+                write!(f, "{}", num)
+            }
+            BasicBlockInstruction::BinOp(op, l, r) => {
+                write!(f, "${} {} ${}", l, op, r)
+            }
+            BasicBlockInstruction::Ref(id) => {
+                write!(f, "${}", id)
+            }
+            BasicBlockInstruction::Undefined => {
+                write!(f, "undefined")
+            }
+            BasicBlockInstruction::This => {
+                write!(f, "this")
+            }
+            BasicBlockInstruction::Array(elements) => {
+                write!(
+                    f,
+                    "[{}]",
+                    elements
+                        .iter()
+                        .map(|e| match e {
+                            ArrayElement::Hole => format!(","),
+                            ArrayElement::Item(id) => format!("${},", id),
+                            ArrayElement::Spread(id) => format!("...${},", id),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            }
+            BasicBlockInstruction::Function(id) => {
+                write!(f, "{:?}", id)
+            }
+            BasicBlockInstruction::Call(callee, args) => {
+                write!(
+                    f,
+                    "call ${}({})",
+                    callee,
+                    args.iter()
+                        .map(|a| format!("${}", a))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            BasicBlockInstruction::ArgumentRead(idx) => {
+                write!(f, "arguments[{}]", idx)
+            }
+            BasicBlockInstruction::ArgumentRest(idx) => {
+                write!(f, "arguments[{}...]", idx)
+            }
+            BasicBlockInstruction::TempExit(exit_type, arg) => {
+                write!(f, "{:?} ${}", exit_type, arg)
+            }
+
+            BasicBlockInstruction::Phi(vars) => {
+                write!(
+                    f,
+                    "either({})",
+                    vars.iter()
+                        .map(|v| format!("${}", v))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            BasicBlockInstruction::CaughtError => {
+                write!(f, "caught_error()")
+            }
+        }
+    }
+}
+
+impl Debug for BasicBlockExit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BasicBlockExit::Cond(cond, cons, alt) => {
+                write!(f, "cond ${} ? jump @{} : jump @{}", cond, cons, alt)
+            }
+            BasicBlockExit::Jump(to) => {
+                write!(f, "jump @{}", to)
+            }
+            BasicBlockExit::ExitFn(exit_type, val) => match exit_type {
+                ExitType::Return => {
+                    write!(f, "return ${}", val)
+                }
+                ExitType::Throw => {
+                    write!(f, "throw ${}", val)
+                }
+            },
+            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after_block) => {
+                write!(
+                    f,
+                    "try @{} catch @{} finally @{} after @{}",
+                    try_block, catch_block, finally_block, after_block
+                )
+            }
+            BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
+                write!(
+                    f,
+                    "error ? jump @{} : jump @{}",
+                    catch_block, finally_or_after
+                )
+            }
+            BasicBlockExit::PopFinally(finally_block, after_block) => {
+                write!(f, "finally @{} after @{}", finally_block, after_block)
+            }
+            BasicBlockExit::EndFinally(after_block) => {
+                write!(f, "end finally after @{}", after_block)
+            }
+        }
+    }
+}
+
+impl Debug for BasicBlockModule {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        let BasicBlockModule {
+            summary,
+            top_level_stats,
+            functions,
+            imports,
+            exports,
+        } = self;
+
+        let mut functions: Vec<_> = functions.iter().map(|(k, v)| (k.0, v)).collect();
+        functions.sort_unstable_by_key(|(k, _)| *k);
+        let functions: Vec<_> = functions.iter().map(|(_, v)| v).collect();
+
+        let mut d = f.debug_struct("BasicBlockModule");
+
+        d.field("summary", &summary);
+        d.field("top_level_stats", &top_level_stats);
+
+        if !functions.is_empty() {
+            d.field("functions", &functions);
+        }
+        if !imports.is_empty() {
+            d.field("imports", &self.imports);
+        }
+        if !exports.is_empty() {
+            d.field("exports", &self.exports);
+        }
+
+        d.finish()
+    }
+}
+
+impl Debug for FunctionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FunctionId({})", self.0)
+    }
+}
+
+impl Debug for BasicBlockGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.environment.env_type {
+            BasicBlockEnvironmentType::Module => {}
+            BasicBlockEnvironmentType::Function(_argc) => writeln!(f, "function():")?,
+        }
+        for (k, v) in self.iter() {
+            writeln!(f, "@{}: {:?}", k, v)?;
+        }
+        Ok(())
+    }
+}
