@@ -195,7 +195,7 @@ impl BasicBlockGroup {
 
 #[test]
 fn test_dominance() {
-    use crate::basic_blocks::testutils::*;
+    use crate::testutils::*;
 
     let block = test_basic_blocks(
         "var x = 0;

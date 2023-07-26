@@ -386,7 +386,7 @@ fn to_expr_ast(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::testutils::*;
+    use crate::testutils::*;
 
     #[test]
     fn to_tree() {

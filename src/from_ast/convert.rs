@@ -434,7 +434,7 @@ pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::basic_blocks::testutils::*;
+    use crate::testutils::*;
 
     #[test]
     fn simple_add() {

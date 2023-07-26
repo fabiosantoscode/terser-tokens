@@ -3,9 +3,6 @@ pub mod basic_block_group;
 pub mod basic_block_module;
 pub mod normalize;
 
-#[cfg(test)]
-pub mod testutils;
-
 pub use basic_block::{
     ArrayElement, BasicBlock, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
 };

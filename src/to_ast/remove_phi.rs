@@ -64,7 +64,7 @@ fn remove_phi_inner(block: &mut BasicBlock, phies_to_final_name: &mut HashMap<us
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::testutils::*;
+    use crate::testutils::*;
 
     #[test]
     fn test_remove_phi() {

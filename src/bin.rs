@@ -9,6 +9,9 @@ mod swc_parse;
 mod swc_stringify;
 mod to_ast;
 
+#[cfg(test)]
+mod testutils;
+
 pub fn main() {
     let mut input = String::new();
     io::stdin().lock().read_to_string(&mut input).unwrap();
