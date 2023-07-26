@@ -1,3 +1,3 @@
-pub mod scope;
+mod scope;
 
-pub use scope::Scope;
+pub use scope::*;

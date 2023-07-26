@@ -1,12 +1,12 @@
-pub mod basic_block;
-pub mod basic_block_group;
-pub mod basic_block_instruction;
-pub mod basic_block_module;
-pub mod fmt_debug;
-pub mod normalize;
+mod basic_block;
+mod basic_block_group;
+mod basic_block_instruction;
+mod basic_block_module;
+mod fmt_debug;
+mod normalize;
 
-pub use basic_block::{BasicBlock, BasicBlockExit, ExitType};
-pub use basic_block_group::{BasicBlockEnvironment, BasicBlockEnvironmentType, BasicBlockGroup};
-pub use basic_block_instruction::{ArrayElement, BasicBlockInstruction, TempExitType};
-pub use basic_block_module::{BasicBlockModule, Export, FunctionId, Import, ModuleSummary};
-pub use normalize::normalize_basic_blocks;
+pub use basic_block::*;
+pub use basic_block_group::*;
+pub use basic_block_instruction::*;
+pub use basic_block_module::*;
+pub use normalize::*;

@@ -2,17 +2,15 @@ use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 
-use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule};
-use crate::from_ast::{
-    convert_context::FromAstCtx, module_to_basic_blocks, statements_to_basic_blocks,
-};
-use crate::swc_parse::swc_parse;
-
 use swc_common::SourceMap;
 use swc_common::{BytePos, SourceFile};
 use swc_ecma_ast::{ExprStmt, Script, Stmt};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{parse_file_as_expr, EsConfig};
+
+use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule};
+use crate::from_ast::{module_to_basic_blocks, statements_to_basic_blocks, FromAstCtx};
+use crate::swc_parse::swc_parse;
 
 pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
     let file = SourceFile::new(

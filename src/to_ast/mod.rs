@@ -1,6 +1,9 @@
 mod dominator_tree_for_translation;
 mod remove_phi;
-pub mod to_ast;
+mod to_ast;
 mod to_structured_flow;
 
-pub use to_ast::module_to_ast;
+pub use dominator_tree_for_translation::*;
+pub use remove_phi::*;
+pub use to_ast::*;
+pub use to_structured_flow::*;

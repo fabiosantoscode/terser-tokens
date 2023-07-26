@@ -33,19 +33,19 @@ impl Scope {
         self.vars = self.vars.insert(&name, &idx);
     }
 
-    pub fn go_into_block(&mut self) -> Self {
+    pub fn go_into_block_scope(&mut self) -> Self {
         let mut new_scope = Self::new(true);
         new_scope.parent = Some(Box::new(self.clone()));
         new_scope
     }
 
-    pub fn go_into_function(&self) -> Self {
+    pub fn go_into_function_scope(&self) -> Self {
         let mut new_scope = Self::new(false);
         new_scope.parent = Some(Box::new(self.clone()));
         new_scope
     }
 
-    pub fn leave(&mut self) -> Self {
+    pub fn leave_scope(&mut self) -> Self {
         if let Some(parent) = &self.parent {
             return *parent.clone();
         }
@@ -100,7 +100,7 @@ mod tests {
     fn can_get_set_in_block() {
         let mut scope = Scope::new(true);
         scope.insert("a".to_string(), 0);
-        let mut scope = scope.go_into_block();
+        let mut scope = scope.go_into_block_scope();
         scope.insert("b".to_string(), 1);
         scope.insert("c".to_string(), 2);
 
@@ -109,7 +109,7 @@ mod tests {
         assert_eq!(scope.get("c"), Some(2));
         assert_eq!(scope.get("d"), None);
 
-        let scope = scope.leave();
+        let scope = scope.leave_scope();
 
         assert_eq!(scope.get("a"), Some(0));
         assert_eq!(scope.get("b"), None);

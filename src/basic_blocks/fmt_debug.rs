@@ -1,8 +1,9 @@
+use std::fmt::{Debug, Error, Formatter};
+
 use super::{
     ArrayElement, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup,
     BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId,
 };
-use std::fmt::{Debug, Error, Formatter};
 
 impl Debug for BasicBlock {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

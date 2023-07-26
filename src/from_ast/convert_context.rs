@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use swc_ecma_ast::{Expr, Ident};
 
 use crate::basic_blocks::{
@@ -60,7 +59,7 @@ impl FromAstCtx {
             exits: vec![None],
             var_index: self.var_index,
             conditionals: vec![],
-            scope: self.scope.go_into_function(),
+            scope: self.scope.go_into_function_scope(),
             label_tracking: vec![],
             function_index: self.function_index,
             functions,

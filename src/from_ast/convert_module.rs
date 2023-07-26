@@ -2,9 +2,7 @@ use swc_ecma_ast::{
     ExportSpecifier, ImportSpecifier, Module, ModuleDecl, ModuleExportName, ModuleItem, Stmt,
 };
 
-use super::convert::statements_to_basic_blocks;
-use super::convert_context::FromAstCtx;
-
+use super::{statements_to_basic_blocks, FromAstCtx};
 use crate::basic_blocks::{BasicBlockModule, Export, Import, ModuleSummary};
 
 pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBlockModule, String> {

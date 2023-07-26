@@ -7,7 +7,7 @@ use deep_bind::contextual;
 
 use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup, ExitType};
 
-use super::dominator_tree_for_translation::Graph;
+use super::Graph;
 
 // https://dl.acm.org/doi/pdf/10.1145/3547621
 // This paper really unlocked this project.

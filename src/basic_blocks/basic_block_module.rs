@@ -1,5 +1,6 @@
-use super::basic_block_group::BasicBlockGroup;
 use std::collections::HashMap;
+
+use super::BasicBlockGroup;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModuleSummary {

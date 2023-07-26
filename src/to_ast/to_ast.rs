@@ -8,10 +8,7 @@ use crate::basic_blocks::{
     ArrayElement, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, TempExitType,
 };
 
-use super::{
-    remove_phi::remove_phi,
-    to_structured_flow::{do_tree, StructuredFlow},
-};
+use super::{do_tree, remove_phi, StructuredFlow};
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {

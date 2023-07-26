@@ -10,8 +10,7 @@ use crate::basic_blocks::{
     BasicBlockInstruction, ExitType, TempExitType,
 };
 
-use super::convert_context::{FromAstCtx, NestedIntoStatement};
-use super::convert_function::function_to_basic_blocks;
+use super::{function_to_basic_blocks, FromAstCtx, NestedIntoStatement};
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement

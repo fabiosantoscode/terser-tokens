@@ -1,8 +1,7 @@
-use super::convert::statements_to_basic_blocks;
-use super::convert_context::FromAstCtx;
-use crate::basic_blocks::{BasicBlockEnvironmentType, BasicBlockInstruction, FunctionId};
-
 use swc_ecma_ast::Function;
+
+use super::{statements_to_basic_blocks, FromAstCtx};
+use crate::basic_blocks::{BasicBlockEnvironmentType, BasicBlockInstruction, FunctionId};
 
 pub fn function_to_basic_blocks(
     ctx: &mut FromAstCtx,
@@ -60,7 +59,7 @@ pub fn function_to_basic_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::basic_block_group::BasicBlockGroup;
+    use crate::basic_blocks::BasicBlockGroup;
     use crate::swc_parse::swc_parse;
 
     fn conv_fn(src: &str) -> BasicBlockGroup {

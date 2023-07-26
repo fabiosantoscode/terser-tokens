@@ -1,9 +1,9 @@
+use nom::IResult;
+
 use crate::basic_blocks::{
     ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, ExitType,
     TempExitType,
 };
-
-use nom::IResult;
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
     parse_instructions_inner(input).unwrap().1

@@ -1,4 +1,4 @@
-use super::basic_block::BasicBlock;
+use super::BasicBlock;
 
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
