@@ -1,4 +1,5 @@
 use hamt::HamtRc;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Clone)]
 pub struct Scope {
@@ -50,6 +51,31 @@ impl Scope {
         }
 
         self.clone()
+    }
+}
+
+impl Debug for Scope {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut d = if self.is_block {
+            f.debug_struct("Scope (block)")
+        } else {
+            f.debug_struct("Scope (function)")
+        };
+
+        let mut vars = vec![];
+        let mut sorted_keys = self.vars.keys().collect::<Vec<_>>();
+        sorted_keys.sort_unstable();
+        for key in sorted_keys {
+            vars.push(format!("{}: {}", key, self.vars.get(key).unwrap()));
+        }
+
+        d.field("vars", &vars);
+
+        if let Some(parent) = &self.parent {
+            d.field("parent", &parent);
+        }
+
+        d.finish()
     }
 }
 

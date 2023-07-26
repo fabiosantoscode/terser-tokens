@@ -56,9 +56,9 @@ impl Debug for BasicBlockModule {
             exports,
         } = self;
 
-        let mut functions = functions.iter().map(|(k, v)| (k.0, v)).collect::<Vec<_>>();
+        let mut functions: Vec<_> = functions.iter().map(|(k, v)| (k.0, v)).collect();
         functions.sort_unstable_by_key(|(k, _)| *k);
-        let functions = functions.iter().map(|(_, v)| v).collect::<Vec<_>>();
+        let functions: Vec<_> = functions.iter().map(|(_, v)| v).collect();
 
         let mut d = f.debug_struct("BasicBlockModule");
 

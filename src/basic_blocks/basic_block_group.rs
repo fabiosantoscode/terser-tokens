@@ -27,11 +27,7 @@ pub struct FunctionId(pub usize);
 impl BasicBlockGroup {
     pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {
         Self {
-            blocks: blocks
-                .into_iter()
-                .enumerate()
-                .map(|(i, block)| (i, block))
-                .collect::<Vec<_>>(),
+            blocks: blocks.into_iter().enumerate().collect(),
             ..Default::default()
         }
     }

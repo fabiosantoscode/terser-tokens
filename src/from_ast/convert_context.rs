@@ -15,6 +15,7 @@ pub enum NestedIntoStatement {
     Unlabelled,
 }
 
+#[derive(Debug)]
 pub struct ConvertContext {
     pub basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
     pub exits: Vec<Option<BasicBlockExit>>,
@@ -200,5 +201,62 @@ impl ConvertContext {
 
     pub fn register_export(&mut self, export: Export) {
         self.exports.push(export);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_general() {
+        let mut ctx = ConvertContext::new();
+
+        ctx.assign_name("varname", 123);
+
+        ctx.enter_conditional_branch();
+
+        ctx.assign_name("conditional_varname", 456);
+        ctx.assign_name("conditional_varname", 789);
+
+        ctx.go_into_function(|ctx| {
+            ctx.assign_name("conditional_varname", 999);
+
+            insta::assert_debug_snapshot!(ctx, @r###"
+            ConvertContext {
+                basic_blocks: [
+                    [],
+                ],
+                exits: [
+                    None,
+                ],
+                var_index: 0,
+                conditionals: [],
+                scope: Scope (function) {
+                    vars: [
+                        "conditional_varname: 999",
+                    ],
+                    parent: Scope (function) {
+                        vars: [
+                            "conditional_varname: 789",
+                            "varname: 123",
+                        ],
+                    },
+                },
+                label_tracking: [],
+                function_index: FunctionId(
+                    1,
+                ),
+                functions: {},
+                imports: [],
+                exports: [],
+            }
+            "###);
+
+            Ok(BasicBlockGroup::from_asts(vec![]))
+        })
+        .unwrap();
+
+        ctx.leave_conditional_branch();
     }
 }
