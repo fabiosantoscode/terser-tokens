@@ -336,7 +336,7 @@ fn is_loop_header(node: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::testutils::{parse_basic_blocks, test_basic_blocks};
+    use crate::basic_blocks::testutils::*;
 
     #[test]
     fn basic_flow() {
