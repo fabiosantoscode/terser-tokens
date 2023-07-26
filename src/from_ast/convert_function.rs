@@ -1,11 +1,11 @@
 use super::convert::statements_to_basic_blocks;
-use super::convert_context::ConvertContext;
+use super::convert_context::FromAstCtx;
 use crate::basic_blocks::{BasicBlockEnvironmentType, BasicBlockInstruction, FunctionId};
 
 use swc_ecma_ast::Function;
 
 pub fn function_to_basic_blocks(
-    ctx: &mut ConvertContext,
+    ctx: &mut FromAstCtx,
     function: &Function,
 ) -> Result<FunctionId, String> {
     // count function.length
@@ -64,7 +64,7 @@ mod tests {
     use crate::swc_parse::swc_parse;
 
     fn conv_fn(src: &str) -> BasicBlockGroup {
-        let mut ctx = ConvertContext::new();
+        let mut ctx = FromAstCtx::new();
         let func = swc_parse(src);
         let idx = function_to_basic_blocks(
             &mut ctx,

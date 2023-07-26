@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule};
 use crate::from_ast::{
-    convert_context::ConvertContext, module_to_basic_blocks, statements_to_basic_blocks,
+    convert_context::FromAstCtx, module_to_basic_blocks, statements_to_basic_blocks,
 };
 use crate::swc_parse::swc_parse;
 
@@ -38,7 +38,7 @@ pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
 pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
     let m = parse_expression(source);
     statements_to_basic_blocks(
-        &mut ConvertContext::new(),
+        &mut FromAstCtx::new(),
         &vec![&Stmt::Expr(ExprStmt {
             span: Default::default(),
             expr: Box::new(m),

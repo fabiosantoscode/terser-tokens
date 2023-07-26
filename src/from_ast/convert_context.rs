@@ -16,7 +16,7 @@ pub enum NestedIntoStatement {
 }
 
 #[derive(Debug)]
-pub struct ConvertContext {
+pub struct FromAstCtx {
     pub basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
@@ -29,7 +29,7 @@ pub struct ConvertContext {
     pub exports: Vec<Export>,
 }
 
-impl ConvertContext {
+impl FromAstCtx {
     pub fn new() -> Self {
         Self {
             basic_blocks: vec![vec![]],
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_general() {
-        let mut ctx = ConvertContext::new();
+        let mut ctx = FromAstCtx::new();
 
         ctx.assign_name("varname", 123);
 
@@ -223,7 +223,7 @@ mod tests {
             ctx.assign_name("conditional_varname", 999);
 
             insta::assert_debug_snapshot!(ctx, @r###"
-            ConvertContext {
+            FromAstCtx {
                 basic_blocks: [
                     [],
                 ],
@@ -244,9 +244,7 @@ mod tests {
                     },
                 },
                 label_tracking: [],
-                function_index: FunctionId(
-                    1,
-                ),
+                function_index: FunctionId(1),
                 functions: {},
                 imports: [],
                 exports: [],
@@ -257,6 +255,60 @@ mod tests {
         })
         .unwrap();
 
+        insta::assert_debug_snapshot!(ctx, @r###"
+        FromAstCtx {
+            basic_blocks: [
+                [],
+            ],
+            exits: [
+                None,
+            ],
+            var_index: 0,
+            conditionals: [
+                {
+                    "conditional_varname": [
+                        456,
+                        789,
+                    ],
+                },
+            ],
+            scope: Scope (function) {
+                vars: [
+                    "conditional_varname: 789",
+                    "varname: 123",
+                ],
+            },
+            label_tracking: [],
+            function_index: FunctionId(1),
+            functions: {
+                FunctionId(0): ,
+            },
+            imports: [],
+            exports: [],
+        }
+        "###);
+
+        // this pops the conditionals, creates phi nodes and assigns the conditional var to the phied version
         ctx.leave_conditional_branch();
+
+        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
+        insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
+        [
+            [
+                (
+                    0,
+                    either($456, $789),
+                ),
+            ],
+        ]
+        "###);
+        insta::assert_debug_snapshot!(ctx.scope, @r###"
+        Scope (function) {
+            vars: [
+                "conditional_varname: 0",
+                "varname: 123",
+            ],
+        }
+        "###);
     }
 }

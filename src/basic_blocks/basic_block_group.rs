@@ -21,8 +21,14 @@ pub struct BasicBlockEnvironment {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq)]
+#[derive(Clone, Copy, PartialEq, Hash, Eq)]
 pub struct FunctionId(pub usize);
+
+impl Debug for FunctionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FunctionId({})", self.0)
+    }
+}
 
 impl BasicBlockGroup {
     pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {

@@ -10,12 +10,12 @@ use crate::basic_blocks::{
     BasicBlockInstruction, ExitType, TempExitType,
 };
 
-use super::convert_context::{ConvertContext, NestedIntoStatement};
+use super::convert_context::{FromAstCtx, NestedIntoStatement};
 use super::convert_function::function_to_basic_blocks;
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
-fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
+fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
     let is_loop = |stat: &Stmt| match stat {
         Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::ForIn(_) | Stmt::ForOf(_) => true,
         _ => false,
@@ -50,7 +50,7 @@ fn stat_to_basic_blocks(ctx: &mut ConvertContext, stat: &Stmt) {
     }
 }
 
-fn block_scoped_to_basic_blocks(ctx: &mut ConvertContext, stats: &[Stmt]) {
+fn block_scoped_to_basic_blocks(ctx: &mut FromAstCtx, stats: &[Stmt]) {
     // TODO actually implement block scope
     for stat in stats {
         stat_to_basic_blocks(ctx, stat);
@@ -59,7 +59,7 @@ fn block_scoped_to_basic_blocks(ctx: &mut ConvertContext, stats: &[Stmt]) {
 }
 
 /// Turn a statement into basic blocks. Wrapped by `stat_to_basic_blocks` to handle labels.
-fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
+fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
     match stat {
         Stmt::Expr(expr) => {
             let _exprid = expr_to_basic_blocks(ctx, &expr.expr);
@@ -234,10 +234,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut ConvertContext, stat: &Stmt) {
     }
 }
 
-pub fn statements_to_basic_blocks(
-    ctx: &mut ConvertContext,
-    statements: &[&Stmt],
-) -> BasicBlockGroup {
+pub fn statements_to_basic_blocks(ctx: &mut FromAstCtx, statements: &[&Stmt]) -> BasicBlockGroup {
     for stat in statements {
         stat_to_basic_blocks(ctx, stat);
         ctx.wrap_up_block();
@@ -273,7 +270,7 @@ pub fn statements_to_basic_blocks(
     BasicBlockGroup::from_asts(asts)
 }
 
-pub fn expr_to_basic_blocks(ctx: &mut ConvertContext, exp: &Expr) -> usize {
+pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
     let node = match exp {
         Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
         Expr::Bin(bin) => {

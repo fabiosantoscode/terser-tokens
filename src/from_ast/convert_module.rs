@@ -3,12 +3,12 @@ use swc_ecma_ast::{
 };
 
 use super::convert::statements_to_basic_blocks;
-use super::convert_context::ConvertContext;
+use super::convert_context::FromAstCtx;
 
 use crate::basic_blocks::{BasicBlockModule, Export, Import, ModuleSummary};
 
 pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBlockModule, String> {
-    let mut ctx = ConvertContext::new();
+    let mut ctx = FromAstCtx::new();
     let summary = find_importexport(&mut ctx, filename, &module);
 
     let top_level_stats: Vec<&Stmt> = module
@@ -31,7 +31,7 @@ pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBl
 }
 
 fn find_importexport(
-    ctx: &mut ConvertContext,
+    ctx: &mut FromAstCtx,
     filename: &str,
     module: &swc_ecma_ast::Module,
 ) -> ModuleSummary {

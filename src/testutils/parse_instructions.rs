@@ -5,11 +5,11 @@ use crate::basic_blocks::{
 
 use nom::IResult;
 
-pub fn parse_basic_blocks(input: &str) -> BasicBlockGroup {
-    parse_basic_blocks_inner(input).unwrap().1
+pub fn parse_instructions(input: &str) -> BasicBlockGroup {
+    parse_instructions_inner(input).unwrap().1
 }
 
-fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
+fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
     use nom::branch::*;
     use nom::bytes::complete::*;
     use nom::character::complete::*;
@@ -66,29 +66,36 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
 
         fn ins_caught_error(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // caught_error
-            let (input, _) = tag("caught_error")(input)?;
+            let (input, _) = tag("caught_error()")(input)?;
             Ok((input, BasicBlockInstruction::CaughtError))
         }
 
         fn ins_array(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            fn array_elm(input: &str) -> IResult<&str, ArrayElement> {
+                use ArrayElement::*;
+
+                // In case we see ",]", skip the .expect() below
+                not(tag("]"))(input)?;
+
+                let r = cut(alt((
+                    map(preceded(tag("..."), parse_ref), |r| Spread(r)),
+                    map(|input| ins_ref(input), |i| Item(i.unwrap_ref())),
+                    map(peek(tag(",")), |_| Hole),
+                )))(input);
+
+                Ok(r.expect("bad array element"))
+            }
+
             // [ref, ref, ...]
             let (input, _) = tag("[")(input)?;
             let input = whitespace!(input);
-            let (input, items) = separated_list0(
-                tag(","),
-                preceded(multispace0, parse_ref),
-            )(input)?;
+            let (input, items) =
+                separated_list0(tag(","), preceded(multispace0, array_elm))(input)?;
+            let input = whitespace!(input);
+            let (input, _) = opt(tag(","))(input)?;
             let input = whitespace!(input);
             let (input, _) = tag("]")(input)?;
-            Ok((
-                input,
-                BasicBlockInstruction::Array(
-                    items
-                        .into_iter()
-                        .map(|r| ArrayElement::Item(r))
-                        .collect::<Vec<_>>(),
-                ),
-            ))
+            Ok((input, BasicBlockInstruction::Array(items)))
         }
 
         fn ins_tempexit(input: &str) -> IResult<&str, BasicBlockInstruction> {
@@ -115,10 +122,8 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             let (input, _) = tag("either")(input)?;
             let (input, _paren) = tag("(")(input)?;
             let input = whitespace!(input);
-            let (input, items) = separated_list0(
-                tag(","),
-                preceded(multispace0, parse_ref),
-            )(input)?;
+            let (input, items) =
+                separated_list0(tag(","), preceded(multispace0, parse_ref))(input)?;
             let (input, _paren) = tag(")")(input)?;
 
             Ok((input, BasicBlockInstruction::Phi(items)))
@@ -142,7 +147,8 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             ins_array,
             ins_tempexit,
             ins_phi,
-        )))(input)?;
+        )))(input)
+        .expect("bad instruction");
 
         let input = whitespace!(input);
 
@@ -158,7 +164,15 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         let (input, _exit) = tag("=")(input)?;
         let input = whitespace!(input);
 
-        let (input, word) = alt((tag("jump"), tag("cond"), tag("return"), tag("try")))(input)?;
+        let (input, word) = alt((
+            tag("jump"),
+            tag("cond"),
+            tag("return"),
+            tag("try"),
+            tag("error"),
+            tag("finally"),
+            tag("end finally after"),
+        ))(input)?;
 
         let input = whitespace!(input);
 
@@ -216,6 +230,41 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
                     ),
                 )
             }
+            "error" => {
+                // error ? jump @123 : jump @456
+                let (input, _) = tag("?")(input)?;
+                let input = whitespace!(input);
+                let (input, _) = tag("jump")(input)?;
+                let input = whitespace!(input);
+                let (input, consequent) = parse_blockref(input)?;
+                let input = whitespace!(input);
+                let (input, _) = tag(":")(input)?;
+                let input = whitespace!(input);
+                let (input, _) = tag("jump")(input)?;
+                let input = whitespace!(input);
+                let (input, alternate) = parse_blockref(input)?;
+
+                (input, BasicBlockExit::PopCatch(consequent, alternate))
+            }
+            "finally" => {
+                // finally @10 after @11
+                let (input, finally_block) = parse_blockref(input)?;
+                let input = whitespace!(input);
+                let (input, _) = tag("after")(input)?;
+                let input = whitespace!(input);
+                let (input, after_block) = parse_blockref(input)?;
+
+                (
+                    input,
+                    BasicBlockExit::PopFinally(finally_block, after_block),
+                )
+            }
+            "end finally after" => {
+                // end finally after @10
+                let (input, after_block) = parse_blockref(input)?;
+
+                (input, BasicBlockExit::EndFinally(after_block))
+            }
             _ => unimplemented!(),
         };
 
@@ -243,10 +292,11 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         // whitespace
         let input = whitespace!(input);
 
-        let (input, instructions) = cut(many0(basic_block_instruction))(input)?;
+        let (input, instructions) =
+            cut(many0(basic_block_instruction))(input).expect("bad block of instructions");
 
         let input = whitespace!(input);
-        let (input, exit) = cut(parse_basic_block_exit)(input)?;
+        let (input, exit) = cut(parse_basic_block_exit)(input).expect("bad block exit");
 
         let input = whitespace!(input);
         let (input, _) = tag("}")(input)?;
@@ -266,7 +316,8 @@ fn parse_basic_blocks_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         Ok((input, n.parse().unwrap()))
     }
 
-    let (input, blocks) = many0(preceded(basic_block_header, cut(basic_block)))(input)?;
+    let (input, blocks) =
+        many0(preceded(basic_block_header, cut(basic_block)))(input).expect("bad basic blocks");
 
     let (input, _) = eof(input)?;
 
@@ -281,7 +332,7 @@ mod tests {
 
     #[test]
     fn test_parse_basic_blocks() {
-        let blocks = parse_basic_blocks_inner(
+        let blocks = parse_instructions_inner(
             r###"
             @0: {
                 $0 = 123
@@ -303,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_parse_basic_blocks_2() {
-        let blocks = parse_basic_blocks_inner(
+        let blocks = parse_instructions_inner(
             r###"
             @0: {
                 $0 = 777

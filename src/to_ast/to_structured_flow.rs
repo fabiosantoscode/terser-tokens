@@ -340,17 +340,17 @@ mod tests {
 
     #[test]
     fn basic_flow() {
-        let func = parse_basic_blocks(
+        let func = parse_instructions(
             r###"
-        @0: {
-            $0 = 123
-            exit = jump @1
-        }
-        @1: {
-            $1 = 456
-            exit = return $1
-        }
-        "###,
+            @0: {
+                $0 = 123
+                exit = jump @1
+            }
+            @1: {
+                $1 = 456
+                exit = return $1
+            }
+            "###,
         );
 
         insta::assert_debug_snapshot!(do_tree(&func), @r###"
@@ -362,26 +362,26 @@ mod tests {
 
     #[test]
     fn basic_if() {
-        let func = parse_basic_blocks(
+        let func = parse_instructions(
             r###"
-        @0: {
-            $0 = 123
-            exit = cond $0 ? jump @1 : jump @2
-        }
-        @1: {
-            $1 = 456
-            exit = jump @3
-        }
-        @2: {
-            $2 = 789
-            exit = jump @3
-        }
-        @3: {
-            $3 = either($1, $2)
-            $4 = undefined
-            exit = return $4
-        }
-        "###,
+            @0: {
+                $0 = 123
+                exit = cond $0 ? jump @1 : jump @2
+            }
+            @1: {
+                $1 = 456
+                exit = jump @3
+            }
+            @2: {
+                $2 = 789
+                exit = jump @3
+            }
+            @3: {
+                $3 = either($1, $2)
+                $4 = undefined
+                exit = return $4
+            }
+            "###,
         );
 
         insta::assert_debug_snapshot!(do_tree(&func), @r###"
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn basic_if_2() {
-        let func = parse_basic_blocks(
+        let func = parse_instructions(
             r###"
             @0: {
                 exit = jump @1
@@ -433,7 +433,7 @@ mod tests {
 
     #[test]
     fn basic_while_minimal() {
-        let func = parse_basic_blocks(
+        let func = parse_instructions(
             r###"
             @0: {
                 $0 = 123
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn basic_while_minimal_2() {
-        let func = parse_basic_blocks(
+        let func = parse_instructions(
             r###"
             @0: {
                 $0 = 123
@@ -498,37 +498,37 @@ mod tests {
 
     #[test]
     fn basic_while_2() {
-        let func = parse_basic_blocks(
+        let func = parse_instructions(
             r###"
-        @0: {
-            $0 = 777
-            exit = jump @1
-        }
-        @1: {
-            exit = cond $0 ? jump @2 : jump @7
-        }
-        @2: {
-            $1 = 888
-            exit = jump @3
-        }
-        @3: {
-            exit = cond $1 ? jump @4 : jump @5
-        }
-        @4: {
-            exit = jump @7
-        }
-        @5: {
-            exit = jump @6
-        }
-        @6: {
-            exit = jump @0
-        }
-        @7: {
-            $2 = 999
-            $3 = undefined
-            exit = return $3
-        }
-        "###,
+            @0: {
+                $0 = 777
+                exit = jump @1
+            }
+            @1: {
+                exit = cond $0 ? jump @2 : jump @7
+            }
+            @2: {
+                $1 = 888
+                exit = jump @3
+            }
+            @3: {
+                exit = cond $1 ? jump @4 : jump @5
+            }
+            @4: {
+                exit = jump @7
+            }
+            @5: {
+                exit = jump @6
+            }
+            @6: {
+                exit = jump @0
+            }
+            @7: {
+                $2 = 999
+                $3 = undefined
+                exit = return $3
+            }
+            "###,
         );
 
         insta::assert_debug_snapshot!(do_tree(&func), @r###"
@@ -546,41 +546,41 @@ mod tests {
 
     #[test]
     fn basic_while_3() {
-        let func = parse_basic_blocks(
+        let func = parse_instructions(
             r###"
-        @0: {
-            $0 = 777
-            exit = jump @1
-        }
-        @1: {
-            $0 = 777
-            exit = jump @2
-        }
-        @2: {
-            exit = cond $0 ? jump @3 : jump @8
-        }
-        @3: {
-            $1 = 888
-            exit = jump @4
-        }
-        @4: {
-            exit = cond $1 ? jump @5 : jump @6
-        }
-        @5: {
-            exit = jump @8
-        }
-        @6: {
-            exit = jump @7
-        }
-        @7: {
-            exit = jump @1
-        }
-        @8: {
-            $2 = 999
-            $3 = undefined
-            exit = return $3
-        }
-        "###,
+            @0: {
+                $0 = 777
+                exit = jump @1
+            }
+            @1: {
+                $0 = 777
+                exit = jump @2
+            }
+            @2: {
+                exit = cond $0 ? jump @3 : jump @8
+            }
+            @3: {
+                $1 = 888
+                exit = jump @4
+            }
+            @4: {
+                exit = cond $1 ? jump @5 : jump @6
+            }
+            @5: {
+                exit = jump @8
+            }
+            @6: {
+                exit = jump @7
+            }
+            @7: {
+                exit = jump @1
+            }
+            @8: {
+                $2 = 999
+                $3 = undefined
+                exit = return $3
+            }
+            "###,
         );
 
         insta::assert_debug_snapshot!(do_tree(&func), @r###"
@@ -600,33 +600,34 @@ mod tests {
 
     #[test]
     fn mk_stats() {
-        let func = test_basic_blocks("123; 123; 123; 123; 123 ? 456 : 789");
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            $0 = 123
-            $1 = 123
-            $2 = 123
-            $3 = 123
-            exit = jump @1
-        }
-        @1: {
-            $4 = 123
-            exit = cond $4 ? jump @2 : jump @3
-        }
-        @2: {
-            $5 = 456
-            exit = jump @4
-        }
-        @3: {
-            $6 = 789
-            exit = jump @4
-        }
-        @4: {
-            $7 = either($5, $6)
-            $8 = undefined
-            exit = return $8
-        }
-        "###);
+        let func = parse_instructions(
+            r###"
+            @0: {
+                $0 = 123
+                $1 = 123
+                $2 = 123
+                $3 = 123
+                exit = jump @1
+            }
+            @1: {
+                $4 = 123
+                exit = cond $4 ? jump @2 : jump @3
+            }
+            @2: {
+                $5 = 456
+                exit = jump @4
+            }
+            @3: {
+                $6 = 789
+                exit = jump @4
+            }
+            @4: {
+                $7 = either($5, $6)
+                $8 = undefined
+                exit = return $8
+            }
+            "###,
+        );
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
@@ -645,29 +646,30 @@ mod tests {
 
     #[test]
     fn an_array() {
-        let func = test_basic_blocks("var x = [1, 2 ? 3 : 4, , ...3];");
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            $0 = 1
-            $1 = 2
-            exit = cond $1 ? jump @1 : jump @2
-        }
-        @1: {
-            $2 = 3
-            exit = jump @3
-        }
-        @2: {
-            $3 = 4
-            exit = jump @3
-        }
-        @3: {
-            $4 = either($2, $3)
-            $5 = 3
-            $6 = [$0, $4, , ...$5,]
-            $7 = undefined
-            exit = return $7
-        }
-        "###);
+        let func = parse_instructions(
+            r###"
+            @0: {
+                $0 = 1
+                $1 = 2
+                exit = cond $1 ? jump @1 : jump @2
+            }
+            @1: {
+                $2 = 3
+                exit = jump @3
+            }
+            @2: {
+                $3 = 4
+                exit = jump @3
+            }
+            @3: {
+                $4 = either($2, $3)
+                $5 = 3
+                $6 = [$0, $4, , ...$5,]
+                $7 = undefined
+                exit = return $7
+            }
+            "###,
+        );
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
@@ -686,41 +688,42 @@ mod tests {
 
     #[test]
     fn mk_stats_2() {
-        let func = test_basic_blocks("123 ? (456 ? 7 : 8) : 9");
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            $0 = 123
-            exit = cond $0 ? jump @1 : jump @6
-        }
-        @1: {
-            $1 = 456
-            exit = cond $1 ? jump @2 : jump @3
-        }
-        @2: {
-            $2 = 7
-            exit = jump @4
-        }
-        @3: {
-            $3 = 8
-            exit = jump @4
-        }
-        @4: {
-            exit = jump @5
-        }
-        @5: {
-            $4 = either($2, $3)
-            exit = jump @7
-        }
-        @6: {
-            $5 = 9
-            exit = jump @7
-        }
-        @7: {
-            $6 = either($4, $5)
-            $7 = undefined
-            exit = return $7
-        }
-        "###);
+        let func = parse_instructions(
+            r###"
+            @0: {
+                $0 = 123
+                exit = cond $0 ? jump @1 : jump @6
+            }
+            @1: {
+                $1 = 456
+                exit = cond $1 ? jump @2 : jump @3
+            }
+            @2: {
+                $2 = 7
+                exit = jump @4
+            }
+            @3: {
+                $3 = 8
+                exit = jump @4
+            }
+            @4: {
+                exit = jump @5
+            }
+            @5: {
+                $4 = either($2, $3)
+                exit = jump @7
+            }
+            @6: {
+                $5 = 9
+                exit = jump @7
+            }
+            @7: {
+                $6 = either($4, $5)
+                $7 = undefined
+                exit = return $7
+            }
+            "###,
+        );
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
@@ -742,43 +745,43 @@ mod tests {
 
     #[test]
     fn mk_stats_3() {
-        let func = test_basic_blocks("if (123) { 345 } 10; if (1) 2");
-
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            $0 = 123
-            exit = jump @1
-        }
-        @1: {
-            exit = cond $0 ? jump @2 : jump @4
-        }
-        @2: {
-            $1 = 345
-            exit = jump @3
-        }
-        @3: {
-            exit = jump @4
-        }
-        @4: {
-            $2 = 10
-            $3 = 1
-            exit = jump @5
-        }
-        @5: {
-            exit = cond $3 ? jump @6 : jump @8
-        }
-        @6: {
-            $4 = 2
-            exit = jump @7
-        }
-        @7: {
-            exit = jump @8
-        }
-        @8: {
-            $5 = undefined
-            exit = return $5
-        }
-        "###);
+        let func = parse_instructions(
+            r###"
+            @0: {
+                $0 = 123
+                exit = jump @1
+            }
+            @1: {
+                exit = cond $0 ? jump @2 : jump @4
+            }
+            @2: {
+                $1 = 345
+                exit = jump @3
+            }
+            @3: {
+                exit = jump @4
+            }
+            @4: {
+                $2 = 10
+                $3 = 1
+                exit = jump @5
+            }
+            @5: {
+                exit = cond $3 ? jump @6 : jump @8
+            }
+            @6: {
+                $4 = 2
+                exit = jump @7
+            }
+            @7: {
+                exit = jump @8
+            }
+            @8: {
+                $5 = undefined
+                exit = return $5
+            }
+            "###,
+        );
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
@@ -800,15 +803,46 @@ mod tests {
 
     #[test]
     fn mk_loop() {
-        let func = test_basic_blocks(
-            "
-            while (777) {
-                if (888) {
-                    break;
-                }
+        let func = parse_instructions(
+            r###"
+            @0: {
+                exit = jump @1
             }
-            999
-        ",
+            @1: {
+                $0 = 777
+                exit = jump @2
+            }
+            @2: {
+                exit = cond $0 ? jump @3 : jump @8
+            }
+            @3: {
+                $1 = 888
+                exit = jump @4
+            }
+            @4: {
+                exit = cond $1 ? jump @5 : jump @6
+            }
+            @5: {
+                exit = jump @10
+            }
+            @6: {
+                exit = jump @7
+            }
+            @7: {
+                exit = jump @1
+            }
+            @8: {
+                exit = jump @9
+            }
+            @9: {
+                exit = jump @10
+            }
+            @10: {
+                $2 = 999
+                $3 = undefined
+                exit = return $3
+            }
+            "###,
         );
         insta::assert_debug_snapshot!(func, @r###"
         @0: {
@@ -872,72 +906,61 @@ mod tests {
 
     #[test]
     fn mk_loop_break() {
-        let func = test_basic_blocks(
-            "
-            while (777) {
-                if (888) {
-                    123;
-                }
-                if (889) {
-                    break;
-                }
+        let func = parse_instructions(
+            r###"
+            @0: {
+                exit = jump @1
             }
-            999
-        ",
+            @1: {
+                $0 = 777
+                exit = jump @2
+            }
+            @2: {
+                exit = cond $0 ? jump @3 : jump @12
+            }
+            @3: {
+                $1 = 888
+                exit = jump @4
+            }
+            @4: {
+                exit = cond $1 ? jump @5 : jump @7
+            }
+            @5: {
+                $2 = 123
+                exit = jump @6
+            }
+            @6: {
+                exit = jump @7
+            }
+            @7: {
+                $3 = 889
+                exit = jump @8
+            }
+            @8: {
+                exit = cond $3 ? jump @9 : jump @10
+            }
+            @9: {
+                exit = jump @14
+            }
+            @10: {
+                exit = jump @11
+            }
+            @11: {
+                exit = jump @1
+            }
+            @12: {
+                exit = jump @13
+            }
+            @13: {
+                exit = jump @14
+            }
+            @14: {
+                $4 = 999
+                $5 = undefined
+                exit = return $5
+            }
+            "###,
         );
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            exit = jump @1
-        }
-        @1: {
-            $0 = 777
-            exit = jump @2
-        }
-        @2: {
-            exit = cond $0 ? jump @3 : jump @12
-        }
-        @3: {
-            $1 = 888
-            exit = jump @4
-        }
-        @4: {
-            exit = cond $1 ? jump @5 : jump @7
-        }
-        @5: {
-            $2 = 123
-            exit = jump @6
-        }
-        @6: {
-            exit = jump @7
-        }
-        @7: {
-            $3 = 889
-            exit = jump @8
-        }
-        @8: {
-            exit = cond $3 ? jump @9 : jump @10
-        }
-        @9: {
-            exit = jump @14
-        }
-        @10: {
-            exit = jump @11
-        }
-        @11: {
-            exit = jump @1
-        }
-        @12: {
-            exit = jump @13
-        }
-        @13: {
-            exit = jump @14
-        }
-        @14: {
-            $4 = 999
-            $5 = undefined
-            exit = return $5
-        }
-        "###);
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
@@ -964,48 +987,42 @@ mod tests {
 
     #[test]
     fn mk_trycatch() {
-        let func = test_basic_blocks(
-            "try {
-                777;
-            } catch (e) {
-                888;
+        let func = parse_instructions(
+            r###"
+            @0: {
+                exit = jump @1
             }
-            999",
+            @1: {
+                exit = try @2 catch @4 finally @6 after @8
+            }
+            @2: {
+                $0 = 777
+                exit = jump @3
+            }
+            @3: {
+                exit = error ? jump @4 : jump @6
+            }
+            @4: {
+                $1 = caught_error()
+                $2 = 888
+                exit = jump @5
+            }
+            @5: {
+                exit = finally @6 after @7
+            }
+            @6: {
+                exit = jump @7
+            }
+            @7: {
+                exit = end finally after @8
+            }
+            @8: {
+                $3 = 999
+                $4 = undefined
+                exit = return $4
+            }
+            "###,
         );
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            exit = jump @1
-        }
-        @1: {
-            exit = try @2 catch @4 finally @6 after @8
-        }
-        @2: {
-            $0 = 777
-            exit = jump @3
-        }
-        @3: {
-            exit = error ? jump @4 : jump @6
-        }
-        @4: {
-            $1 = caught_error()
-            $2 = 888
-            exit = jump @5
-        }
-        @5: {
-            exit = finally @6 after @7
-        }
-        @6: {
-            exit = jump @7
-        }
-        @7: {
-            exit = end finally after @8
-        }
-        @8: {
-            $3 = 999
-            $4 = undefined
-            exit = return $4
-        }
-        "###);
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
@@ -1026,51 +1043,43 @@ mod tests {
 
     #[test]
     fn mk_trycatch_2() {
-        let func = test_basic_blocks(
-            "try {
-                777;
-            } catch (e) {
-                888;
-            } finally {
-                999;
+        let func = parse_instructions(
+            r###"
+            @0: {
+                exit = jump @1
             }
-            111",
+            @1: {
+                exit = try @2 catch @4 finally @6 after @8
+            }
+            @2: {
+                $0 = 777
+                exit = jump @3
+            }
+            @3: {
+                exit = error ? jump @4 : jump @6
+            }
+            @4: {
+                $1 = caught_error()
+                $2 = 888
+                exit = jump @5
+            }
+            @5: {
+                exit = finally @6 after @7
+            }
+            @6: {
+                $3 = 999
+                exit = jump @7
+            }
+            @7: {
+                exit = end finally after @8
+            }
+            @8: {
+                $4 = 111
+                $5 = undefined
+                exit = return $5
+            }
+            "###,
         );
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            exit = jump @1
-        }
-        @1: {
-            exit = try @2 catch @4 finally @6 after @8
-        }
-        @2: {
-            $0 = 777
-            exit = jump @3
-        }
-        @3: {
-            exit = error ? jump @4 : jump @6
-        }
-        @4: {
-            $1 = caught_error()
-            $2 = 888
-            exit = jump @5
-        }
-        @5: {
-            exit = finally @6 after @7
-        }
-        @6: {
-            $3 = 999
-            exit = jump @7
-        }
-        @7: {
-            exit = end finally after @8
-        }
-        @8: {
-            $4 = 111
-            $5 = undefined
-            exit = return $5
-        }
-        "###);
 
         let g = func.get_dom_graph();
         println!("{:?}", g);
@@ -1091,58 +1100,53 @@ mod tests {
 
     #[test]
     fn mk_trycatch_edgecases() {
-        let func = test_basic_blocks(
-            "try {
-                if (111) {222}
-            } catch {
+        let func = parse_instructions(
+            r###"
+            @0: {
+                exit = jump @1
             }
-            111",
+            @1: {
+                exit = try @2 catch @8 finally @10 after @12
+            }
+            @2: {
+                $0 = 111
+                exit = jump @3
+            }
+            @3: {
+                exit = cond $0 ? jump @4 : jump @6
+            }
+            @4: {
+                $1 = 222
+                exit = jump @5
+            }
+            @5: {
+                exit = jump @6
+            }
+            @6: {
+                exit = jump @7
+            }
+            @7: {
+                exit = error ? jump @8 : jump @10
+            }
+            @8: {
+                exit = jump @9
+            }
+            @9: {
+                exit = finally @10 after @11
+            }
+            @10: {
+                exit = jump @11
+            }
+            @11: {
+                exit = end finally after @12
+            }
+            @12: {
+                $2 = 111
+                $3 = undefined
+                exit = return $3
+            }
+            "###,
         );
-        insta::assert_debug_snapshot!(func, @r###"
-        @0: {
-            exit = jump @1
-        }
-        @1: {
-            exit = try @2 catch @8 finally @10 after @12
-        }
-        @2: {
-            $0 = 111
-            exit = jump @3
-        }
-        @3: {
-            exit = cond $0 ? jump @4 : jump @6
-        }
-        @4: {
-            $1 = 222
-            exit = jump @5
-        }
-        @5: {
-            exit = jump @6
-        }
-        @6: {
-            exit = jump @7
-        }
-        @7: {
-            exit = error ? jump @8 : jump @10
-        }
-        @8: {
-            exit = jump @9
-        }
-        @9: {
-            exit = finally @10 after @11
-        }
-        @10: {
-            exit = jump @11
-        }
-        @11: {
-            exit = end finally after @12
-        }
-        @12: {
-            $2 = 111
-            $3 = undefined
-            exit = return $3
-        }
-        "###);
 
         let g = func.get_dom_graph();
         println!("{:?}", g);

@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn test_remove_phi() {
-        let mut blocks = parse_basic_blocks(
+        let mut blocks = parse_instructions(
             r###"
             @0: {
                 $0 = 777
