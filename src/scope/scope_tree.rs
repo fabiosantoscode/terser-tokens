@@ -1,11 +1,13 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ScopeTreeNode<Of = usize> {
     pub parent: Option<ScopeTreeHandle>,
     pub is_block: bool, // TODO there are actually two "function" scopes
-    pub vars: HashMap<String, Of>,
+    pub vars: BTreeMap<String, Of>,
 }
 
+#[derive(Debug)]
 pub struct ScopeTree<Of = usize> {
     scopes: Vec<ScopeTreeNode<Of>>,
     pub current_scope: ScopeTreeHandle,
@@ -24,7 +26,7 @@ where
             scopes: vec![ScopeTreeNode {
                 parent: None,
                 is_block: false,
-                vars: HashMap::new(),
+                vars: BTreeMap::new(),
             }],
             current_scope: ScopeTreeHandle(0),
         }
@@ -41,7 +43,7 @@ where
         self.scopes.push(ScopeTreeNode {
             parent,
             is_block: false,
-            vars: HashMap::new(),
+            vars: BTreeMap::new(),
         });
         let id = ScopeTreeHandle(self.scopes.len() - 1);
         self.current_scope = id;
@@ -54,7 +56,7 @@ where
         self.scopes.push(ScopeTreeNode {
             parent: parent,
             is_block: true,
-            vars: HashMap::new(),
+            vars: BTreeMap::new(),
         });
         let id = ScopeTreeHandle(self.scopes.len() - 1);
         self.current_scope = id;
@@ -70,6 +72,10 @@ where
         scope.vars.insert(name, value);
     }
 
+    fn has_at(&self, n: ScopeTreeHandle, name: &str) -> bool {
+        self.scopes[n.0].vars.contains_key(name)
+    }
+
     fn get_at(&self, n: ScopeTreeHandle, name: &str) -> Option<&Of> {
         self.scopes[n.0].vars.get(name)
     }
@@ -82,17 +88,30 @@ where
         self.parent_at(self.current_scope)
     }
 
-    pub(crate) fn get_scope_of(&self, name: &str) -> Option<ScopeTreeHandle> {
-        let mut cur = Some(self.current_scope);
+    pub(crate) fn lookup(&self, name: &str) -> Option<Of> {
+        self.lookup_at(self.current_scope, name)
+    }
 
-        while let Some(scope) = cur {
-            if let Some(_) = self.get_at(scope, name) {
-                return Some(scope);
-            }
-            cur = self.parent_at(scope);
+    pub fn lookup_at(&self, at: ScopeTreeHandle, name: &str) -> Option<Of> {
+        if let Some(v) = self.get_at(at, name) {
+            Some(v.clone())
+        } else {
+            let parent = self.parent_at(at)?;
+            self.lookup_at(parent, name)
         }
+    }
 
-        None
+    pub(crate) fn lookup_scope_of(&self, name: &str) -> Option<ScopeTreeHandle> {
+        self.lookup_scope_of_at(self.current_scope, name)
+    }
+
+    pub fn lookup_scope_of_at(&self, at: ScopeTreeHandle, name: &str) -> Option<ScopeTreeHandle> {
+        if self.has_at(at, name) {
+            Some(at)
+        } else {
+            let parent = self.parent_at(at)?;
+            self.lookup_scope_of_at(parent, name)
+        }
     }
 
     fn get_closest_function_scope_at(&self, at: ScopeTreeHandle) -> Option<ScopeTreeHandle> {

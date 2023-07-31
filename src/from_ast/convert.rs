@@ -1,15 +1,15 @@
 use std::borrow::Borrow;
 
 use swc_ecma_ast::{
-    AwaitExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt,
-    ThrowStmt, YieldExpr,
+    AwaitExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt, ThrowStmt,
+    YieldExpr,
 };
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
 };
 
-use super::{function_to_basic_blocks, FromAstCtx, NestedIntoStatement};
+use super::{function_to_basic_blocks, FromAstCtx, NestedIntoStatement, FunctionLike};
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
@@ -189,7 +189,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 if let Some(p) = &handler.param {
                     let sym = p.clone().ident().unwrap(/* TODO */);
                     let catcherr = ctx.push_instruction(BasicBlockInstruction::CaughtError);
-                    ctx.scope.insert(sym.sym.to_string(), catcherr);
+                    ctx.assign_name(&sym.sym, catcherr);
                 }
                 block_scoped_to_basic_blocks(ctx, &handler.body.stmts);
             }
@@ -252,7 +252,7 @@ fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             PatOrExpr::Pat(e) => match e.borrow() {
                 Pat::Ident(ident) => {
                     let sym = ident.sym.to_string();
-                    let Some(_old_idx) = ctx.scope.borrow().get(&sym) else {todo!()};
+                    let Some(_old_idx) = ctx.read_name(&sym) else {todo!()};
 
                     let expr_idx = expr_to_basic_blocks(ctx, &assign.right);
                     ctx.assign_name(&sym, expr_idx);
@@ -307,7 +307,9 @@ fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             BasicBlockInstruction::Phi(vec![cons, alt])
         }
         Expr::Ident(ident) => {
-            let Some(var_idx) = ctx.scope.borrow().get(&ident.sym.to_string()) else {todo!("{} not found in scope", ident.sym.to_string())};
+            let Some(var_idx) = ctx.read_name(&ident.sym.to_string()) else {
+                todo!("{} not found in scope", ident.sym.to_string())
+            };
 
             BasicBlockInstruction::Ref(var_idx)
         }
@@ -335,7 +337,7 @@ fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Member(_) => todo!(),
         Expr::SuperProp(_) => todo!(),
         Expr::Fn(function) => {
-            let func = function_to_basic_blocks(ctx, function.function.as_ref())
+            let func = function_to_basic_blocks(ctx, FunctionLike::FnExpr(function))
                 .expect("todo error handling");
             BasicBlockInstruction::Function(func.id)
         }

@@ -1,28 +1,78 @@
 use fix_fn::fix_fn;
 use swc_ecma_ast::{
     ArrowExpr, AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, FnDecl,
-    FnExpr, IfStmt, Lit, Param, Pat, PatOrExpr, Stmt, YieldExpr,
+    FnExpr, IfStmt, Lit, Param, Pat, PatOrExpr, Stmt, VarDeclKind, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
 
+#[derive(Debug)]
+pub struct NonLocalInfo {
+    pub nonlocals: Vec<String>,
+    pub funscoped: Vec<String>,
+}
+
 /// given a list of statements, which vars here are used in scopes within?
-pub fn find_nonlocals(func: FunctionLike) -> Vec<String> {
+pub fn find_nonlocals(func: FunctionLike) -> NonLocalInfo {
     let mut ctx = NonLocalsContext {
         scopes: ScopeTree::new(),
         depth: 0,
         found_nonlocals: vec![],
         deferred_fns: vec![],
+        found_funscoped: vec![],
     };
     ctx.do_fn(func);
     ctx.undefer_all();
-    ctx.found_nonlocals
+
+    NonLocalInfo {
+        nonlocals: ctx.found_nonlocals,
+        funscoped: ctx.found_funscoped,
+    }
 }
 
+#[derive(Clone)]
 pub enum FunctionLike<'a> {
     FnDecl(&'a FnDecl),
     FnExpr(&'a FnExpr),
     ArrowExpr(&'a ArrowExpr),
+}
+
+impl<'a> FunctionLike<'a> {
+    pub fn function_length(&self) -> usize {
+        match self {
+            FunctionLike::FnDecl(FnDecl { function, .. })
+            | FunctionLike::FnExpr(FnExpr { function, .. }) => function
+                .params
+                .iter()
+                .filter(|param| match param.pat {
+                    swc_ecma_ast::Pat::Ident(_) => true,
+                    swc_ecma_ast::Pat::Rest(_) => false,
+                    _ => todo!("non-ident function param"),
+                })
+                .count(),
+            _ => todo!(),
+        }
+    }
+
+    pub fn get_params(&self) -> Vec<&Pat> {
+        match self {
+            FunctionLike::FnDecl(FnDecl { function, .. })
+            | FunctionLike::FnExpr(FnExpr { function, .. }) => {
+                function.params.iter().map(|param| &param.pat).collect()
+            }
+            _ => todo!(),
+        }
+    }
+
+    pub(crate) fn get_statements(&'a self) -> Vec<&'a Stmt> {
+        match self {
+            FunctionLike::FnDecl(FnDecl { function, .. })
+            | FunctionLike::FnExpr(FnExpr { function, .. }) => {
+                function.body.as_ref().expect("function body is empty").stmts.iter().collect()
+            },
+            _ => todo!(),
+        }
+    }
 }
 
 struct NonLocalsContext<'a> {
@@ -30,10 +80,14 @@ struct NonLocalsContext<'a> {
     pub depth: u32,
     pub found_nonlocals: Vec<String>,
     pub deferred_fns: Vec<(FunctionLike<'a>, ScopeTreeHandle)>,
+    pub found_funscoped: Vec<String>,
 }
 
 impl<'a> NonLocalsContext<'a> {
-    fn assign_name(&mut self, name: String) {
+    fn assign_name(&mut self, name: String, funscoped: bool) {
+        if funscoped && self.depth == 0 {
+            self.found_funscoped.push(name.clone());
+        }
         self.scopes.insert(name.clone(), name);
     }
 
@@ -44,7 +98,7 @@ impl<'a> NonLocalsContext<'a> {
             .scopes
             .same_function_as(self.scopes.current_scope, root_scope)
         {
-            if let Some(scope_of_name) = self.scopes.get_scope_of(&name) {
+            if let Some(scope_of_name) = self.scopes.lookup_scope_of(&name) {
                 if self.scopes.same_function_as(scope_of_name, root_scope) {
                     if !self.found_nonlocals.contains(&name) {
                         self.found_nonlocals.push(name);
@@ -57,7 +111,7 @@ impl<'a> NonLocalsContext<'a> {
     fn insert_params(&mut self, params: &[Param]) {
         let insert_pat = fix_fn!(|insert_pat, ctx: &mut NonLocalsContext, pat: &Pat| -> () {
             if let Pat::Ident(id) = &pat {
-                ctx.assign_name(id.sym.to_string());
+                ctx.assign_name(id.sym.to_string(), true);
             } else if let Pat::Assign(assign) = &pat {
                 insert_pat(ctx, &assign.left);
             } else if let Pat::Rest(rest) = &pat {
@@ -70,10 +124,10 @@ impl<'a> NonLocalsContext<'a> {
             insert_pat(self, &param.pat);
         });
     }
-    fn insert_pats(&mut self, pats: &[Pat]) {
+    fn insert_pats(&mut self, pats: &[Pat], funscoped: bool) {
         pats.iter().for_each(|pat| {
             if let Pat::Ident(id) = &pat {
-                self.assign_name(id.sym.to_string());
+                self.assign_name(id.sym.to_string(), funscoped);
             } else {
                 todo!("pattern params")
             }
@@ -96,13 +150,13 @@ impl<'a> NonLocalsContext<'a> {
         match expr {
             FunctionLike::FnExpr(function) => {
                 if let Some(name) = function.ident.as_ref() {
-                    self.assign_name(name.sym.to_string());
+                    self.assign_name(name.sym.to_string(), true);
                 }
                 self.insert_params(&function.function.params);
                 block_nonlocals(self, &function.function.body.as_ref().unwrap().stmts);
             }
             FunctionLike::ArrowExpr(arrow) => {
-                self.insert_pats(&arrow.params);
+                self.insert_pats(&arrow.params, true);
                 match arrow.body.as_ref() {
                     BlockStmtOrExpr::BlockStmt(b) => block_nonlocals(self, &b.stmts),
                     BlockStmtOrExpr::Expr(e) => expr_nonlocals(self, &e),
@@ -110,7 +164,8 @@ impl<'a> NonLocalsContext<'a> {
             }
             FunctionLike::FnDecl(fn_decl) => {
                 // TODO does the function name exist differently inside the function, or is it the same as the symbol defined outside?
-                self.assign_name(fn_decl.ident.sym.to_string());
+                self.assign_name(fn_decl.ident.sym.to_string(), true);
+                // TODO hoisted fn decls: self.push_fndecl(fn_decl);
                 self.insert_params(&fn_decl.function.params);
                 block_nonlocals(self, &fn_decl.function.body.as_ref().unwrap().stmts);
             }
@@ -142,7 +197,7 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
             for decl in &var.decls {
                 let Pat::Ident(ident) = &decl.name else {todo!()};
                 expr_nonlocals(ctx, decl.init.as_ref().unwrap());
-                ctx.assign_name(ident.sym.to_string());
+                ctx.assign_name(ident.sym.to_string(), var.kind == VarDeclKind::Var);
             }
         }
         Stmt::Decl(Decl::Fn(fn_decl)) => {
@@ -185,7 +240,7 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
-                    ctx.assign_name(p.clone().ident().unwrap(/* TODO */).sym.to_string());
+                    ctx.assign_name(p.clone().ident().unwrap(/* TODO */).sym.to_string(), false);
                 }
                 block_nonlocals(ctx, &handler.body.stmts);
             }
@@ -206,7 +261,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
         // WRITES
         Expr::Assign(assign) => match &assign.left {
             PatOrExpr::Pat(e) => match e.as_ref() {
-                Pat::Ident(ident) => ctx.assign_name(ident.id.sym.to_string()),
+                Pat::Ident(ident) => ctx.assign_name(ident.id.sym.to_string(), false),
                 _ => todo!(),
             },
             _ => todo!(),
@@ -338,13 +393,20 @@ mod tests {
             .expect_fn_decl();
 
         insta::assert_debug_snapshot!(find_nonlocals(FunctionLike::FnDecl(&func)), @r###"
-        [
-            "x_arg",
-            "a",
-            "defined_after",
-            "overwritten_in_block",
-            "x_rest",
-        ]
+        NonLocalInfo {
+            nonlocals: [
+                "x_arg",
+                "a",
+                "defined_after",
+                "overwritten_in_block",
+                "x_rest",
+            ],
+            funscoped: [
+                "x",
+                "x_arg",
+                "x_rest",
+            ],
+        }
         "###);
     }
 }

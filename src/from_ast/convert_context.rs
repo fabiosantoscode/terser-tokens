@@ -1,12 +1,14 @@
 use std::collections::HashMap;
-use swc_ecma_ast::{Ident};
+use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
     normalize_basic_blocks, BasicBlock, BasicBlockEnvironment, BasicBlockEnvironmentType,
     BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, Export,
     FunctionId, Import, ModuleSummary,
 };
-use crate::scope::Scope;
+use crate::scope::ScopeTree;
+
+use super::NonLocalInfo;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NestedIntoStatement {
@@ -20,13 +22,14 @@ pub struct FromAstCtx {
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
     pub conditionals: Vec<HashMap<String, Vec<usize>>>,
-    pub scope: Scope,
+    scope_tree: ScopeTree,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,
     function_index: FunctionId,
     pub functions: HashMap<FunctionId, BasicBlockGroup>,
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
+    pub nonlocalinfo: Option<NonLocalInfo>,
 }
 
 impl FromAstCtx {
@@ -36,13 +39,14 @@ impl FromAstCtx {
             exits: vec![None],
             var_index: 0,
             conditionals: vec![],
-            scope: Scope::new(false),
+            scope_tree: ScopeTree::new(),
             label_tracking: vec![],
             function_index: FunctionId(0),
             current_function_index: Some(FunctionId(0)),
             functions: HashMap::new(),
             imports: vec![],
             exports: vec![],
+            nonlocalinfo: None,
         }
     }
 
@@ -81,7 +85,11 @@ impl FromAstCtx {
             None => {}
         };
 
-        self.scope.insert(name.into(), value);
+        self.scope_tree.insert(name.into(), value);
+    }
+
+    pub fn read_name(&mut self, name: &str) -> Option<usize> {
+        self.scope_tree.lookup(name)
     }
 
     pub fn enter_conditional_branch(&mut self) {
@@ -103,7 +111,7 @@ impl FromAstCtx {
         for (varname, phies) in to_phi.into_iter() {
             let phi = BasicBlockInstruction::Phi(phies);
             let phi_idx = self.push_instruction(phi);
-            self.scope.insert(varname, phi_idx);
+            self.scope_tree.insert(varname, phi_idx);
         }
     }
 
@@ -224,6 +232,7 @@ impl FromAstCtx {
     pub fn go_into_function<C>(
         &mut self,
         arg_count: usize,
+        nonlocalinfo: Option<NonLocalInfo>,
         convert_in_function: C,
     ) -> Result<&BasicBlockGroup, String>
     where
@@ -232,21 +241,25 @@ impl FromAstCtx {
         self.function_index.0 += 1;
         let function_index = self.function_index;
 
+        self.scope_tree.go_into_function_scope();
+
         // functions are shared between contexts
         let functions = std::mem::replace(&mut self.functions, HashMap::new());
+        let scope_tree = std::mem::replace(&mut self.scope_tree, ScopeTree::new());
 
         let mut inner_ctx = Self {
             basic_blocks: vec![vec![]],
             exits: vec![None],
             var_index: self.var_index,
             conditionals: vec![],
-            scope: self.scope.go_into_function_scope(),
+            scope_tree,
             label_tracking: vec![],
             function_index: self.function_index,
             current_function_index: Some(function_index),
             functions,
             imports: vec![],
             exports: vec![],
+            nonlocalinfo,
         };
 
         convert_in_function(&mut inner_ctx)?;
@@ -264,6 +277,7 @@ impl FromAstCtx {
         inner_ctx.functions.insert(id, function_bg);
 
         self.functions = std::mem::replace(&mut inner_ctx.functions, HashMap::new());
+        self.scope_tree = std::mem::replace(&mut inner_ctx.scope_tree, ScopeTree::new());
 
         // collect global function registry, global var numbering
         self.var_index = inner_ctx.var_index;
@@ -291,7 +305,7 @@ mod tests {
         ctx.assign_name("conditional_varname", 456);
         ctx.assign_name("conditional_varname", 789);
 
-        ctx.go_into_function(1, |ctx| {
+        ctx.go_into_function(1, None, |ctx| {
             ctx.assign_name("conditional_varname", 999);
 
             insta::assert_debug_snapshot!(ctx, @r###"
@@ -304,16 +318,31 @@ mod tests {
                 ],
                 var_index: 0,
                 conditionals: [],
-                scope: Scope (function) {
-                    vars: [
-                        "conditional_varname: 999",
+                scope_tree: ScopeTree {
+                    scopes: [
+                        ScopeTreeNode {
+                            parent: None,
+                            is_block: false,
+                            vars: {
+                                "conditional_varname": 789,
+                                "varname": 123,
+                            },
+                        },
+                        ScopeTreeNode {
+                            parent: Some(
+                                ScopeTreeHandle(
+                                    0,
+                                ),
+                            ),
+                            is_block: false,
+                            vars: {
+                                "conditional_varname": 999,
+                            },
+                        },
                     ],
-                    parent: Scope (function) {
-                        vars: [
-                            "conditional_varname: 789",
-                            "varname: 123",
-                        ],
-                    },
+                    current_scope: ScopeTreeHandle(
+                        1,
+                    ),
                 },
                 label_tracking: [],
                 current_function_index: Some(
@@ -323,6 +352,7 @@ mod tests {
                 functions: {},
                 imports: [],
                 exports: [],
+                nonlocalinfo: None,
             }
             "###);
 
@@ -347,11 +377,31 @@ mod tests {
                     ],
                 },
             ],
-            scope: Scope (function) {
-                vars: [
-                    "conditional_varname: 789",
-                    "varname: 123",
+            scope_tree: ScopeTree {
+                scopes: [
+                    ScopeTreeNode {
+                        parent: None,
+                        is_block: false,
+                        vars: {
+                            "conditional_varname": 789,
+                            "varname": 123,
+                        },
+                    },
+                    ScopeTreeNode {
+                        parent: Some(
+                            ScopeTreeHandle(
+                                0,
+                            ),
+                        ),
+                        is_block: false,
+                        vars: {
+                            "conditional_varname": 999,
+                        },
+                    },
                 ],
+                current_scope: ScopeTreeHandle(
+                    1,
+                ),
             },
             label_tracking: [],
             current_function_index: Some(
@@ -368,13 +418,72 @@ mod tests {
             },
             imports: [],
             exports: [],
+            nonlocalinfo: None,
         }
         "###);
 
         // this pops the conditionals, creates phi nodes and assigns the conditional var to the phied version
         ctx.leave_conditional_branch();
 
-        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
+        insta::assert_debug_snapshot!(ctx, @r###"
+        FromAstCtx {
+            basic_blocks: [
+                [
+                    (
+                        1,
+                        either($456, $789),
+                    ),
+                ],
+            ],
+            exits: [
+                None,
+            ],
+            var_index: 2,
+            conditionals: [],
+            scope_tree: ScopeTree {
+                scopes: [
+                    ScopeTreeNode {
+                        parent: None,
+                        is_block: false,
+                        vars: {
+                            "conditional_varname": 789,
+                            "varname": 123,
+                        },
+                    },
+                    ScopeTreeNode {
+                        parent: Some(
+                            ScopeTreeHandle(
+                                0,
+                            ),
+                        ),
+                        is_block: false,
+                        vars: {
+                            "conditional_varname": 1,
+                        },
+                    },
+                ],
+                current_scope: ScopeTreeHandle(
+                    1,
+                ),
+            },
+            label_tracking: [],
+            current_function_index: Some(
+                FunctionId(0),
+            ),
+            function_index: FunctionId(1),
+            functions: {
+                FunctionId(1): function():
+                @0: {
+                    $0 = undefined
+                    exit = return $0
+                }
+                ,
+            },
+            imports: [],
+            exports: [],
+            nonlocalinfo: None,
+        }
+        "###);
         insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
         [
             [
@@ -384,14 +493,6 @@ mod tests {
                 ),
             ],
         ]
-        "###);
-        insta::assert_debug_snapshot!(ctx.scope, @r###"
-        Scope (function) {
-            vars: [
-                "conditional_varname: 1",
-                "varname: 123",
-            ],
-        }
         "###);
     }
 }

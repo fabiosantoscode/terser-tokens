@@ -1,29 +1,19 @@
-use swc_ecma_ast::Function;
-
-use super::{statements_to_basic_blocks, FromAstCtx};
+use super::{find_nonlocals, statements_to_basic_blocks, FromAstCtx, FunctionLike};
 use crate::basic_blocks::{BasicBlockGroup, BasicBlockInstruction};
 
 pub fn function_to_basic_blocks<'a>(
     ctx: &'a mut FromAstCtx,
-    function: &'a Function,
+    function: FunctionLike<'a>,
 ) -> Result<&'a BasicBlockGroup, String> {
     // count function.length
-    let arg_count: usize = function
-        .params
-        .iter()
-        .filter(|param| match param.pat {
-            swc_ecma_ast::Pat::Ident(_) => true,
-            swc_ecma_ast::Pat::Rest(_) => false,
-            _ => todo!("non-ident function param"),
-        })
-        .count();
+    let arg_count: usize = function.function_length();
 
-    ctx.go_into_function(arg_count, |ctx| {
+    ctx.go_into_function(arg_count, Some(find_nonlocals(function.clone())), |ctx| {
         function
-            .params
-            .iter()
+            .get_params()
+            .into_iter()
             .enumerate()
-            .for_each(|(i, param)| match &param.pat {
+            .for_each(|(i, pat)| match pat {
                 swc_ecma_ast::Pat::Ident(ident) => {
                     let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
                     ctx.assign_name(&ident.id.sym.to_string(), arg);
@@ -36,15 +26,7 @@ pub fn function_to_basic_blocks<'a>(
                 _ => todo!("non-ident function param"),
             });
 
-        let stats = function
-            .body
-            .as_ref()
-            .expect("function body")
-            .stmts
-            .iter()
-            .collect::<Vec<_>>();
-
-        statements_to_basic_blocks(ctx, &stats);
+        statements_to_basic_blocks(ctx, &function.get_statements());
 
         // TODO refactor note:
         // because statements_to_basic_blocks is not a method of `ctx`, it doesn't know if it's
@@ -68,7 +50,7 @@ mod tests {
             .expect_stmt()
             .expect_decl()
             .expect_fn_decl();
-        let func = function_to_basic_blocks(&mut ctx, decl.function.as_ref())
+        let func = function_to_basic_blocks(&mut ctx, FunctionLike::FnDecl(&decl))
             .expect("function_to_basic_blocks");
 
         func.clone()
