@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Debug};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ScopeTreeNode<Of = usize> {
@@ -14,7 +14,7 @@ pub struct ScopeTree<Of = usize> {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeTreeHandle(pub usize);
 
 impl<Of> ScopeTree<Of>
@@ -101,6 +101,23 @@ where
         }
     }
 
+    pub fn lookup_in_function(&self, name: &str) -> Option<Of> {
+        self.lookup_in_function_at(self.current_scope, name)
+    }
+
+    pub fn lookup_in_function_at(&self, at: ScopeTreeHandle, name: &str) -> Option<Of> {
+        if let Some(v) = self.get_at(at, name) {
+            Some(v.clone())
+        } else {
+            let parent = self.parent_at(at)?;
+            if self.scopes[parent.0].is_block {
+                None
+            } else {
+                self.lookup_in_function_at(parent, name)
+            }
+        }
+    }
+
     pub(crate) fn lookup_scope_of(&self, name: &str) -> Option<ScopeTreeHandle> {
         self.lookup_scope_of_at(self.current_scope, name)
     }
@@ -127,5 +144,11 @@ where
         let a = self.get_closest_function_scope_at(a);
         let b = self.get_closest_function_scope_at(b);
         a == b
+    }
+}
+
+impl Debug for ScopeTreeHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ScopeTreeHandle({})", self.0)
     }
 }

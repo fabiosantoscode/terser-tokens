@@ -22,7 +22,7 @@ pub struct FromAstCtx {
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
     pub conditionals: Vec<HashMap<String, Vec<usize>>>,
-    scope_tree: ScopeTree,
+    pub scope_tree: ScopeTree,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,
     function_index: FunctionId,
@@ -70,49 +70,6 @@ impl FromAstCtx {
 
     pub fn set_exit(&mut self, at: usize, new_exit: BasicBlockExit) {
         self.exits[at] = Some(new_exit)
-    }
-
-    pub fn assign_name(&mut self, name: &str, value: usize) {
-        let mut conditionals = self.conditionals.last_mut();
-        match conditionals {
-            Some(ref mut conditionals) => {
-                if let Some(conditional) = conditionals.get_mut(name) {
-                    conditional.push(value);
-                } else {
-                    conditionals.insert(name.to_string(), vec![value]);
-                }
-            }
-            None => {}
-        };
-
-        self.scope_tree.insert(name.into(), value);
-    }
-
-    pub fn read_name(&mut self, name: &str) -> Option<usize> {
-        self.scope_tree.lookup(name)
-    }
-
-    pub fn enter_conditional_branch(&mut self) {
-        self.conditionals.push(HashMap::new())
-    }
-
-    pub fn leave_conditional_branch(&mut self) {
-        // phi nodes for conditionally assigned variables
-        let to_phi = self
-            .conditionals
-            .pop()
-            .expect("unbalanced conditional branch");
-        let mut to_phi = to_phi
-            .into_iter()
-            .filter(|(_, phies)| phies.len() > 1)
-            .collect::<Vec<_>>();
-        to_phi.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        for (varname, phies) in to_phi.into_iter() {
-            let phi = BasicBlockInstruction::Phi(phies);
-            let phi_idx = self.push_instruction(phi);
-            self.scope_tree.insert(varname, phi_idx);
-        }
     }
 
     pub fn current_block_index(&self) -> usize {
@@ -259,8 +216,11 @@ impl FromAstCtx {
             functions,
             imports: vec![],
             exports: vec![],
-            nonlocalinfo,
+            nonlocalinfo: None,
         };
+        if let Some(nonlocalinfo) = nonlocalinfo {
+            inner_ctx.embed_nonlocals(nonlocalinfo, self.nonlocalinfo.as_ref());
+        }
 
         convert_in_function(&mut inner_ctx)?;
 
@@ -287,212 +247,5 @@ impl FromAstCtx {
             .functions
             .get(&function_index)
             .expect("convert_in_function callback never called wrap_up_function()"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_general() {
-        let mut ctx = FromAstCtx::new();
-
-        ctx.assign_name("varname", 123);
-
-        ctx.enter_conditional_branch();
-
-        ctx.assign_name("conditional_varname", 456);
-        ctx.assign_name("conditional_varname", 789);
-
-        ctx.go_into_function(1, None, |ctx| {
-            ctx.assign_name("conditional_varname", 999);
-
-            insta::assert_debug_snapshot!(ctx, @r###"
-            FromAstCtx {
-                basic_blocks: [
-                    [],
-                ],
-                exits: [
-                    None,
-                ],
-                var_index: 0,
-                conditionals: [],
-                scope_tree: ScopeTree {
-                    scopes: [
-                        ScopeTreeNode {
-                            parent: None,
-                            is_block: false,
-                            vars: {
-                                "conditional_varname": 789,
-                                "varname": 123,
-                            },
-                        },
-                        ScopeTreeNode {
-                            parent: Some(
-                                ScopeTreeHandle(
-                                    0,
-                                ),
-                            ),
-                            is_block: false,
-                            vars: {
-                                "conditional_varname": 999,
-                            },
-                        },
-                    ],
-                    current_scope: ScopeTreeHandle(
-                        1,
-                    ),
-                },
-                label_tracking: [],
-                current_function_index: Some(
-                    FunctionId(1),
-                ),
-                function_index: FunctionId(1),
-                functions: {},
-                imports: [],
-                exports: [],
-                nonlocalinfo: None,
-            }
-            "###);
-
-            Ok(())
-        })
-        .unwrap();
-
-        insta::assert_debug_snapshot!(ctx, @r###"
-        FromAstCtx {
-            basic_blocks: [
-                [],
-            ],
-            exits: [
-                None,
-            ],
-            var_index: 1,
-            conditionals: [
-                {
-                    "conditional_varname": [
-                        456,
-                        789,
-                    ],
-                },
-            ],
-            scope_tree: ScopeTree {
-                scopes: [
-                    ScopeTreeNode {
-                        parent: None,
-                        is_block: false,
-                        vars: {
-                            "conditional_varname": 789,
-                            "varname": 123,
-                        },
-                    },
-                    ScopeTreeNode {
-                        parent: Some(
-                            ScopeTreeHandle(
-                                0,
-                            ),
-                        ),
-                        is_block: false,
-                        vars: {
-                            "conditional_varname": 999,
-                        },
-                    },
-                ],
-                current_scope: ScopeTreeHandle(
-                    1,
-                ),
-            },
-            label_tracking: [],
-            current_function_index: Some(
-                FunctionId(0),
-            ),
-            function_index: FunctionId(1),
-            functions: {
-                FunctionId(1): function():
-                @0: {
-                    $0 = undefined
-                    exit = return $0
-                }
-                ,
-            },
-            imports: [],
-            exports: [],
-            nonlocalinfo: None,
-        }
-        "###);
-
-        // this pops the conditionals, creates phi nodes and assigns the conditional var to the phied version
-        ctx.leave_conditional_branch();
-
-        insta::assert_debug_snapshot!(ctx, @r###"
-        FromAstCtx {
-            basic_blocks: [
-                [
-                    (
-                        1,
-                        either($456, $789),
-                    ),
-                ],
-            ],
-            exits: [
-                None,
-            ],
-            var_index: 2,
-            conditionals: [],
-            scope_tree: ScopeTree {
-                scopes: [
-                    ScopeTreeNode {
-                        parent: None,
-                        is_block: false,
-                        vars: {
-                            "conditional_varname": 789,
-                            "varname": 123,
-                        },
-                    },
-                    ScopeTreeNode {
-                        parent: Some(
-                            ScopeTreeHandle(
-                                0,
-                            ),
-                        ),
-                        is_block: false,
-                        vars: {
-                            "conditional_varname": 1,
-                        },
-                    },
-                ],
-                current_scope: ScopeTreeHandle(
-                    1,
-                ),
-            },
-            label_tracking: [],
-            current_function_index: Some(
-                FunctionId(0),
-            ),
-            function_index: FunctionId(1),
-            functions: {
-                FunctionId(1): function():
-                @0: {
-                    $0 = undefined
-                    exit = return $0
-                }
-                ,
-            },
-            imports: [],
-            exports: [],
-            nonlocalinfo: None,
-        }
-        "###);
-        insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
-        [
-            [
-                (
-                    1,
-                    either($456, $789),
-                ),
-            ],
-        ]
-        "###);
     }
 }

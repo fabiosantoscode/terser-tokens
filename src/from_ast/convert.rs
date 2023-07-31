@@ -9,7 +9,7 @@ use crate::basic_blocks::{
     ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
 };
 
-use super::{function_to_basic_blocks, FromAstCtx, NestedIntoStatement, FunctionLike};
+use super::{function_to_basic_blocks, FromAstCtx, FunctionLike, NestedIntoStatement};
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement

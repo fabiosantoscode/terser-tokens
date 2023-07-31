@@ -183,16 +183,20 @@ mod tests {
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $0 = 1
-            $3 = FunctionId(2)
-            exit = return $3
+            $0 = undefined
+            $1 = write_non_local $$1 $0
+            $2 = 1
+            $3 = write_non_local $$1 $2
+            $7 = FunctionId(2)
+            exit = return $7
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(2)).unwrap(), @r###"
         function():
         @0: {
-            $1 = $0
-            exit = return $1
+            $4 = read_non_local $$1
+            $5 = $4
+            exit = return $5
         }
         "###);
     }

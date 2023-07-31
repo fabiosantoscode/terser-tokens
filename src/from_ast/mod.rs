@@ -1,5 +1,6 @@
 mod convert;
 mod convert_context;
+mod convert_context_names;
 mod convert_function;
 mod convert_module;
 mod find_nonlocals;
@@ -7,6 +8,7 @@ mod function_like;
 
 pub use convert::*;
 pub use convert_context::*;
+pub use convert_context_names::*;
 pub use convert_function::*;
 pub use convert_module::*;
 pub use find_nonlocals::*;

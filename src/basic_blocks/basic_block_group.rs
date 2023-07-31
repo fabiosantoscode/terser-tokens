@@ -1,4 +1,4 @@
-use super::{BasicBlock, NonLocalId, FunctionId};
+use super::{BasicBlock, FunctionId, NonLocalId};
 
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
