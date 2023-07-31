@@ -280,72 +280,9 @@ mod tests {
         ctx.go_into_function(1, None, |ctx| {
             ctx.assign_name("conditional_varname", 999);
 
-            insta::assert_debug_snapshot!(ctx, @r###"
-            FromAstCtx {
-                basic_blocks: [
-                    [],
-                ],
-                exits: [
-                    None,
-                ],
-                var_index: 0,
-                conditionals: [],
-                scope_tree: ScopeTree {
-                    scopes: [
-                        ScopeTreeNode {
-                            parent: None,
-                            is_block: false,
-                            vars: {
-                                "conditional_varname": 789,
-                                "varname": 123,
-                            },
-                        },
-                        ScopeTreeNode {
-                            parent: Some(
-                                ScopeTreeHandle(0),
-                            ),
-                            is_block: false,
-                            vars: {
-                                "conditional_varname": 999,
-                            },
-                        },
-                    ],
-                    current_scope: ScopeTreeHandle(1),
-                },
-                label_tracking: [],
-                current_function_index: Some(
-                    FunctionId(1),
-                ),
-                function_index: FunctionId(1),
-                functions: {},
-                imports: [],
-                exports: [],
-                nonlocalinfo: None,
-            }
-            "###);
-
-            Ok(())
-        })
-        .unwrap();
-
-        insta::assert_debug_snapshot!(ctx, @r###"
-        FromAstCtx {
-            basic_blocks: [
-                [],
-            ],
-            exits: [
-                None,
-            ],
-            var_index: 1,
-            conditionals: [
-                {
-                    "conditional_varname": [
-                        456,
-                        789,
-                    ],
-                },
-            ],
-            scope_tree: ScopeTree {
+            insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
+            insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
+            ScopeTree {
                 scopes: [
                     ScopeTreeNode {
                         parent: None,
@@ -366,82 +303,74 @@ mod tests {
                     },
                 ],
                 current_scope: ScopeTreeHandle(1),
+            }
+            "###);
+
+            Ok(())
+        })
+        .unwrap();
+
+        insta::assert_debug_snapshot!(ctx.conditionals, @r###"
+        [
+            {
+                "conditional_varname": [
+                    456,
+                    789,
+                ],
             },
-            label_tracking: [],
-            current_function_index: Some(
-                FunctionId(0),
-            ),
-            function_index: FunctionId(1),
-            functions: {
-                FunctionId(1): function():
-                @0: {
-                    $0 = undefined
-                    exit = return $0
-                }
-                ,
-            },
-            imports: [],
-            exports: [],
-            nonlocalinfo: None,
+        ]
+        "###);
+        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
+        ScopeTree {
+            scopes: [
+                ScopeTreeNode {
+                    parent: None,
+                    is_block: false,
+                    vars: {
+                        "conditional_varname": 789,
+                        "varname": 123,
+                    },
+                },
+                ScopeTreeNode {
+                    parent: Some(
+                        ScopeTreeHandle(0),
+                    ),
+                    is_block: false,
+                    vars: {
+                        "conditional_varname": 999,
+                    },
+                },
+            ],
+            current_scope: ScopeTreeHandle(0),
         }
         "###);
 
         // this pops the conditionals, creates phi nodes and assigns the conditional var to the phied version
         ctx.leave_conditional_branch();
 
-        insta::assert_debug_snapshot!(ctx, @r###"
-        FromAstCtx {
-            basic_blocks: [
-                [
-                    (
-                        1,
-                        either($456, $789),
+        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
+        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
+        ScopeTree {
+            scopes: [
+                ScopeTreeNode {
+                    parent: None,
+                    is_block: false,
+                    vars: {
+                        "conditional_varname": 1,
+                        "varname": 123,
+                    },
+                },
+                ScopeTreeNode {
+                    parent: Some(
+                        ScopeTreeHandle(0),
                     ),
-                ],
-            ],
-            exits: [
-                None,
-            ],
-            var_index: 2,
-            conditionals: [],
-            scope_tree: ScopeTree {
-                scopes: [
-                    ScopeTreeNode {
-                        parent: None,
-                        is_block: false,
-                        vars: {
-                            "conditional_varname": 789,
-                            "varname": 123,
-                        },
+                    is_block: false,
+                    vars: {
+                        "conditional_varname": 999,
                     },
-                    ScopeTreeNode {
-                        parent: Some(
-                            ScopeTreeHandle(0),
-                        ),
-                        is_block: false,
-                        vars: {
-                            "conditional_varname": 1,
-                        },
-                    },
-                ],
-                current_scope: ScopeTreeHandle(1),
-            },
-            label_tracking: [],
-            current_function_index: Some(
-                FunctionId(0),
-            ),
-            function_index: FunctionId(1),
-            functions: {
-                FunctionId(1): function():
-                @0: {
-                    $0 = undefined
-                    exit = return $0
-                }
-                ,
-            },
-            imports: [],
-            exports: [],
-            nonlocalinfo: None,
+                },
+            ],
+            current_scope: ScopeTreeHandle(0),
         }
         "###);
         insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"

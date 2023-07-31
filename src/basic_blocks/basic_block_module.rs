@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::BasicBlockGroup;
 
@@ -24,7 +24,7 @@ pub enum Export {
 #[derive(Clone)]
 pub struct BasicBlockModule {
     pub summary: ModuleSummary,
-    pub functions: HashMap<FunctionId, BasicBlockGroup>,
+    pub functions: BTreeMap<FunctionId, BasicBlockGroup>,
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
 }
@@ -49,5 +49,5 @@ impl BasicBlockModule {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Hash, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Hash, PartialOrd, Ord, Eq, Default)]
 pub struct FunctionId(pub usize);

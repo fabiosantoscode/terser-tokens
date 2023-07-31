@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
@@ -26,7 +26,7 @@ pub struct FromAstCtx {
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,
     function_index: FunctionId,
-    pub functions: HashMap<FunctionId, BasicBlockGroup>,
+    pub functions: BTreeMap<FunctionId, BasicBlockGroup>,
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
     pub nonlocalinfo: Option<NonLocalInfo>,
@@ -43,7 +43,7 @@ impl FromAstCtx {
             label_tracking: vec![],
             function_index: FunctionId(0),
             current_function_index: Some(FunctionId(0)),
-            functions: HashMap::new(),
+            functions: BTreeMap::new(),
             imports: vec![],
             exports: vec![],
             nonlocalinfo: None,
@@ -201,7 +201,7 @@ impl FromAstCtx {
         self.scope_tree.go_into_function_scope();
 
         // functions are shared between contexts
-        let functions = std::mem::replace(&mut self.functions, HashMap::new());
+        let functions = std::mem::replace(&mut self.functions, BTreeMap::new());
         let scope_tree = std::mem::replace(&mut self.scope_tree, ScopeTree::new());
 
         let mut inner_ctx = Self {
@@ -236,8 +236,10 @@ impl FromAstCtx {
 
         inner_ctx.functions.insert(id, function_bg);
 
-        self.functions = std::mem::replace(&mut inner_ctx.functions, HashMap::new());
+        self.functions = std::mem::replace(&mut inner_ctx.functions, BTreeMap::new());
         self.scope_tree = std::mem::replace(&mut inner_ctx.scope_tree, ScopeTree::new());
+
+        self.scope_tree.leave_scope();
 
         // collect global function registry, global var numbering
         self.var_index = inner_ctx.var_index;

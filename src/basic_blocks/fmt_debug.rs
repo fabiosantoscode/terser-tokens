@@ -148,8 +148,6 @@ impl Debug for BasicBlockModule {
             exports,
         } = self;
 
-        let mut functions: Vec<_> = functions.iter().map(|(k, v)| (k.0, v)).collect();
-        functions.sort_unstable_by_key(|(k, _)| *k);
         let functions: Vec<_> = functions.iter().map(|(_, v)| v).collect();
 
         let (top_level_stats, functions) = functions.split_first().unwrap();
@@ -191,8 +189,11 @@ impl Debug for BasicBlockGroup {
             BasicBlockEnvironmentType::Module => {}
             BasicBlockEnvironmentType::Function(_argc) => writeln!(f, "function():")?,
         }
-        for (k, v) in self.iter() {
-            writeln!(f, "@{}: {:?}", k, v)?;
+        for (i, (k, v)) in self.iter().enumerate() {
+            if i > 0 {
+                write!(f, "\n")?;
+            }
+            write!(f, "@{}: {:?}", k, v)?;
         }
         Ok(())
     }

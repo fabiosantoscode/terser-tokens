@@ -1,7 +1,7 @@
 use swc_ecma_ast::{
-    ArrayLit, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee, ComputedPropName, Decl, Expr,
-    ExprOrSpread, FnExpr, Function, Ident, Lit, MemberExpr, MemberProp, Module, ModuleItem,
-    ReturnStmt, Stmt, ThrowStmt, YieldExpr,
+    ArrayLit, AssignExpr, AssignOp, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee,
+    ComputedPropName, Decl, Expr, ExprOrSpread, FnExpr, Function, Ident, Lit, MemberExpr,
+    MemberProp, Module, ModuleItem, Pat, PatOrExpr, ReturnStmt, Stmt, ThrowStmt, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -354,6 +354,19 @@ fn to_expr_ast(
             })
         }
 
+        BasicBlockInstruction::ReadNonLocal(id) => {
+            Expr::Ident(Ident::new(get_variable(id.0).into(), Default::default()))
+        }
+        BasicBlockInstruction::WriteNonLocal(id, value) => Expr::Assign(AssignExpr {
+            op: AssignOp::Assign,
+            span: Default::default(),
+            left: PatOrExpr::Pat(Box::new(Pat::Ident(BindingIdent {
+                id: Ident::new(get_variable(id.0).into(), Default::default()),
+                type_ann: None,
+            }))),
+            right: Box::new(get_identifier(get_variable(*value))),
+        }),
+
         BasicBlockInstruction::TempExit(typ, arg) => match typ {
             TempExitType::Yield => Expr::Yield(YieldExpr {
                 span: Default::default(),
@@ -375,15 +388,7 @@ fn to_expr_ast(
             ctx.get_caught_error().into(),
             Default::default(),
         )),
-
         BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
-
-        BasicBlockInstruction::ReadNonLocal(id) => {
-            todo!()
-        }
-        BasicBlockInstruction::WriteNonLocal(id, value) => {
-            todo!()
-        }
     }
 }
 
@@ -462,6 +467,54 @@ mod tests {
         var $16 = $13 + $15;
         var $17 = undefined;
         return $17;
+        "###);
+    }
+
+    #[test]
+    fn to_scopes() {
+        let block_group = test_basic_blocks_module(
+            "var outer = 1
+            var bar = function bar() { return outer; }",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var $0 = undefined;
+        var $1 = $1 = $0;
+        var $2 = 1;
+        var $3 = $1 = $2;
+        var $7 = function() {
+            var $4 = $1;
+            var $5 = $4;
+            return $5;
+        };
+        var $8 = undefined;
+        return $8;
+        "###);
+    }
+
+    #[test]
+    fn to_scopes_rw() {
+        let block_group = test_basic_blocks_module(
+            "var outer = 1
+            var bar = function bar() { outer = 9 }",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var $0 = undefined;
+        var $1 = $1 = $0;
+        var $2 = 1;
+        var $3 = $1 = $2;
+        var $8 = function() {
+            var $4 = $1;
+            var $5 = 9;
+            var $6 = $1 = $5;
+            var $7 = undefined;
+            return $7;
+        };
+        var $9 = undefined;
+        return $9;
         "###);
     }
 

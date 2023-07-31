@@ -39,9 +39,8 @@ where
 
     /// Create a new child func scope and make it the current scope
     pub fn go_into_function_scope(&mut self) -> ScopeTreeHandle {
-        let parent = Some(self.current_scope);
         self.scopes.push(ScopeTreeNode {
-            parent,
+            parent: Some(self.current_scope),
             is_block: false,
             vars: BTreeMap::new(),
         });
@@ -52,9 +51,8 @@ where
 
     /// Create a new child block scope and make it the current scope
     pub fn go_into_block_scope(&mut self) -> ScopeTreeHandle {
-        let parent = Some(self.current_scope);
         self.scopes.push(ScopeTreeNode {
-            parent: parent,
+            parent: Some(self.current_scope),
             is_block: true,
             vars: BTreeMap::new(),
         });
@@ -88,7 +86,7 @@ where
         self.parent_at(self.current_scope)
     }
 
-    pub(crate) fn lookup(&self, name: &str) -> Option<Of> {
+    pub fn lookup(&self, name: &str) -> Option<Of> {
         self.lookup_at(self.current_scope, name)
     }
 
@@ -111,14 +109,14 @@ where
         } else {
             let parent = self.parent_at(at)?;
             if self.scopes[parent.0].is_block {
-                None
-            } else {
                 self.lookup_in_function_at(parent, name)
+            } else {
+                None
             }
         }
     }
 
-    pub(crate) fn lookup_scope_of(&self, name: &str) -> Option<ScopeTreeHandle> {
+    pub fn lookup_scope_of(&self, name: &str) -> Option<ScopeTreeHandle> {
         self.lookup_scope_of_at(self.current_scope, name)
     }
 
@@ -140,7 +138,7 @@ where
         }
     }
 
-    pub(crate) fn same_function_as(&self, a: ScopeTreeHandle, b: ScopeTreeHandle) -> bool {
+    pub fn same_function_as(&self, a: ScopeTreeHandle, b: ScopeTreeHandle) -> bool {
         let a = self.get_closest_function_scope_at(a);
         let b = self.get_closest_function_scope_at(b);
         a == b

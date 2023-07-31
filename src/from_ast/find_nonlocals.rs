@@ -1,7 +1,7 @@
 use fix_fn::fix_fn;
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Param,
-    Pat, PatOrExpr, Stmt, VarDeclKind, YieldExpr,
+    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Module,
+    ModuleItem, Param, Pat, PatOrExpr, Stmt, VarDeclKind, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
@@ -32,8 +32,26 @@ pub fn find_nonlocals(func: FunctionLike) -> NonLocalInfo {
     }
 }
 
+/// given a list of statements, which vars here are used in scopes within?
+pub fn find_module_nonlocals(module: &Module) -> NonLocalInfo {
+    let mut ctx = NonLocalsContext {
+        scopes: ScopeTree::new(),
+        depth: 0,
+        found_nonlocals: vec![],
+        deferred_fns: vec![],
+        found_funscoped: vec![],
+    };
+    ctx.do_module(module);
+    ctx.undefer_all();
+
+    NonLocalInfo {
+        nonlocals: ctx.found_nonlocals,
+        funscoped: ctx.found_funscoped,
+    }
+}
+
 struct NonLocalsContext<'a> {
-    pub scopes: ScopeTree<String>, // TODO Scope can be changed, use something more generic
+    pub scopes: ScopeTree<String>,
     pub depth: u32,
     pub found_nonlocals: Vec<String>,
     pub deferred_fns: Vec<(FunctionLike<'a>, ScopeTreeHandle)>,
@@ -42,10 +60,10 @@ struct NonLocalsContext<'a> {
 
 impl<'a> NonLocalsContext<'a> {
     fn assign_name(&mut self, name: String, funscoped: bool) {
-        if funscoped && self.depth == 0 {
+        if funscoped && self.depth == 0 && !self.found_funscoped.contains(&name) {
             self.found_funscoped.push(name.clone());
         }
-        self.scopes.insert(name.clone(), name);
+        self.scopes.insert(name.clone(), name.clone());
     }
 
     fn read_name(&mut self, name: String) {
@@ -127,6 +145,17 @@ impl<'a> NonLocalsContext<'a> {
                 block_nonlocals(self, &fn_decl.function.body.as_ref().unwrap().stmts);
             }
         }
+    }
+
+    pub fn do_module(&mut self, module: &'a Module) {
+        module.body.iter().for_each(|item| match item {
+            ModuleItem::Stmt(stmt) => {
+                stat_nonlocals(self, stmt);
+            }
+            ModuleItem::ModuleDecl(_) => {
+                // TODO
+            }
+        });
     }
 
     pub fn undefer_all(&mut self) {
@@ -218,7 +247,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
         // WRITES
         Expr::Assign(assign) => match &assign.left {
             PatOrExpr::Pat(e) => match e.as_ref() {
-                Pat::Ident(ident) => ctx.assign_name(ident.id.sym.to_string(), false),
+                Pat::Ident(ident) => ctx.read_name(ident.id.sym.to_string()),
                 _ => todo!(),
             },
             _ => todo!(),
@@ -362,6 +391,49 @@ mod tests {
                 "x",
                 "x_arg",
                 "x_rest",
+            ],
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_find_nonlocals_module() {
+        let module = swc_parse(
+            "var x = 1;
+            var a = 0;
+            var x = function a() {
+                return x + a;
+            }",
+        );
+
+        insta::assert_debug_snapshot!(find_module_nonlocals(&module), @r###"
+        NonLocalInfo {
+            nonlocals: [
+                "x",
+            ],
+            funscoped: [
+                "x",
+                "a",
+            ],
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_find_nonlocals_module_w() {
+        let module = swc_parse(
+            "var outer = 1
+            var bar = function bar() { outer = 9 }",
+        );
+
+        insta::assert_debug_snapshot!(find_module_nonlocals(&module), @r###"
+        NonLocalInfo {
+            nonlocals: [
+                "outer",
+            ],
+            funscoped: [
+                "outer",
+                "bar",
             ],
         }
         "###);

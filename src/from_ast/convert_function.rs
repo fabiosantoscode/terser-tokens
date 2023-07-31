@@ -28,21 +28,19 @@ pub fn function_to_basic_blocks<'a>(
 
         statements_to_basic_blocks(ctx, &function.get_statements());
 
-        // TODO refactor note:
-        // because statements_to_basic_blocks is not a method of `ctx`, it doesn't know if it's
-        // supposed to be a function. We should make it a method of `ctx` so it returns the
-        // correct type. Same for function_to_basic_blocks probably.
         Ok(())
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
-    use crate::basic_blocks::BasicBlockGroup;
+    use crate::basic_blocks::{BasicBlockGroup, FunctionId};
     use crate::swc_parse::swc_parse;
 
-    fn conv_fn(src: &str) -> BasicBlockGroup {
+    fn conv_fn(src: &str) -> BTreeMap<FunctionId, BasicBlockGroup> {
         let mut ctx = FromAstCtx::new();
         let func = swc_parse(src);
         let decl = func.body[0]
@@ -50,24 +48,27 @@ mod tests {
             .expect_stmt()
             .expect_decl()
             .expect_fn_decl();
-        let func = function_to_basic_blocks(&mut ctx, FunctionLike::FnDecl(&decl))
-            .expect("function_to_basic_blocks");
+        function_to_basic_blocks(&mut ctx, FunctionLike::FnDecl(&decl)).unwrap();
 
-        func.clone()
+        ctx.functions.into_iter().collect()
     }
+
+    // TODO test nonlocal arguments
 
     #[test]
     fn test_basic_blocks_function() {
         let func = conv_fn("function _(y, z) { return y + z }");
         insta::assert_debug_snapshot!(func, @r###"
-        function():
-        @0: {
-            $0 = arguments[0]
-            $1 = arguments[1]
-            $2 = $0
-            $3 = $1
-            $4 = $2 + $3
-            exit = return $4
+        {
+            FunctionId(1): function():
+            @0: {
+                $0 = arguments[0]
+                $1 = arguments[1]
+                $2 = $0
+                $3 = $1
+                $4 = $2 + $3
+                exit = return $4
+            },
         }
         "###);
     }
@@ -76,12 +77,73 @@ mod tests {
     fn test_basic_blocks_function_rest() {
         let func = conv_fn("function _(y, ...z) { return z }");
         insta::assert_debug_snapshot!(func, @r###"
-        function():
-        @0: {
-            $0 = arguments[0]
-            $1 = arguments[1...]
-            $2 = $1
-            exit = return $2
+        {
+            FunctionId(1): function():
+            @0: {
+                $0 = arguments[0]
+                $1 = arguments[1...]
+                $2 = $1
+                exit = return $2
+            },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_closure() {
+        let func = conv_fn(
+            "function _() {
+                var outer = 1
+                var bar = function bar() { return outer; }
+            }",
+        );
+        insta::assert_debug_snapshot!(func, @r###"
+        {
+            FunctionId(1): function():
+            @0: {
+                $0 = undefined
+                $1 = write_non_local $$1 $0
+                $2 = 1
+                $3 = write_non_local $$1 $2
+                $7 = FunctionId(2)
+                $8 = undefined
+                exit = return $8
+            },
+            FunctionId(2): function():
+            @0: {
+                $4 = read_non_local $$1
+                $5 = $4
+                exit = return $5
+            },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_closure_nonlocal_arg() {
+        let func = conv_fn(
+            "function _(outer_arg) {
+                var bar = function bar() { return outer_arg; }
+            }",
+        );
+        insta::assert_debug_snapshot!(func, @r###"
+        {
+            FunctionId(1): function():
+            @0: {
+                $0 = undefined
+                $1 = write_non_local $$1 $0
+                $2 = arguments[0]
+                $3 = write_non_local $$1 $2
+                $7 = FunctionId(2)
+                $8 = undefined
+                exit = return $8
+            },
+            FunctionId(2): function():
+            @0: {
+                $4 = read_non_local $$1
+                $5 = $4
+                exit = return $5
+            },
         }
         "###);
     }

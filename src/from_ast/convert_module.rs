@@ -2,12 +2,14 @@ use swc_ecma_ast::{
     ExportSpecifier, ImportSpecifier, Module, ModuleDecl, ModuleExportName, ModuleItem, Stmt,
 };
 
-use super::{statements_to_basic_blocks, FromAstCtx};
+use super::{find_module_nonlocals, statements_to_basic_blocks, FromAstCtx};
 use crate::basic_blocks::{BasicBlockModule, Export, Import, ModuleSummary};
 
 pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBlockModule, String> {
     let mut ctx = FromAstCtx::new();
     let summary = find_importexport(&mut ctx, filename, &module);
+
+    ctx.embed_nonlocals(find_module_nonlocals(module), None);
 
     let top_level_stats: Vec<&Stmt> = module
         .body
@@ -114,8 +116,7 @@ mod tests {
                     $2 = $0 + $1
                     $3 = undefined
                     exit = return $3
-                }
-                ,
+                },
             },
         )
         "###);
@@ -144,8 +145,7 @@ mod tests {
                 $6 = FunctionId(1)
                 $7 = undefined
                 exit = return $7
-            }
-            ,
+            },
             functions: [
                 function():
                 @0: {
@@ -153,14 +153,12 @@ mod tests {
                     $3 = $2
                     $4 = call $3()
                     exit = return $4
-                }
-                ,
+                },
                 function():
                 @0: {
                     $0 = 2
                     exit = return $0
-                }
-                ,
+                },
             ],
         }
         "###);
@@ -202,6 +200,91 @@ mod tests {
     }
 
     #[test]
+    fn a_closure_write() {
+        let module = module_to_basic_blocks(
+            "index.js",
+            &swc_parse(
+                "var outer = 1
+                var bar = function bar() { outer = 9 }",
+            ),
+        )
+        .unwrap();
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
+        @0: {
+            $0 = undefined
+            $1 = write_non_local $$1 $0
+            $2 = 1
+            $3 = write_non_local $$1 $2
+            $8 = FunctionId(1)
+            $9 = undefined
+            exit = return $9
+        }
+        "###);
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
+        function():
+        @0: {
+            $4 = read_non_local $$1
+            $5 = 9
+            $6 = write_non_local $$1 $5
+            $7 = undefined
+            exit = return $7
+        }
+        "###);
+    }
+
+    #[test]
+    fn funs_nested() {
+        let module = module_to_basic_blocks(
+            "index.js",
+            &swc_parse(
+                "var foo = function foo() {
+                    var foo_inner = function foo_inner(arg) {
+                        return arg;
+                    }
+                    return foo_inner(123);
+                }
+                var bar = function bar() { return 456; }
+                foo() + bar()",
+            ),
+        )
+        .unwrap();
+        insta::assert_debug_snapshot!(module.functions, @r###"
+        {
+            FunctionId(0): @0: {
+                $8 = FunctionId(1)
+                $11 = FunctionId(3)
+                $12 = $8
+                $13 = call $12()
+                $14 = $11
+                $15 = call $14()
+                $16 = $13 + $15
+                $17 = undefined
+                exit = return $17
+            },
+            FunctionId(1): function():
+            @0: {
+                $3 = FunctionId(2)
+                $4 = $3
+                $5 = 123
+                $6 = call $4($5)
+                exit = return $6
+            },
+            FunctionId(2): function():
+            @0: {
+                $0 = arguments[0]
+                $1 = $0
+                exit = return $1
+            },
+            FunctionId(3): function():
+            @0: {
+                $9 = 456
+                exit = return $9
+            },
+        }
+        "###);
+    }
+
+    #[test]
     fn imports() {
         let module = module_to_basic_blocks(
             "index.js",
@@ -219,8 +302,7 @@ mod tests {
                 top_level_stats: @0: {
                     $0 = undefined
                     exit = return $0
-                }
-                ,
+                },
                 imports: [
                     Name(
                         "foo#0",
