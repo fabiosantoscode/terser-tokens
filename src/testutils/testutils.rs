@@ -35,18 +35,26 @@ pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
 
 pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
     let m = parse_expression(source);
-    statements_to_basic_blocks(
-        &mut FromAstCtx::new(),
-        &vec![&Stmt::Expr(ExprStmt {
-            span: Default::default(),
-            expr: Box::new(m),
-        })],
-    )
+
+    let mut c = FromAstCtx::new();
+    let bg = c.go_into_function(0, |c: &mut FromAstCtx| {
+        statements_to_basic_blocks(
+            c,
+            &vec![&Stmt::Expr(ExprStmt {
+                span: Default::default(),
+                expr: Box::new(m),
+            })],
+        );
+
+        Ok(())
+    });
+
+    bg.unwrap().clone()
 }
 
 pub fn test_basic_blocks(source: &str) -> BasicBlockGroup {
     let m = test_basic_blocks_module(source);
-    m.top_level_stats
+    m.top_level_stats().clone()
 }
 
 pub fn test_basic_blocks_module(source: &str) -> BasicBlockModule {

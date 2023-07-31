@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use swc_ecma_ast::{Expr, Ident};
+use swc_ecma_ast::{Ident};
 
 use crate::basic_blocks::{
-    BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, Export, FunctionId, Import,
+    normalize_basic_blocks, BasicBlock, BasicBlockEnvironment, BasicBlockEnvironmentType,
+    BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, Export,
+    FunctionId, Import, ModuleSummary,
 };
 use crate::scope::Scope;
-
-use super::convert::expr_to_basic_blocks;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NestedIntoStatement {
@@ -22,6 +22,7 @@ pub struct FromAstCtx {
     pub conditionals: Vec<HashMap<String, Vec<usize>>>,
     pub scope: Scope,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
+    pub current_function_index: Option<FunctionId>,
     function_index: FunctionId,
     pub functions: HashMap<FunctionId, BasicBlockGroup>,
     pub imports: Vec<Import>,
@@ -38,47 +39,11 @@ impl FromAstCtx {
             scope: Scope::new(false),
             label_tracking: vec![],
             function_index: FunctionId(0),
+            current_function_index: Some(FunctionId(0)),
             functions: HashMap::new(),
             imports: vec![],
             exports: vec![],
         }
-    }
-
-    pub fn go_into_function<C>(&mut self, convert_in_function: C) -> Result<FunctionId, String>
-    where
-        C: FnOnce(&mut Self) -> Result<BasicBlockGroup, String>,
-    {
-        let function_index = self.function_index;
-        self.function_index.0 += 1;
-
-        // functions are shared between contexts
-        let functions = std::mem::replace(&mut self.functions, HashMap::new());
-
-        let mut ctx = Self {
-            basic_blocks: vec![vec![]],
-            exits: vec![None],
-            var_index: self.var_index,
-            conditionals: vec![],
-            scope: self.scope.go_into_function_scope(),
-            label_tracking: vec![],
-            function_index: self.function_index,
-            functions,
-            imports: vec![],
-            exports: vec![],
-        };
-
-        let blocks = convert_in_function(&mut ctx)?;
-
-        self.functions = std::mem::replace(&mut ctx.functions, HashMap::new());
-
-        // collect global function registry, global var numbering
-        self.var_index = ctx.var_index;
-        self.function_index = ctx.function_index;
-
-        // Add the new function
-        self.functions.insert(function_index, blocks);
-
-        Ok(function_index)
     }
 
     pub fn push_instruction(&mut self, node: BasicBlockInstruction) -> usize {
@@ -152,15 +117,6 @@ impl FromAstCtx {
         self.current_block_index()
     }
 
-    pub fn create_gapped_block(&mut self, expr: &Expr) -> (usize, usize, usize) {
-        let block_idx = self.current_block_index();
-        let expr_idx = expr_to_basic_blocks(self, expr);
-        let next_block_idx = self.current_block_index();
-        self.wrap_up_block();
-
-        (block_idx, expr_idx, next_block_idx)
-    }
-
     pub fn push_label(&mut self, label: NestedIntoStatement) {
         self.label_tracking.push((label, vec![]));
     }
@@ -201,6 +157,123 @@ impl FromAstCtx {
     pub fn register_export(&mut self, export: Export) {
         self.exports.push(export);
     }
+
+    pub(crate) fn wrap_up_blocks(&mut self) -> (FunctionId, Vec<(usize, BasicBlock)>) {
+        let exit_count = self.exits.len();
+        let mut exits = vec![];
+
+        for i in 0..exit_count {
+            let e = &self.exits[i];
+            match e {
+                Some(exit) => exits.push(exit.clone()),
+                None => {
+                    if i + 1 >= exit_count {
+                        let undef_ret =
+                            self.push_instruction_to_nth_block(BasicBlockInstruction::Undefined, i);
+                        exits.push(BasicBlockExit::ExitFn(ExitType::Return, undef_ret));
+                    } else {
+                        exits.push(BasicBlockExit::Jump(i + 1));
+                    }
+                }
+            }
+        }
+
+        let (exits, basic_blocks) = normalize_basic_blocks(&exits, &self.basic_blocks);
+
+        self.basic_blocks = vec![];
+        self.exits = vec![];
+
+        let blocks = exits
+            .into_iter()
+            .zip(basic_blocks.into_iter())
+            .map(|(exit, block)| BasicBlock::new(block, exit))
+            .enumerate()
+            .collect::<Vec<_>>();
+
+        (
+            self.current_function_index.take().expect(
+                "wrap_up_blocks must be called within a current function (or module) context",
+            ),
+            blocks,
+        )
+    }
+
+    pub(crate) fn wrap_up_module(&mut self, summary: ModuleSummary) -> BasicBlockModule {
+        use std::mem::replace;
+
+        let (id, blocks) = self.wrap_up_blocks();
+        let module_bg = BasicBlockGroup {
+            id,
+            blocks,
+            environment: BasicBlockEnvironment {
+                env_type: BasicBlockEnvironmentType::Module,
+                ..Default::default()
+            },
+        };
+
+        self.functions.insert(id, module_bg);
+
+        BasicBlockModule {
+            summary,
+            functions: replace(&mut self.functions, Default::default()),
+            imports: replace(&mut self.imports, Default::default()),
+            exports: replace(&mut self.exports, Default::default()),
+        }
+    }
+
+    pub fn go_into_function<C>(
+        &mut self,
+        arg_count: usize,
+        convert_in_function: C,
+    ) -> Result<&BasicBlockGroup, String>
+    where
+        C: FnOnce(&mut Self) -> Result<(), String>,
+    {
+        self.function_index.0 += 1;
+        let function_index = self.function_index;
+
+        // functions are shared between contexts
+        let functions = std::mem::replace(&mut self.functions, HashMap::new());
+
+        let mut inner_ctx = Self {
+            basic_blocks: vec![vec![]],
+            exits: vec![None],
+            var_index: self.var_index,
+            conditionals: vec![],
+            scope: self.scope.go_into_function_scope(),
+            label_tracking: vec![],
+            function_index: self.function_index,
+            current_function_index: Some(function_index),
+            functions,
+            imports: vec![],
+            exports: vec![],
+        };
+
+        convert_in_function(&mut inner_ctx)?;
+
+        let (id, blocks) = inner_ctx.wrap_up_blocks();
+        let function_bg = BasicBlockGroup {
+            id,
+            blocks,
+            environment: BasicBlockEnvironment {
+                env_type: BasicBlockEnvironmentType::Function(arg_count),
+                ..Default::default()
+            },
+        };
+
+        inner_ctx.functions.insert(id, function_bg);
+
+        self.functions = std::mem::replace(&mut inner_ctx.functions, HashMap::new());
+
+        // collect global function registry, global var numbering
+        self.var_index = inner_ctx.var_index;
+        self.function_index = inner_ctx.function_index;
+
+        Ok(self
+            .functions
+            .get(&function_index)
+            .expect("convert_in_function callback never called wrap_up_function()"))
+    }
 }
 
 #[cfg(test)]
@@ -218,7 +291,7 @@ mod tests {
         ctx.assign_name("conditional_varname", 456);
         ctx.assign_name("conditional_varname", 789);
 
-        ctx.go_into_function(|ctx| {
+        ctx.go_into_function(1, |ctx| {
             ctx.assign_name("conditional_varname", 999);
 
             insta::assert_debug_snapshot!(ctx, @r###"
@@ -243,6 +316,9 @@ mod tests {
                     },
                 },
                 label_tracking: [],
+                current_function_index: Some(
+                    FunctionId(1),
+                ),
                 function_index: FunctionId(1),
                 functions: {},
                 imports: [],
@@ -250,7 +326,7 @@ mod tests {
             }
             "###);
 
-            Ok(BasicBlockGroup::from_asts(vec![]))
+            Ok(())
         })
         .unwrap();
 
@@ -262,7 +338,7 @@ mod tests {
             exits: [
                 None,
             ],
-            var_index: 0,
+            var_index: 1,
             conditionals: [
                 {
                     "conditional_varname": [
@@ -278,9 +354,17 @@ mod tests {
                 ],
             },
             label_tracking: [],
+            current_function_index: Some(
+                FunctionId(0),
+            ),
             function_index: FunctionId(1),
             functions: {
-                FunctionId(0): ,
+                FunctionId(1): function():
+                @0: {
+                    $0 = undefined
+                    exit = return $0
+                }
+                ,
             },
             imports: [],
             exports: [],
@@ -295,7 +379,7 @@ mod tests {
         [
             [
                 (
-                    0,
+                    1,
                     either($456, $789),
                 ),
             ],
@@ -304,7 +388,7 @@ mod tests {
         insta::assert_debug_snapshot!(ctx.scope, @r###"
         Scope (function) {
             vars: [
-                "conditional_varname: 0",
+                "conditional_varname: 1",
                 "varname: 123",
             ],
         }

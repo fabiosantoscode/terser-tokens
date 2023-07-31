@@ -143,7 +143,6 @@ impl Debug for BasicBlockModule {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         let BasicBlockModule {
             summary,
-            top_level_stats,
             functions,
             imports,
             exports,
@@ -152,6 +151,8 @@ impl Debug for BasicBlockModule {
         let mut functions: Vec<_> = functions.iter().map(|(k, v)| (k.0, v)).collect();
         functions.sort_unstable_by_key(|(k, _)| *k);
         let functions: Vec<_> = functions.iter().map(|(_, v)| v).collect();
+
+        let (top_level_stats, functions) = functions.split_first().unwrap();
 
         let mut d = f.debug_struct("BasicBlockModule");
 

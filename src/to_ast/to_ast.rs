@@ -28,7 +28,7 @@ fn to_ast_inner(block_module: BasicBlockModule) -> Vec<Stmt> {
         remove_phi(block_group);
     });
 
-    let tree = do_tree(&block_module.top_level_stats);
+    let tree = do_tree(&block_module.top_level_stats());
 
     to_stat_ast(
         &mut ToAstContext {
@@ -37,7 +37,7 @@ fn to_ast_inner(block_module: BasicBlockModule) -> Vec<Stmt> {
             module: &block_module,
         },
         &tree,
-        &block_module.top_level_stats,
+        &block_module.top_level_stats(),
     )
 }
 

@@ -1,7 +1,8 @@
-use super::{BasicBlock, NonLocalId};
+use super::{BasicBlock, NonLocalId, FunctionId};
 
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
+    pub id: FunctionId,
     pub blocks: Vec<(usize, BasicBlock)>,
     pub environment: BasicBlockEnvironment,
 }

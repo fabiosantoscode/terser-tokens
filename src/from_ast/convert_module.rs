@@ -17,15 +17,10 @@ pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBl
             ModuleItem::ModuleDecl(_) => None,
         })
         .collect();
-    let top_level_stats = statements_to_basic_blocks(&mut ctx, &top_level_stats);
 
-    Ok(BasicBlockModule {
-        summary,
-        top_level_stats,
-        functions: ctx.functions,
-        imports: ctx.imports,
-        exports: ctx.exports,
-    })
+    statements_to_basic_blocks(&mut ctx, &top_level_stats);
+
+    Ok(ctx.wrap_up_module(summary))
 }
 
 fn find_importexport(
@@ -146,7 +141,7 @@ mod tests {
                 filename: "index.js",
             },
             top_level_stats: @0: {
-                $6 = FunctionId(0)
+                $6 = FunctionId(1)
                 $7 = undefined
                 exit = return $7
             }
@@ -154,7 +149,7 @@ mod tests {
             functions: [
                 function():
                 @0: {
-                    $2 = FunctionId(1)
+                    $2 = FunctionId(2)
                     $3 = $2
                     $4 = call $3()
                     exit = return $4
@@ -185,18 +180,18 @@ mod tests {
             ),
         )
         .unwrap();
-        insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
-        function(nonlocals=[NonLocalId(0)]):
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
+        function():
         @0: {
             $0 = 1
-            $3 = FunctionId(1)
+            $3 = FunctionId(2)
             exit = return $3
         }
         "###);
-        insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
-        function(nonlocals=[NonLocalId(0)]):
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(2)).unwrap(), @r###"
+        function():
         @0: {
-            $1 = read_non_local $$0
+            $1 = $0
             exit = return $1
         }
         "###);

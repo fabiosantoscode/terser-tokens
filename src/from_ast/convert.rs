@@ -1,13 +1,12 @@
 use std::borrow::Borrow;
 
 use swc_ecma_ast::{
-    AwaitExpr, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt,
+    AwaitExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt,
     ThrowStmt, YieldExpr,
 };
 
 use crate::basic_blocks::{
-    normalize_basic_blocks, ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup,
-    BasicBlockInstruction, ExitType, TempExitType,
+    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
 };
 
 use super::{function_to_basic_blocks, FromAstCtx, NestedIntoStatement};
@@ -233,43 +232,14 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
     }
 }
 
-pub fn statements_to_basic_blocks(ctx: &mut FromAstCtx, statements: &[&Stmt]) -> BasicBlockGroup {
+pub fn statements_to_basic_blocks(ctx: &mut FromAstCtx, statements: &[&Stmt]) {
     for stat in statements {
         stat_to_basic_blocks(ctx, stat);
         ctx.wrap_up_block();
     }
-
-    let exit_count = ctx.exits.len();
-    let mut exits = vec![];
-
-    for i in 0..exit_count {
-        let e = &ctx.exits[i];
-        match e {
-            Some(exit) => exits.push(exit.clone()),
-            None => {
-                if i + 1 >= exit_count {
-                    let undef_ret =
-                        ctx.push_instruction_to_nth_block(BasicBlockInstruction::Undefined, i);
-                    exits.push(BasicBlockExit::ExitFn(ExitType::Return, undef_ret));
-                } else {
-                    exits.push(BasicBlockExit::Jump(i + 1));
-                }
-            }
-        }
-    }
-
-    let (exits, basic_blocks) = normalize_basic_blocks(&exits, &ctx.basic_blocks);
-
-    let asts = exits
-        .into_iter()
-        .zip(basic_blocks.into_iter())
-        .map(|(exit, block)| BasicBlock::new(block, exit))
-        .collect::<Vec<_>>();
-
-    BasicBlockGroup::from_asts(asts)
 }
 
-pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
+fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
     let node = match exp {
         Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
         Expr::Bin(bin) => {
@@ -301,18 +271,20 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             }
             return last.expect("Seq must have 1+ exprs");
         }
-        Expr::Cond(CondExpr {
-            test, cons, alt, ..
-        }) => {
-            let (_, test, blockidx_before) = ctx.create_gapped_block(&test);
+        Expr::Cond(cond_expr) => {
+            let test = expr_to_basic_blocks(ctx, &cond_expr.test);
+            let blockidx_before = ctx.current_block_index();
+            ctx.wrap_up_block();
 
             ctx.enter_conditional_branch();
 
-            let (blockidx_consequent_before, cons, blockidx_consequent_after) =
-                ctx.create_gapped_block(&cons);
+            let blockidx_consequent_before = ctx.current_block_index();
+            let cons = expr_to_basic_blocks(ctx, &cond_expr.cons);
+            let blockidx_consequent_after = ctx.current_block_index();
+            ctx.wrap_up_block();
 
             let blockidx_alternate_before = ctx.current_block_index();
-            let alt = expr_to_basic_blocks(ctx, &alt);
+            let alt = expr_to_basic_blocks(ctx, &cond_expr.alt);
             ctx.wrap_up_block();
             let blockidx_after = ctx.current_block_index();
 
@@ -363,9 +335,9 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Member(_) => todo!(),
         Expr::SuperProp(_) => todo!(),
         Expr::Fn(function) => {
-            let id = function_to_basic_blocks(ctx, function.function.as_ref())
+            let func = function_to_basic_blocks(ctx, function.function.as_ref())
                 .expect("todo error handling");
-            BasicBlockInstruction::Function(id)
+            BasicBlockInstruction::Function(func.id)
         }
         Expr::Call(call) => {
             // TODO non-expr callees (super, import)
@@ -436,6 +408,7 @@ mod tests {
     fn simple_add() {
         let s = test_basic_blocks_expr("10 + 20 + 30;");
         insta::assert_debug_snapshot!(s, @r###"
+        function():
         @0: {
             $0 = 10
             $1 = 20
@@ -522,6 +495,7 @@ mod tests {
     fn simple_cond() {
         let s = test_basic_blocks_expr("1 ? 10 : 20;");
         insta::assert_debug_snapshot!(s, @r###"
+        function():
         @0: {
             $0 = 1
             exit = cond $0 ? jump @1 : jump @2
@@ -546,6 +520,7 @@ mod tests {
     fn cond_nested() {
         let s = test_basic_blocks_expr("1 ? (2 ? 10 : 15) : 20;");
         insta::assert_debug_snapshot!(s, @r###"
+        function():
         @0: {
             $0 = 1
             exit = cond $0 ? jump @1 : jump @6

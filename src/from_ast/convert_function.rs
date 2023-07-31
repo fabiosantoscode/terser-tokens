@@ -1,12 +1,12 @@
 use swc_ecma_ast::Function;
 
 use super::{statements_to_basic_blocks, FromAstCtx};
-use crate::basic_blocks::{BasicBlockEnvironmentType, BasicBlockInstruction, FunctionId};
+use crate::basic_blocks::{BasicBlockGroup, BasicBlockInstruction};
 
-pub fn function_to_basic_blocks(
-    ctx: &mut FromAstCtx,
-    function: &Function,
-) -> Result<FunctionId, String> {
+pub fn function_to_basic_blocks<'a>(
+    ctx: &'a mut FromAstCtx,
+    function: &'a Function,
+) -> Result<&'a BasicBlockGroup, String> {
     // count function.length
     let arg_count: usize = function
         .params
@@ -18,7 +18,7 @@ pub fn function_to_basic_blocks(
         })
         .count();
 
-    ctx.go_into_function(|ctx| {
+    ctx.go_into_function(arg_count, |ctx| {
         function
             .params
             .iter()
@@ -36,23 +36,21 @@ pub fn function_to_basic_blocks(
                 _ => todo!("non-ident function param"),
             });
 
-        let mut func = statements_to_basic_blocks(
-            ctx,
-            function
-                .body
-                .as_ref()
-                .expect("function body")
-                .stmts
-                .iter()
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-        func.environment.env_type = BasicBlockEnvironmentType::Function(arg_count);
+        let stats = function
+            .body
+            .as_ref()
+            .expect("function body")
+            .stmts
+            .iter()
+            .collect::<Vec<_>>();
+
+        statements_to_basic_blocks(ctx, &stats);
+
         // TODO refactor note:
         // because statements_to_basic_blocks is not a method of `ctx`, it doesn't know if it's
         // supposed to be a function. We should make it a method of `ctx` so it returns the
         // correct type. Same for function_to_basic_blocks probably.
-        Ok(func)
+        Ok(())
     })
 }
 
@@ -65,19 +63,15 @@ mod tests {
     fn conv_fn(src: &str) -> BasicBlockGroup {
         let mut ctx = FromAstCtx::new();
         let func = swc_parse(src);
-        let idx = function_to_basic_blocks(
-            &mut ctx,
-            func.body[0]
-                .clone()
-                .expect_stmt()
-                .expect_decl()
-                .expect_fn_decl()
-                .function
-                .as_ref(),
-        )
-        .expect("function_to_basic_blocks");
+        let decl = func.body[0]
+            .clone()
+            .expect_stmt()
+            .expect_decl()
+            .expect_fn_decl();
+        let func = function_to_basic_blocks(&mut ctx, decl.function.as_ref())
+            .expect("function_to_basic_blocks");
 
-        ctx.functions.get(&idx).expect("get function").clone()
+        func.clone()
     }
 
     #[test]

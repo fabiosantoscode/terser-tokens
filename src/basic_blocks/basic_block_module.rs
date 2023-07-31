@@ -24,7 +24,6 @@ pub enum Export {
 #[derive(Clone)]
 pub struct BasicBlockModule {
     pub summary: ModuleSummary,
-    pub top_level_stats: BasicBlockGroup,
     pub functions: HashMap<FunctionId, BasicBlockGroup>,
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
@@ -35,11 +34,14 @@ impl BasicBlockModule {
         self.functions.get(&id)
     }
 
+    pub fn top_level_stats(&self) -> &BasicBlockGroup {
+        &self.functions[&FunctionId(0)]
+    }
+
     pub fn mutate_all_block_groups<Mutator>(&mut self, mutator: &mut Mutator)
     where
         Mutator: FnMut(&mut BasicBlockGroup),
     {
-        mutator(&mut self.top_level_stats);
         for (_, function) in self.functions.iter_mut() {
             mutator(function);
         }
@@ -47,5 +49,5 @@ impl BasicBlockModule {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Hash, Eq)]
+#[derive(Clone, Copy, PartialEq, Hash, Eq, Default)]
 pub struct FunctionId(pub usize);
