@@ -1,10 +1,12 @@
 use fix_fn::fix_fn;
 use swc_ecma_ast::{
-    ArrowExpr, AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, FnDecl,
-    FnExpr, IfStmt, Lit, Param, Pat, PatOrExpr, Stmt, VarDeclKind, YieldExpr,
+    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Param,
+    Pat, PatOrExpr, Stmt, VarDeclKind, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
+
+use super::FunctionLike;
 
 #[derive(Debug)]
 pub struct NonLocalInfo {
@@ -27,51 +29,6 @@ pub fn find_nonlocals(func: FunctionLike) -> NonLocalInfo {
     NonLocalInfo {
         nonlocals: ctx.found_nonlocals,
         funscoped: ctx.found_funscoped,
-    }
-}
-
-#[derive(Clone)]
-pub enum FunctionLike<'a> {
-    FnDecl(&'a FnDecl),
-    FnExpr(&'a FnExpr),
-    ArrowExpr(&'a ArrowExpr),
-}
-
-impl<'a> FunctionLike<'a> {
-    pub fn function_length(&self) -> usize {
-        match self {
-            FunctionLike::FnDecl(FnDecl { function, .. })
-            | FunctionLike::FnExpr(FnExpr { function, .. }) => function
-                .params
-                .iter()
-                .filter(|param| match param.pat {
-                    swc_ecma_ast::Pat::Ident(_) => true,
-                    swc_ecma_ast::Pat::Rest(_) => false,
-                    _ => todo!("non-ident function param"),
-                })
-                .count(),
-            _ => todo!(),
-        }
-    }
-
-    pub fn get_params(&self) -> Vec<&Pat> {
-        match self {
-            FunctionLike::FnDecl(FnDecl { function, .. })
-            | FunctionLike::FnExpr(FnExpr { function, .. }) => {
-                function.params.iter().map(|param| &param.pat).collect()
-            }
-            _ => todo!(),
-        }
-    }
-
-    pub(crate) fn get_statements(&'a self) -> Vec<&'a Stmt> {
-        match self {
-            FunctionLike::FnDecl(FnDecl { function, .. })
-            | FunctionLike::FnExpr(FnExpr { function, .. }) => {
-                function.body.as_ref().expect("function body is empty").stmts.iter().collect()
-            },
-            _ => todo!(),
-        }
     }
 }
 
