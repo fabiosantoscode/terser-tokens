@@ -1,14 +1,20 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use swc_ecma_ast::{
     ArrayLit, AssignExpr, AssignOp, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee,
-    ComputedPropName, Decl, Expr, ExprOrSpread, FnExpr, Function, Ident, Lit, MemberExpr,
+    ComputedPropName, Decl, Expr, ExprOrSpread, ExprStmt, FnExpr, Function, Ident, Lit, MemberExpr,
     MemberProp, Module, ModuleItem, Pat, PatOrExpr, ReturnStmt, Stmt, ThrowStmt, YieldExpr,
 };
 
-use crate::basic_blocks::{
-    ArrayElement, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, TempExitType,
+use crate::{
+    analyze::count_variable_uses,
+    basic_blocks::{
+        ArrayElement, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType,
+        TempExitType,
+    },
 };
 
-use super::{do_tree, remove_phi, StructuredFlow};
+use super::{do_tree, get_inlined_variables, remove_phi, StructuredFlow};
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {
@@ -21,30 +27,35 @@ pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     }
 }
 
-fn to_ast_inner(block_module: BasicBlockModule) -> Vec<Stmt> {
-    let mut block_module = block_module;
+fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
+    let variable_use_count = count_variable_uses(&block_module);
+    let inlined_variables = get_inlined_variables(&block_module, &variable_use_count);
 
     block_module.mutate_all_block_groups(&mut |block_group| {
         remove_phi(block_group);
     });
 
+    let mut ctx = ToAstContext {
+        caught_error: None,
+        error_counter: 0,
+        module: &block_module,
+        inlined_variables,
+        variable_use_count,
+        emitted_vars: BTreeSet::new(),
+    };
+
     let tree = do_tree(&block_module.top_level_stats());
 
-    to_stat_ast(
-        &mut ToAstContext {
-            caught_error: None,
-            error_counter: 0,
-            module: &block_module,
-        },
-        &tree,
-        &block_module.top_level_stats(),
-    )
+    to_stat_ast(&mut ctx, &tree, &block_module.top_level_stats())
 }
 
 struct ToAstContext<'a> {
     pub caught_error: Option<String>,
     pub error_counter: usize,
     pub module: &'a BasicBlockModule,
+    pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
+    pub variable_use_count: BTreeMap<usize, u32>,
+    pub emitted_vars: BTreeSet<usize>,
 }
 
 impl ToAstContext<'_> {
@@ -60,42 +71,17 @@ impl ToAstContext<'_> {
         self.caught_error = Some(varname.clone());
         varname
     }
-}
 
-fn get_variable(var_idx: usize) -> String {
-    format!("${}", var_idx)
-}
+    fn will_be_inlined(&self, variable: usize) -> bool {
+        self.inlined_variables.contains_key(&variable)
+    }
+    fn get_inlined_expression(&self, var_idx: usize) -> Option<&BasicBlockInstruction> {
+        self.inlined_variables.get(&var_idx)
+    }
 
-fn get_identifier(i: String) -> Expr {
-    Expr::Ident(Ident::new(i.into(), Default::default()))
-}
-
-fn var_decl(name: &str, value: Expr) -> Stmt {
-    let varname = Ident::new(name.into(), Default::default());
-    let vardecl = swc_ecma_ast::VarDecl {
-        span: Default::default(),
-        kind: swc_ecma_ast::VarDeclKind::Var,
-        declare: false,
-        decls: vec![swc_ecma_ast::VarDeclarator {
-            span: Default::default(),
-            name: swc_ecma_ast::Pat::Ident(BindingIdent {
-                id: varname,
-                type_ann: None,
-            }),
-            init: Some(Box::new(value)),
-            definite: false,
-        }],
-    };
-    let vardecl = Stmt::Decl(Decl::Var(Box::new(vardecl)));
-
-    vardecl
-}
-
-fn get_block(stats: Vec<Stmt>) -> Stmt {
-    Stmt::Block(swc_ecma_ast::BlockStmt {
-        span: Default::default(),
-        stmts: stats,
-    })
+    fn variable_has_uses(&self, variable: usize) -> bool {
+        self.variable_use_count.get(&variable).unwrap_or(&0) > &0
+    }
 }
 
 fn to_stat_ast(
@@ -117,35 +103,43 @@ fn to_stat_ast(
 
             stats
                 .iter()
-                .map(|(variable, instruction)| {
-                    let expression: Expr = to_expr_ast(ctx, block_group, instruction);
+                .flat_map(|(variable, instruction)| {
+                    if ctx.will_be_inlined(*variable) {
+                        None
+                    } else {
+                        let expression: Expr = to_expr_ast(ctx, instruction);
 
-                    var_decl(&format!("${}", variable), expression)
+                        // only used vars get "var X = ..."
+                        if ctx.variable_has_uses(*variable) {
+                            Some(var_decl(ctx, *variable, expression))
+                        } else {
+                            Some(Stmt::Expr(ExprStmt {
+                                span: Default::default(),
+                                expr: Box::new(expression),
+                            }))
+                        }
+                    }
                 })
                 .collect::<Vec<_>>()
         }
         StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {
-            let varname = Ident::new(format!("${}", var_idx).into(), Default::default());
-
             let return_stmt = Stmt::Return(ReturnStmt {
                 span: Default::default(),
-                arg: Some(Box::new(Expr::Ident(varname))),
+                arg: Some(Box::new(ref_or_inlined_expr(ctx, *var_idx))),
             });
 
             vec![return_stmt]
         }
         StructuredFlow::Return(ExitType::Throw, Some(var_idx)) => {
-            let varname = Ident::new(format!("${}", var_idx).into(), Default::default());
-
             let throw_stmt = Stmt::Throw(ThrowStmt {
                 span: Default::default(),
-                arg: (Box::new(Expr::Ident(varname))),
+                arg: (Box::new(ref_or_inlined_expr(ctx, *var_idx))),
             });
 
             vec![throw_stmt]
         }
         StructuredFlow::Branch(_, branch_expr, cons, alt) => {
-            let branch_expr = get_identifier(get_variable(*branch_expr));
+            let branch_expr = ref_or_inlined_expr(ctx, *branch_expr);
             let cons = to_stat_vec(ctx, cons);
             let alt = to_stat_vec(ctx, alt);
 
@@ -196,28 +190,21 @@ fn to_stat_ast(
 
             let try_catch_stmt = Stmt::Try(Box::new(swc_ecma_ast::TryStmt {
                 span: Default::default(),
-                block: swc_ecma_ast::BlockStmt {
+                block: BlockStmt {
                     span: Default::default(),
                     stmts: try_block,
                 },
                 handler: Some(swc_ecma_ast::CatchClause {
                     span: Default::default(),
-                    param: Some(swc_ecma_ast::Pat::Ident(BindingIdent {
-                        id: swc_ecma_ast::Ident {
-                            span: Default::default(),
-                            sym: catch_handler.into(),
-                            optional: false,
-                        },
-                        type_ann: None,
-                    })),
-                    body: swc_ecma_ast::BlockStmt {
+                    param: Some(get_binding_identifier(&catch_handler)),
+                    body: BlockStmt {
                         span: Default::default(),
                         stmts: catch_block,
                     },
                 }),
                 finalizer: match finally_block.len() {
                     0 => None,
-                    _ => Some(swc_ecma_ast::BlockStmt {
+                    _ => Some(BlockStmt {
                         span: Default::default(),
                         stmts: finally_block,
                     }),
@@ -232,19 +219,23 @@ fn to_stat_ast(
     }
 }
 
-fn to_expr_ast(
-    ctx: &mut ToAstContext,
-    _block_group: &BasicBlockGroup,
-    expr: &BasicBlockInstruction,
-) -> Expr {
+fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
+    if let Some(varname) = ctx.get_inlined_expression(var_idx) {
+        to_expr_ast(ctx, &varname.clone())
+    } else {
+        get_identifier(get_variable(var_idx))
+    }
+}
+
+fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
     match expr {
         BasicBlockInstruction::LitNumber(num) => (*num).into(),
         BasicBlockInstruction::Undefined => {
             Expr::Ident(Ident::new("undefined".into(), Default::default()))
         }
         BasicBlockInstruction::BinOp(_name, left, right) => {
-            let left = get_identifier(get_variable(*left));
-            let right = get_identifier(get_variable(*right));
+            let left = ref_or_inlined_expr(ctx, *left);
+            let right = ref_or_inlined_expr(ctx, *right);
 
             Expr::Bin(swc_ecma_ast::BinExpr {
                 span: Default::default(),
@@ -253,10 +244,7 @@ fn to_expr_ast(
                 right: Box::new(right),
             })
         }
-        BasicBlockInstruction::Ref(var_idx) => Expr::Ident(Ident::new(
-            get_variable(*var_idx).into(),
-            Default::default(),
-        )),
+        BasicBlockInstruction::Ref(var_idx) => ref_or_inlined_expr(ctx, *var_idx),
         BasicBlockInstruction::This => Expr::Ident(Ident::new("this".into(), Default::default())),
         BasicBlockInstruction::Array(items) => {
             let items = items
@@ -264,11 +252,11 @@ fn to_expr_ast(
                 .map(|item| match item {
                     ArrayElement::Item(var_idx) => Some(ExprOrSpread {
                         spread: None,
-                        expr: Box::new(get_identifier(get_variable(*var_idx))),
+                        expr: Box::new(ref_or_inlined_expr(ctx, *var_idx)),
                     }),
                     ArrayElement::Spread(var_idx) => Some(ExprOrSpread {
                         spread: Some(Default::default()),
-                        expr: Box::new(get_identifier(get_variable(*var_idx))),
+                        expr: Box::new(ref_or_inlined_expr(ctx, *var_idx)),
                     }),
                     ArrayElement::Hole => None,
                 })
@@ -302,16 +290,14 @@ fn to_expr_ast(
             })
         }
         BasicBlockInstruction::Call(func_idx, args) => {
-            let func = get_identifier(get_variable(*func_idx));
-
             let args = args
                 .iter()
-                .map(|arg| ExprOrSpread::from(get_identifier(get_variable(*arg))))
+                .map(|arg| ExprOrSpread::from(ref_or_inlined_expr(ctx, *arg)))
                 .collect();
 
             Expr::Call(CallExpr {
                 span: Default::default(),
-                callee: Callee::Expr(Box::new(func)),
+                callee: Callee::Expr(Box::new(ref_or_inlined_expr(ctx, *func_idx))),
                 args,
                 type_args: None,
             })
@@ -360,27 +346,24 @@ fn to_expr_ast(
         BasicBlockInstruction::WriteNonLocal(id, value) => Expr::Assign(AssignExpr {
             op: AssignOp::Assign,
             span: Default::default(),
-            left: PatOrExpr::Pat(Box::new(Pat::Ident(BindingIdent {
-                id: Ident::new(get_variable(id.0).into(), Default::default()),
-                type_ann: None,
-            }))),
-            right: Box::new(get_identifier(get_variable(*value))),
+            left: PatOrExpr::Pat(Box::new(get_binding_identifier(&get_variable(id.0)))),
+            right: Box::new(ref_or_inlined_expr(ctx, *value)),
         }),
 
         BasicBlockInstruction::TempExit(typ, arg) => match typ {
             TempExitType::Yield => Expr::Yield(YieldExpr {
                 span: Default::default(),
                 delegate: false,
-                arg: Some(Box::new(get_identifier(get_variable(*arg)))),
+                arg: Some(Box::new(ref_or_inlined_expr(ctx, *arg))),
             }),
             TempExitType::YieldStar => Expr::Yield(YieldExpr {
                 span: Default::default(),
                 delegate: true,
-                arg: Some(Box::new(get_identifier(get_variable(*arg)))),
+                arg: Some(Box::new(ref_or_inlined_expr(ctx, *arg))),
             }),
             TempExitType::Await => Expr::Await(AwaitExpr {
                 span: Default::default(),
-                arg: Box::new(get_identifier(get_variable(*arg))),
+                arg: Box::new(ref_or_inlined_expr(ctx, *arg)),
             }),
         },
 
@@ -390,6 +373,61 @@ fn to_expr_ast(
         )),
         BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
     }
+}
+
+fn get_variable(var_idx: usize) -> String {
+    format!("${}", var_idx)
+}
+
+fn get_identifier(i: String) -> Expr {
+    Expr::Ident(Ident::new(i.into(), Default::default()))
+}
+
+fn get_binding_identifier(i: &str) -> Pat {
+    Pat::Ident(BindingIdent {
+        id: Ident::new(i.into(), Default::default()),
+        type_ann: None,
+    })
+}
+
+fn var_decl(ctx: &mut ToAstContext, variable: usize, value: Expr) -> Stmt {
+    let varname = get_variable(variable);
+
+    let var_or_assign = if ctx.emitted_vars.contains(&variable) {
+        Stmt::Expr(ExprStmt {
+            span: Default::default(),
+            expr: Box::new(Expr::Assign(AssignExpr {
+                span: Default::default(),
+                op: AssignOp::Assign,
+                left: PatOrExpr::Pat(Box::new(get_binding_identifier(&varname))),
+                right: Box::new(value),
+            })),
+        })
+    } else {
+        let vardecl = swc_ecma_ast::VarDecl {
+            span: Default::default(),
+            kind: swc_ecma_ast::VarDeclKind::Var,
+            declare: false,
+            decls: vec![swc_ecma_ast::VarDeclarator {
+                span: Default::default(),
+                name: get_binding_identifier(&varname),
+                init: Some(Box::new(value)),
+                definite: false,
+            }],
+        };
+        Stmt::Decl(Decl::Var(Box::new(vardecl)))
+    };
+
+    ctx.emitted_vars.insert(variable);
+
+    var_or_assign
+}
+
+fn get_block(stats: Vec<Stmt>) -> Stmt {
+    Stmt::Block(swc_ecma_ast::BlockStmt {
+        span: Default::default(),
+        stmts: stats,
+    })
 }
 
 #[cfg(test)]
@@ -403,13 +441,8 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = 1;
-        var $1 = 2;
-        var $2 = $0 + $1;
-        var $3 = 3;
-        var $4 = $2 + $3;
-        var $5 = undefined;
-        return $5;
+        1 + 2 + 3;
+        return undefined;
         "###);
     }
 
@@ -419,14 +452,12 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = 1;
-        if ($0) {
-            var $3 = 2;
+        if (1) {
+            2;
         } else {
-            var $3 = 3;
+            3;
         }
-        var $4 = undefined;
-        return $4;
+        return undefined;
         "###);
     }
 
@@ -445,28 +476,22 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $8 = function() {
-            var $3 = function() {
-                var $0 = arguments[0];
-                var $1 = $0;
-                return $1;
+        var $11 = function() {
+            return 456;
+        };
+        var $12 = function() {
+            var $4 = function() {
+                return arguments[0];
             };
-            var $4 = $3;
             var $5 = 123;
             var $6 = $4($5);
             return $6;
         };
-        var $11 = function() {
-            var $9 = 456;
-            return $9;
-        };
-        var $12 = $8;
         var $13 = $12();
         var $14 = $11;
         var $15 = $14();
-        var $16 = $13 + $15;
-        var $17 = undefined;
-        return $17;
+        $13 + $15;
+        return undefined;
         "###);
     }
 
@@ -480,16 +505,14 @@ mod tests {
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = undefined;
-        var $1 = $1 = $0;
+        $1 = $0;
         var $2 = 1;
-        var $3 = $1 = $2;
-        var $7 = function() {
+        $1 = $2;
+        function() {
             var $4 = $1;
-            var $5 = $4;
-            return $5;
+            return $4;
         };
-        var $8 = undefined;
-        return $8;
+        return undefined;
         "###);
     }
 
@@ -503,18 +526,16 @@ mod tests {
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = undefined;
-        var $1 = $1 = $0;
+        $1 = $0;
         var $2 = 1;
-        var $3 = $1 = $2;
-        var $8 = function() {
-            var $4 = $1;
+        $1 = $2;
+        function() {
+            $1;
             var $5 = 9;
-            var $6 = $1 = $5;
-            var $7 = undefined;
-            return $7;
+            $1 = $5;
+            return undefined;
         };
-        var $9 = undefined;
-        return $9;
+        return undefined;
         "###);
     }
 
@@ -525,15 +546,12 @@ mod tests {
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         while(true){
-            var $0 = 123;
-            if ($0) {
-                var $1 = 456;
-                if ($1) {} else {
+            if (123) {
+                if (456) {} else {
                     continue;
                 }
             } else {}
-            var $2 = undefined;
-            return $2;
+            return undefined;
         }
         "###);
     }
@@ -548,18 +566,14 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = 10;
-        var $1 = 123;
-        if ($1) {
+        10;
+        if (123) {
             var $4 = 456;
         } else {
-            var $4 = 789;
+            $4 = 789;
         }
-        var $5 = $4;
-        var $6 = 1;
-        var $7 = $5 + $6;
-        var $8 = undefined;
-        return $8;
+        $4 + 1;
+        return undefined;
         "###);
     }
 
@@ -579,21 +593,14 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = 10;
         try {
-            var $1 = $0;
-            var $2 = 10;
-            var $3 = $1 + $2;
-            if ($3) {
-                var $4 = 123;
-                throw $4;
+            if (10 + 10) {
+                throw 123;
             } else {}
         } catch ($error1) {
-            var $5 = $error1;
-            var $6 = 456;
+            $error1;
         }
-        var $7 = $6;
-        return $7;
+        return 456;
         "###);
     }
 
@@ -619,27 +626,19 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var $0 = 10;
         try {
-            var $1 = $0;
-            var $2 = 10;
-            var $3 = $1 + $2;
-            if ($3) {
-                var $4 = 123;
-                throw $4;
+            if ($0 + 10) {
+                throw 123;
             } else {}
         } catch ($error1) {
             var $5 = $error1;
             try {
-                var $6 = 123;
+                123;
             } catch ($error2) {
                 var $7 = $error2;
-                var $8 = $5;
-                var $9 = $7;
-                var $10 = $8 + $9;
-                return $10;
+                return $5 + $7;
             }
         }
-        var $11 = $0;
-        return $11;
+        return $0;
         "###);
     }
 }

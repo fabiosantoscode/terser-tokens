@@ -197,10 +197,22 @@ impl BasicBlockGroup {
 fn test_dominance() {
     use crate::testutils::*;
 
-    let block = test_basic_blocks(
-        "var x = 0;
-        while (x < 10) {
-            x = x + 1;
+    let block = parse_instructions(
+        "@0: {
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $3 ? jump @2 : jump @4
+        }
+        @2: {
+            exit = jump @3
+        }
+        @3: {
+            exit = jump @0
+        }
+        @4: {
+            $7 = undefined
+            exit = return $7
         }",
     );
 
@@ -213,6 +225,16 @@ fn test_dominance() {
             println!("{} doms {:?}", id, dom);
         }
     }
+
+    insta::assert_debug_snapshot!(g.reverse_postorder(), @r###"
+    [
+        4,
+        3,
+        2,
+        1,
+        0,
+    ]
+    "###);
 
     // nothing tested here since it's all the domtree crate
 }
