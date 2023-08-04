@@ -84,6 +84,18 @@ impl BasicBlockExit {
             BasicBlockExit::EndFinally(after_finally_target) => vec![*after_finally_target],
         }
     }
+
+    pub fn used_vars(&self) -> Vec<usize> {
+        match self {
+            BasicBlockExit::Cond(cond_var, _, _) => vec![*cond_var],
+            BasicBlockExit::ExitFn(_, returned) => vec![*returned],
+            BasicBlockExit::Jump(_)
+            | BasicBlockExit::SetTryAndCatch(_, _, _, _)
+            | BasicBlockExit::PopCatch(_, _)
+            | BasicBlockExit::PopFinally(_, _)
+            | BasicBlockExit::EndFinally(_) => vec![],
+        }
+    }
 }
 
 impl Default for BasicBlockExit {

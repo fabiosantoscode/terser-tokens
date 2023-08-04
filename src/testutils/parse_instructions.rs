@@ -1,12 +1,27 @@
+use std::collections::BTreeMap;
+
 use nom::IResult;
 
 use crate::basic_blocks::{
-    ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, ExitType,
-    NonLocalId, TempExitType,
+    ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
+    BasicBlockModule, ExitType, FunctionId, NonLocalId, TempExitType,
 };
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
     parse_instructions_inner(input).unwrap().1
+}
+
+pub fn parse_instructions_module(input: Vec<&str>) -> BasicBlockModule {
+    let functions: BTreeMap<_, _> = input
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (FunctionId(i), parse_instructions(s)))
+        .collect();
+
+    BasicBlockModule {
+        functions,
+        ..Default::default()
+    }
 }
 
 fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
@@ -161,8 +176,8 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             ins_undefined,
             ins_this,
             ins_litnumber,
-            ins_ref,
             ins_binop,
+            ins_ref,
             ins_caught_error,
             ins_array,
             ins_tempexit,

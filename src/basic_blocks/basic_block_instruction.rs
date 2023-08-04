@@ -69,6 +69,37 @@ impl BasicBlockInstruction {
         }
     }
 
+    pub fn used_vars(&self) -> Vec<&usize> {
+        match self {
+            BasicBlockInstruction::LitNumber(_) => vec![],
+            BasicBlockInstruction::Ref(id) => vec![id],
+            BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
+            BasicBlockInstruction::Phi(vars) => vars.iter().collect(),
+            BasicBlockInstruction::Undefined => vec![],
+            BasicBlockInstruction::This => vec![],
+            BasicBlockInstruction::Array(elements) => elements
+                .iter()
+                .filter_map(|e| match e {
+                    ArrayElement::Hole => None,
+                    ArrayElement::Item(id) => Some(id),
+                    ArrayElement::Spread(id) => Some(id),
+                })
+                .collect(),
+            BasicBlockInstruction::TempExit(_, arg) => vec![arg],
+            BasicBlockInstruction::CaughtError => vec![],
+            BasicBlockInstruction::Function(_) => vec![],
+            BasicBlockInstruction::Call(callee, args) => {
+                let mut res = vec![callee];
+                res.extend(args);
+                res
+            }
+            BasicBlockInstruction::ArgumentRead(_) => vec![],
+            BasicBlockInstruction::ArgumentRest(_) => vec![],
+            BasicBlockInstruction::ReadNonLocal(_) => vec![],
+            BasicBlockInstruction::WriteNonLocal(_, val) => vec![val],
+        }
+    }
+
     #[allow(dead_code)]
     pub fn unwrap_ref(&self) -> usize {
         match self {

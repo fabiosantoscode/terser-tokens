@@ -1,6 +1,7 @@
 use std::io;
 use std::io::Read;
 
+mod analyze;
 mod basic_blocks;
 mod compress;
 mod from_ast;

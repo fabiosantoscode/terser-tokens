@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::BasicBlockGroup;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ModuleSummary {
     pub filename: String,
 }
@@ -21,7 +21,7 @@ pub enum Export {
     Default(String),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct BasicBlockModule {
     pub summary: ModuleSummary,
     pub functions: BTreeMap<FunctionId, BasicBlockGroup>,
