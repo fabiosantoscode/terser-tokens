@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::basic_blocks::{BasicBlockInstruction, NonLocalId};
 
-use super::{FromAstCtx, NonLocalInfo};
+use super::{FromAstCtx, NonLocalInfo, NonLocalOrLocal};
 
 impl FromAstCtx {
     pub fn assign_name(&mut self, name: &str, value: usize) {
@@ -15,11 +15,10 @@ impl FromAstCtx {
             let nonlocal = self
                 .scope_tree
                 .lookup(name)
-                .expect("nonlocal not in scope tree");
-            self.push_instruction(BasicBlockInstruction::WriteNonLocal(
-                NonLocalId(nonlocal),
-                value,
-            ));
+                .expect("nonlocal not in scope tree")
+                .unwrap_nonlocal();
+
+            self.push_instruction(BasicBlockInstruction::WriteNonLocal(nonlocal, value));
         } else {
             let mut conditionals = self.conditionals.last_mut();
             match conditionals {
@@ -33,32 +32,24 @@ impl FromAstCtx {
                 None => {}
             };
 
-            self.scope_tree.insert(name.into(), value);
+            self.scope_tree
+                .insert(name.into(), NonLocalOrLocal::Local(value));
         }
     }
 
     pub fn read_name(&mut self, name: &str) -> Option<usize> {
-        if let Some(true) = self
-            .nonlocalinfo
-            .as_ref()
-            .map(|loc| loc.nonlocals.contains(&name.into()))
-        {
-            let nonlocal = self
-                .scope_tree
-                .lookup(name)
-                .expect("nonlocal not in scope tree");
-            let nonlocal_read =
-                self.push_instruction(BasicBlockInstruction::ReadNonLocal(NonLocalId(nonlocal)));
-            Some(nonlocal_read)
+        if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
+            let read_ins = self.push_instruction(BasicBlockInstruction::ReadNonLocal(nonlocal));
+            Some(read_ins)
         } else if self.is_unwritten_funscoped(name) {
             let deferred_undefined = self.push_instruction(BasicBlockInstruction::Undefined);
             self.assign_name(name, deferred_undefined);
 
             Some(deferred_undefined)
         } else if let Some(local) = self.scope_tree.lookup_in_function(name) {
-            Some(local)
+            Some(local.unwrap_local())
         } else if let Some(nonlocal) = self.scope_tree.lookup(name) {
-            unreachable!("nonlocal {} not in nonlocalinfo", nonlocal)
+            unreachable!("nonlocal {:?} not in nonlocalinfo", nonlocal)
         } else {
             None
         }
@@ -94,7 +85,8 @@ impl FromAstCtx {
         for (varname, phies) in to_phi.into_iter() {
             let phi = BasicBlockInstruction::Phi(phies);
             let phi_idx = self.push_instruction(phi);
-            self.scope_tree.insert(varname, phi_idx);
+            self.scope_tree
+                .insert(varname, NonLocalOrLocal::Local(phi_idx));
         }
     }
 
@@ -117,13 +109,11 @@ impl FromAstCtx {
         for name in nonlocalinfo.nonlocals.iter() {
             let nonlocal_id = if !parent_nonlocals.contains(name.as_str()) {
                 let nonlocal_undef = self.push_instruction(BasicBlockInstruction::Undefined);
-                let wanted_id = nonlocal_undef + 1;
-                let read =
-                    BasicBlockInstruction::WriteNonLocal(NonLocalId(wanted_id), nonlocal_undef);
-                let nonlocal_id = self.push_instruction(read);
-                assert_eq!(nonlocal_id, wanted_id);
+                let wanted_id = NonLocalId(self.bump_var_index());
+                let read = BasicBlockInstruction::WriteNonLocal(wanted_id, nonlocal_undef);
+                self.push_instruction(read);
 
-                nonlocal_id
+                NonLocalOrLocal::NonLocal(wanted_id)
             } else {
                 self.scope_tree
                     .lookup(name)
@@ -176,11 +166,11 @@ mod tests {
                     undefined,
                 ),
                 (
-                    1,
+                    2,
                     write_non_local $$1 $0,
                 ),
                 (
-                    2,
+                    3,
                     undefined,
                 ),
             ],
@@ -194,9 +184,9 @@ mod tests {
                     parent: None,
                     is_block: false,
                     vars: {
-                        "nonlocal_assigned_later": 1,
-                        "read_after_assign": 1,
-                        "read_before_assign": 2,
+                        "nonlocal_assigned_later": NonLocal(1),
+                        "read_after_assign": Local(1),
+                        "read_before_assign": Local(3),
                     },
                 },
             ],
@@ -224,8 +214,8 @@ mod tests {
                     parent: None,
                     is_block: false,
                     vars: {
-                        "nonlocal_assigned_later": 3,
-                        "provided_nonlocal": 1,
+                        "nonlocal_assigned_later": NonLocal(4),
+                        "provided_nonlocal": NonLocal(1),
                     },
                 },
             ],
@@ -234,13 +224,13 @@ mod tests {
         "###);
 
         // time to read a not-yet-declared var
-        assert_eq!(ctx.read_name("assigned_later"), Some(4));
+        assert_eq!(ctx.read_name("assigned_later"), Some(6));
 
         // time to read a nonlocal
-        assert_eq!(ctx.read_name("provided_nonlocal"), Some(5));
+        assert_eq!(ctx.read_name("provided_nonlocal"), Some(7));
         insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[5], @r###"
         (
-            5,
+            7,
             read_non_local $$1,
         )
         "###);
@@ -249,7 +239,7 @@ mod tests {
         ctx.assign_name("provided_nonlocal", 123);
         insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[6], @r###"
         (
-            6,
+            8,
             write_non_local $$1 $123,
         )
         "###);
@@ -259,7 +249,7 @@ mod tests {
         ctx.assign_name("provided_nonlocal", 777);
         insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[7], @r###"
         (
-            7,
+            9,
             write_non_local $$1 $777,
         )
         "###);
@@ -288,8 +278,8 @@ mod tests {
                         parent: None,
                         is_block: false,
                         vars: {
-                            "conditional_varname": 789,
-                            "varname": 123,
+                            "conditional_varname": Local(789),
+                            "varname": Local(123),
                         },
                     },
                     ScopeTreeNode {
@@ -298,7 +288,7 @@ mod tests {
                         ),
                         is_block: false,
                         vars: {
-                            "conditional_varname": 999,
+                            "conditional_varname": Local(999),
                         },
                     },
                 ],
@@ -327,8 +317,8 @@ mod tests {
                     parent: None,
                     is_block: false,
                     vars: {
-                        "conditional_varname": 789,
-                        "varname": 123,
+                        "conditional_varname": Local(789),
+                        "varname": Local(123),
                     },
                 },
                 ScopeTreeNode {
@@ -337,7 +327,7 @@ mod tests {
                     ),
                     is_block: false,
                     vars: {
-                        "conditional_varname": 999,
+                        "conditional_varname": Local(999),
                     },
                 },
             ],
@@ -356,8 +346,8 @@ mod tests {
                     parent: None,
                     is_block: false,
                     vars: {
-                        "conditional_varname": 1,
-                        "varname": 123,
+                        "conditional_varname": Local(1),
+                        "varname": Local(123),
                     },
                 },
                 ScopeTreeNode {
@@ -366,7 +356,7 @@ mod tests {
                     ),
                     is_block: false,
                     vars: {
-                        "conditional_varname": 999,
+                        "conditional_varname": Local(999),
                     },
                 },
             ],

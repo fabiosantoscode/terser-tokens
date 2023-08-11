@@ -182,19 +182,19 @@ mod tests {
         function():
         @0: {
             $0 = undefined
-            $1 = write_non_local $$1 $0
-            $2 = 1
-            $3 = write_non_local $$1 $2
-            $7 = FunctionId(2)
-            exit = return $7
+            $2 = write_non_local $$1 $0
+            $3 = 1
+            $4 = write_non_local $$1 $3
+            $8 = FunctionId(2)
+            exit = return $8
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(2)).unwrap(), @r###"
         function():
         @0: {
-            $4 = read_non_local $$1
-            $5 = $4
-            exit = return $5
+            $5 = read_non_local $$1
+            $6 = $5
+            exit = return $6
         }
         "###);
     }
@@ -212,22 +212,22 @@ mod tests {
         insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
         @0: {
             $0 = undefined
-            $1 = write_non_local $$1 $0
-            $2 = 1
-            $3 = write_non_local $$1 $2
-            $8 = FunctionId(1)
-            $9 = undefined
-            exit = return $9
+            $2 = write_non_local $$1 $0
+            $3 = 1
+            $4 = write_non_local $$1 $3
+            $9 = FunctionId(1)
+            $10 = undefined
+            exit = return $10
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $4 = read_non_local $$1
-            $5 = 9
-            $6 = write_non_local $$1 $5
-            $7 = undefined
-            exit = return $7
+            $5 = read_non_local $$1
+            $6 = 9
+            $7 = write_non_local $$1 $6
+            $8 = undefined
+            exit = return $8
         }
         "###);
     }

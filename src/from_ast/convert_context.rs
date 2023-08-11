@@ -1,20 +1,15 @@
 use std::collections::{BTreeMap, HashMap};
+
 use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
     normalize_basic_blocks, BasicBlock, BasicBlockEnvironment, BasicBlockEnvironmentType,
     BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, Export,
-    FunctionId, Import, ModuleSummary,
+    FunctionId, Import, ModuleSummary, NonLocalId,
 };
 use crate::scope::ScopeTree;
 
 use super::NonLocalInfo;
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum NestedIntoStatement {
-    Labelled(String),
-    Unlabelled,
-}
 
 #[derive(Debug)]
 pub struct FromAstCtx {
@@ -22,7 +17,7 @@ pub struct FromAstCtx {
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
     pub conditionals: Vec<HashMap<String, Vec<usize>>>,
-    pub scope_tree: ScopeTree,
+    pub scope_tree: ScopeTree<NonLocalOrLocal>,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,
     function_index: FunctionId,
@@ -54,6 +49,12 @@ impl FromAstCtx {
         let id = self.var_index;
         self.var_index += 1;
         self.basic_blocks.last_mut().unwrap().push((id, node));
+        id
+    }
+
+    pub fn bump_var_index(&mut self) -> usize {
+        let id = self.var_index;
+        self.var_index += 1;
         id
     }
 
@@ -249,5 +250,41 @@ impl FromAstCtx {
             .functions
             .get(&function_index)
             .expect("convert_in_function callback never called wrap_up_function()"))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum NestedIntoStatement {
+    Labelled(String),
+    Unlabelled,
+}
+
+#[derive(PartialEq, Eq, Clone)]
+pub enum NonLocalOrLocal {
+    NonLocal(NonLocalId),
+    Local(usize),
+}
+
+impl NonLocalOrLocal {
+    pub fn unwrap_nonlocal(&self) -> NonLocalId {
+        match self {
+            NonLocalOrLocal::NonLocal(id) => *id,
+            NonLocalOrLocal::Local(_) => panic!("unwrap_nonlocal called on a local variable"),
+        }
+    }
+    pub fn unwrap_local(&self) -> usize {
+        match self {
+            NonLocalOrLocal::NonLocal(_) => panic!("unwrap_local called on a nonlocal variable"),
+            NonLocalOrLocal::Local(id) => *id,
+        }
+    }
+}
+
+impl std::fmt::Debug for NonLocalOrLocal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NonLocalOrLocal::NonLocal(id) => write!(f, "NonLocal({})", id.0),
+            NonLocalOrLocal::Local(id) => write!(f, "Local({})", id),
+        }
     }
 }

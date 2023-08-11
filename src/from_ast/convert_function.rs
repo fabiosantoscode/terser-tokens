@@ -53,8 +53,6 @@ mod tests {
         ctx.functions.into_iter().collect()
     }
 
-    // TODO test nonlocal arguments
-
     #[test]
     fn test_basic_blocks_function() {
         let func = conv_fn("function _(y, z) { return y + z }");
@@ -102,18 +100,18 @@ mod tests {
             FunctionId(1): function():
             @0: {
                 $0 = undefined
-                $1 = write_non_local $$1 $0
-                $2 = 1
-                $3 = write_non_local $$1 $2
-                $7 = FunctionId(2)
-                $8 = undefined
-                exit = return $8
+                $2 = write_non_local $$1 $0
+                $3 = 1
+                $4 = write_non_local $$1 $3
+                $8 = FunctionId(2)
+                $9 = undefined
+                exit = return $9
             },
             FunctionId(2): function():
             @0: {
-                $4 = read_non_local $$1
-                $5 = $4
-                exit = return $5
+                $5 = read_non_local $$1
+                $6 = $5
+                exit = return $6
             },
         }
         "###);
@@ -131,18 +129,106 @@ mod tests {
             FunctionId(1): function():
             @0: {
                 $0 = undefined
-                $1 = write_non_local $$1 $0
-                $2 = arguments[0]
-                $3 = write_non_local $$1 $2
-                $7 = FunctionId(2)
-                $8 = undefined
-                exit = return $8
+                $2 = write_non_local $$1 $0
+                $3 = arguments[0]
+                $4 = write_non_local $$1 $3
+                $8 = FunctionId(2)
+                $9 = undefined
+                exit = return $9
             },
             FunctionId(2): function():
             @0: {
-                $4 = read_non_local $$1
-                $5 = $4
-                exit = return $5
+                $5 = read_non_local $$1
+                $6 = $5
+                exit = return $6
+            },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_closure_duplicate_name() {
+        let func = conv_fn(
+            "function f1() {
+                var dupe = 1
+                var f2 = function f2() {
+                    return dupe;
+                }
+                var f3 = function f3() {
+                    var dupe = 2; // SHADOWS outer `dupe`
+                    var f4 = function f4() { return dupe; }
+                }
+            }",
+        );
+        insta::assert_debug_snapshot!(func, @r###"
+        {
+            FunctionId(1): function():
+            @0: {
+                $0 = undefined
+                $2 = write_non_local $$1 $0
+                $3 = 1
+                $4 = write_non_local $$1 $3
+                $8 = FunctionId(2)
+                $19 = FunctionId(3)
+                $20 = undefined
+                exit = return $20
+            },
+            FunctionId(2): function():
+            @0: {
+                $5 = read_non_local $$1
+                $6 = $5
+                exit = return $6
+            },
+            FunctionId(3): function():
+            @0: {
+                $9 = undefined
+                $11 = write_non_local $$10 $9
+                $12 = 2
+                $13 = write_non_local $$10 $12
+                $17 = FunctionId(4)
+                $18 = undefined
+                exit = return $18
+            },
+            FunctionId(4): function():
+            @0: {
+                $14 = read_non_local $$10
+                $15 = $14
+                exit = return $15
+            },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_closure_nonlocal_and_also_yet_to_be_defined() {
+        let func = conv_fn(
+            "function _() {
+                var x = dupe; // `dupe` is nonlocal
+                var dupe = 999
+                var foo = function foo() {
+                    return dupe;
+                }
+            }",
+        );
+        insta::assert_debug_snapshot!(func, @r###"
+        {
+            FunctionId(1): function():
+            @0: {
+                $0 = undefined
+                $2 = write_non_local $$1 $0
+                $3 = read_non_local $$1
+                $4 = $3
+                $5 = 999
+                $6 = write_non_local $$1 $5
+                $10 = FunctionId(2)
+                $11 = undefined
+                exit = return $11
+            },
+            FunctionId(2): function():
+            @0: {
+                $7 = read_non_local $$1
+                $8 = $7
+                exit = return $8
             },
         }
         "###);
