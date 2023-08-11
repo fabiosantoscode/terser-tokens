@@ -180,6 +180,8 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             let catch_pusher_idx = ctx.wrap_up_block();
             let try_idx = ctx.wrap_up_block();
 
+            ctx.enter_conditional_branch();
+
             block_scoped_to_basic_blocks(ctx, &stmt.block.stmts);
 
             let before_catch_idx = ctx.wrap_up_block();
@@ -202,6 +204,9 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             }
 
             let after_finally_idx = ctx.wrap_up_block();
+
+            ctx.leave_conditional_branch();
+
             let done_and_dusted = ctx.wrap_up_block();
 
             // declare the trycatch
@@ -895,6 +900,51 @@ mod tests {
         @8: {
             $2 = undefined
             exit = return $2
+        }
+        "###);
+    }
+
+    #[test]
+    fn try_catch_phi() {
+        let s = test_basic_blocks(
+            "try {
+                var a = 777
+            } catch {
+                var a = 888
+            }
+            return a",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            exit = jump @1
+        }
+        @1: {
+            exit = try @2 catch @4 finally @6 after @8
+        }
+        @2: {
+            $0 = 777
+            exit = jump @3
+        }
+        @3: {
+            exit = error ? jump @4 : jump @6
+        }
+        @4: {
+            $1 = 888
+            exit = jump @5
+        }
+        @5: {
+            exit = finally @6 after @7
+        }
+        @6: {
+            exit = jump @7
+        }
+        @7: {
+            $2 = either($0, $1)
+            exit = end finally after @8
+        }
+        @8: {
+            $3 = $2
+            exit = return $3
         }
         "###);
     }
