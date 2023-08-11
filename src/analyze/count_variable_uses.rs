@@ -10,7 +10,7 @@ pub fn count_variable_uses(module: &BasicBlockModule) -> BTreeMap<usize, u32> {
         for (_, ins) in block.instructions.iter() {
             // Increment the use count for each operand
             for var in ins.used_vars() {
-                *ret.entry(*var).or_insert(0) += 1;
+                *ret.entry(var).or_insert(0) += 1;
             }
         }
 

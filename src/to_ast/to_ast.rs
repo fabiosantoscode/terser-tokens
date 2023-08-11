@@ -75,8 +75,8 @@ impl ToAstContext<'_> {
     fn will_be_inlined(&self, variable: usize) -> bool {
         self.inlined_variables.contains_key(&variable)
     }
-    fn get_inlined_expression(&self, var_idx: usize) -> Option<&BasicBlockInstruction> {
-        self.inlined_variables.get(&var_idx)
+    fn get_inlined_expression(&mut self, var_idx: usize) -> Option<BasicBlockInstruction> {
+        self.inlined_variables.remove(&var_idx)
     }
 
     fn variable_has_uses(&self, variable: usize) -> bool {
@@ -221,7 +221,7 @@ fn to_stat_ast(
 
 fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
     if let Some(varname) = ctx.get_inlined_expression(var_idx) {
-        to_expr_ast(ctx, &varname.clone())
+        to_expr_ast(ctx, &varname)
     } else {
         get_identifier(get_variable(var_idx))
     }
@@ -476,21 +476,13 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $11 = function() {
-            return 456;
-        };
-        var $12 = function() {
-            var $4 = function() {
+        function() {
+            return function() {
                 return arguments[0];
-            };
-            var $5 = 123;
-            var $6 = $4($5);
-            return $6;
-        };
-        var $13 = $12();
-        var $14 = $11;
-        var $15 = $14();
-        $13 + $15;
+            }(123);
+        }() + function() {
+            return 456;
+        }();
         return undefined;
         "###);
     }
@@ -504,13 +496,10 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = undefined;
-        $1 = $0;
-        var $2 = 1;
-        $1 = $2;
+        $1 = undefined;
+        $1 = 1;
         function() {
-            var $4 = $1;
-            return $4;
+            return $1;
         };
         return undefined;
         "###);
@@ -525,14 +514,11 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = undefined;
-        $1 = $0;
-        var $2 = 1;
-        $1 = $2;
+        $1 = undefined;
+        $1 = 1;
         function() {
             $1;
-            var $5 = 9;
-            $1 = $5;
+            $1 = 9;
             return undefined;
         };
         return undefined;
@@ -634,8 +620,7 @@ mod tests {
             try {
                 123;
             } catch ($error2) {
-                var $7 = $error2;
-                return $5 + $7;
+                return $5 + $error2;
             }
         }
         return $0;
