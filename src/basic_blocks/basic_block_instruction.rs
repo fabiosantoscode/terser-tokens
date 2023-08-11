@@ -20,7 +20,7 @@ pub enum BasicBlockInstruction {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq, Hash)]
 pub struct NonLocalId(pub usize);
 
 #[derive(Clone, PartialEq)]
