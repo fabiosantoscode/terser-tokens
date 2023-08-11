@@ -39,6 +39,12 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
     }
 
     fn basic_block_instruction(input: &str) -> IResult<&str, (usize, BasicBlockInstruction)> {
+        fn spaced_comma(input: &str) -> IResult<&str, ()> {
+            let (input, _) = multispace0(input)?;
+            let (input, _) = tag(",")(input)?;
+            let (input, _) = multispace0(input)?;
+            Ok((input, ()))
+        }
         fn ins_litnumber(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // 10
             let (input, n) = digit1(input)?;
@@ -54,6 +60,29 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             Ok((input, BasicBlockInstruction::Ref(n_usize)))
         }
 
+        fn ins_funcref(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // FunctionId(123)
+            let (input, _) = tag("FunctionId(")(input)?;
+            let (input, n) = digit1(input)?;
+            let (input, _) = tag(")")(input)?;
+            let n_usize: usize = n.parse().unwrap();
+            Ok((input, BasicBlockInstruction::Function(FunctionId(n_usize))))
+        }
+
+        fn ins_argref(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // arguments[123]
+            let (input, _) = tag("arguments[")(input)?;
+            let (input, n) = digit1(input)?;
+            let (input, rest) = opt(tag("..."))(input)?;
+            let (input, _) = tag("]")(input)?;
+            let n_usize: usize = n.parse().unwrap();
+            if let Some(_) = rest {
+                Ok((input, BasicBlockInstruction::ArgumentRest(n_usize)))
+            } else {
+                Ok((input, BasicBlockInstruction::ArgumentRead(n_usize)))
+            }
+        }
+
         fn ins_binop(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // {ref} {operator} {ref}
             let (input, left) = parse_ref(input)?;
@@ -65,6 +94,19 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
                 input,
                 BasicBlockInstruction::BinOp(String::from(op), left, right),
             ))
+        }
+
+        fn ins_call(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // call {ref}({arg1}, {arg2}, ...)
+            let (input, _) = tag("call")(input)?;
+            let input = whitespace!(input);
+            let (input, callee) = parse_ref(input)?;
+            let input = whitespace!(input);
+            let (input, _) = tag("(")(input)?;
+            let input = whitespace!(input);
+            let (input, args) = separated_list0(spaced_comma, parse_ref)(input)?;
+            let (input, _) = tag(")")(input)?;
+            Ok((input, BasicBlockInstruction::Call(callee, args)))
         }
 
         fn ins_undefined(input: &str) -> IResult<&str, BasicBlockInstruction> {
@@ -105,9 +147,9 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             let (input, _) = tag("[")(input)?;
             let input = whitespace!(input);
             let (input, items) =
-                separated_list0(tag(","), preceded(multispace0, array_elm))(input)?;
+                separated_list0(spaced_comma, preceded(multispace0, array_elm))(input)?;
             let input = whitespace!(input);
-            let (input, _) = opt(tag(","))(input)?;
+            let (input, _) = opt(spaced_comma)(input)?;
             let input = whitespace!(input);
             let (input, _) = tag("]")(input)?;
             Ok((input, BasicBlockInstruction::Array(items)))
@@ -138,7 +180,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             let (input, _paren) = tag("(")(input)?;
             let input = whitespace!(input);
             let (input, items) =
-                separated_list0(tag(","), preceded(multispace0, parse_ref))(input)?;
+                separated_list0(spaced_comma, preceded(multispace0, parse_ref))(input)?;
             let (input, _paren) = tag(")")(input)?;
 
             Ok((input, BasicBlockInstruction::Phi(items)))
@@ -177,7 +219,10 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             ins_this,
             ins_litnumber,
             ins_binop,
+            ins_call,
             ins_ref,
+            ins_funcref,
+            ins_argref,
             ins_caught_error,
             ins_array,
             ins_tempexit,
@@ -431,6 +476,14 @@ mod tests {
                 $5 = write_non_local $$2 $4
                 exit = jump @9
             }
+            @9: {
+                $6 = call $5($1, $2)
+                $7 = call $6()
+                $8 = arguments[0]
+                $9 = arguments[1...]
+                $10 = FunctionId(1)
+                exit = return $8
+            }
             "###,
         )
         .unwrap()
@@ -469,6 +522,14 @@ mod tests {
             $4 = read_non_local $$2
             $5 = write_non_local $$2 $4
             exit = jump @9
+        }
+        @9: {
+            $6 = call $5($1, $2)
+            $7 = call $6()
+            $8 = arguments[0]
+            $9 = arguments[1...]
+            $10 = FunctionId(1)
+            exit = return $8
         }
         "###
         );
