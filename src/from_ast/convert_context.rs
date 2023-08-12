@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use swc_ecma_ast::Ident;
 
@@ -16,7 +16,7 @@ pub struct FromAstCtx {
     pub basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
-    pub conditionals: Vec<HashMap<String, Vec<usize>>>,
+    pub conditionals: Vec<BTreeMap<String, Vec<usize>>>,
     pub scope_tree: ScopeTree<NonLocalOrLocal>,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use crate::basic_blocks::{BasicBlockInstruction, NonLocalId};
 
@@ -67,7 +67,7 @@ impl FromAstCtx {
     }
 
     pub fn enter_conditional_branch(&mut self) {
-        self.conditionals.push(HashMap::new())
+        self.conditionals.push(BTreeMap::new());
     }
 
     pub fn leave_conditional_branch(&mut self) {
