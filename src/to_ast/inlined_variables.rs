@@ -9,7 +9,18 @@ pub fn get_inlined_variables(
     module: &BasicBlockModule,
     variable_use_count: &BTreeMap<usize, u32>,
 ) -> BTreeMap<usize, BasicBlockInstruction> {
-    let mut ctx = GetInlinedVariablesCtx::new(variable_use_count);
+    let phied = module
+        .iter_all_instructions()
+        .flat_map(|(_, _, varname, ins)| match ins {
+            BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect(),
+            _ => vec![],
+        })
+        .collect();
+    let mut ctx = GetInlinedVariablesCtx::new(variable_use_count, phied);
 
     for (_id, block_group) in module.functions.iter() {
         // variables used once that are reorderable. Wherever they were defined, they can be inlined.
@@ -63,15 +74,17 @@ fn mark_deps(ctx: &mut GetInlinedVariablesCtx<'_>, dependencies: Vec<usize>) {
 
 struct GetInlinedVariablesCtx<'blkmod> {
     pub pure_candidates: BTreeMap<usize, &'blkmod BasicBlockInstruction>,
+    pub phi_participants: Vec<usize>,
     pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
     pub non_reorderable_candidates: Vec<(usize, &'blkmod BasicBlockInstruction)>,
     pub variable_use_count: &'blkmod BTreeMap<usize, u32>,
 }
 
 impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
-    fn new(variable_use_count: &'blkmod BTreeMap<usize, u32>) -> Self {
+    fn new(variable_use_count: &'blkmod BTreeMap<usize, u32>, phied: Vec<usize>) -> Self {
         Self {
             pure_candidates: Default::default(),
+            phi_participants: phied,
             inlined_variables: Default::default(),
             non_reorderable_candidates: Default::default(),
             variable_use_count,
@@ -90,14 +103,13 @@ impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
     }
 
     fn force_mark_inlineable(&mut self, index: usize, ins: &BasicBlockInstruction) -> bool {
-        match ins {
-            BasicBlockInstruction::Phi(_) => false, // Do not insert phi
-            ins => {
-                // Can inline here!
-                self.inlined_variables.insert(index, ins.clone(/* TODO */));
-                true
-            }
+        if matches!(ins, BasicBlockInstruction::Phi(_)) || self.phi_participants.contains(&index) {
+            return false;
         }
+
+        // Can inline here!
+        self.inlined_variables.insert(index, ins.clone(/* TODO */));
+        true
     }
 }
 
@@ -285,6 +297,53 @@ mod tests {
             11: FunctionId(3),
             15: call $8(),
             16: $15 + $13,
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_phied() {
+        let module = parse_instructions_module(vec![
+            "@0: {
+                $0 = 10
+                $1 = 123
+                exit = jump @1
+            }
+            @1: {
+                exit = cond $1 ? jump @2 : jump @4
+            }
+            @2: {
+                $2 = 456
+                exit = jump @3
+            }
+            @3: {
+                exit = jump @6
+            }
+            @4: {
+                $3 = 789
+                exit = jump @5
+            }
+            @5: {
+                exit = jump @6
+            }
+            @6: {
+                $4 = either($2, $3)
+                $5 = $4
+                $6 = 1
+                $7 = $5 + $6
+                $8 = undefined
+                exit = return $8
+            }",
+        ]);
+
+        let inlined_vars = test_inlined_vars(&module);
+
+        insta::assert_debug_snapshot!(inlined_vars, @r###"
+        {
+            1: 123,
+            5: $4,
+            6: 1,
+            8: undefined,
         }
         "###);
     }
