@@ -21,15 +21,16 @@ impl FromAstCtx {
             self.push_instruction(BasicBlockInstruction::WriteNonLocal(nonlocal, value));
         } else {
             let mut conditionals = self.conditionals.last_mut();
-            match conditionals {
-                Some(ref mut conditionals) => {
-                    if let Some(conditional) = conditionals.get_mut(name) {
-                        conditional.push(value);
-                    } else {
-                        conditionals.insert(name.to_string(), vec![value]);
+
+            if let Some(ref mut conditionals) = conditionals {
+                let entry = conditionals.entry(name.into()).or_insert_with(|| {
+                    match self.scope_tree.lookup_in_function(name) {
+                        Some(NonLocalOrLocal::Local(existing_var)) => vec![existing_var],
+                        _ => vec![],
                     }
-                }
-                None => {}
+                });
+
+                entry.push(value);
             };
 
             self.scope_tree
@@ -369,6 +370,68 @@ mod tests {
                 (
                     1,
                     either($456, $789),
+                ),
+            ],
+        ]
+        "###);
+    }
+
+    #[test]
+    fn test_phi() {
+        let mut ctx = FromAstCtx::new();
+
+        ctx.assign_name("varname_before_if", 11);
+
+        ctx.enter_conditional_branch();
+
+        ctx.assign_name("varname_before_if", 12);
+        ctx.assign_name("varname_in_if", 21);
+        ctx.assign_name("varname_in_if", 22);
+
+        insta::assert_debug_snapshot!(ctx.conditionals, @r###"
+        [
+            {
+                "varname_before_if": [
+                    11,
+                    12,
+                ],
+                "varname_in_if": [
+                    21,
+                    22,
+                ],
+            },
+        ]
+        "###);
+
+        // this pops the conditionals, creates phi nodes and assigns the conditional var to the phied version
+        ctx.leave_conditional_branch();
+
+        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
+        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
+        ScopeTree {
+            scopes: [
+                ScopeTreeNode {
+                    parent: None,
+                    is_block: false,
+                    vars: {
+                        "varname_before_if": Local(0),
+                        "varname_in_if": Local(1),
+                    },
+                },
+            ],
+            current_scope: ScopeTreeHandle(0),
+        }
+        "###);
+        insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
+        [
+            [
+                (
+                    0,
+                    either($11, $12),
+                ),
+                (
+                    1,
+                    either($21, $22),
                 ),
             ],
         ]

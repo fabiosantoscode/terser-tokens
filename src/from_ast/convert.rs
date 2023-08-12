@@ -600,7 +600,7 @@ mod tests {
             exit = jump @4
         }
         @4: {
-            $5 = either($2, $4)
+            $5 = either($0, $2, $4)
             $6 = either($3, $4)
             $7 = $5
             $8 = 2
@@ -637,25 +637,26 @@ mod tests {
             exit = jump @5
         }
         @5: {
+            $5 = either($2, $3)
             exit = jump @6
         }
         @6: {
-            $5 = either($3, $4)
-            $6 = 1
+            $6 = either($3, $4)
+            $7 = 1
             exit = jump @8
         }
         @7: {
-            $7 = 3
+            $8 = 3
             exit = jump @8
         }
         @8: {
-            $8 = either($2, $7)
-            $9 = either($6, $7)
-            $10 = $8
-            $11 = 2
-            $12 = $10 + $11
-            $13 = undefined
-            exit = return $13
+            $9 = either($0, $2, $8)
+            $10 = either($7, $8)
+            $11 = $9
+            $12 = 2
+            $13 = $11 + $12
+            $14 = undefined
+            exit = return $14
         }
         "###);
     }
@@ -809,8 +810,7 @@ mod tests {
     #[test]
     fn an_if_2() {
         let s = test_basic_blocks(
-            "
-            if (123) {
+            "if (123) {
                 if (456) {
                     789;
                 }

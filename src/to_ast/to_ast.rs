@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use swc_ecma_ast::{
     ArrayLit, AssignExpr, AssignOp, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee,
@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-use super::{do_tree, get_inlined_variables, remove_phi, StructuredFlow, ToAstContext};
+use super::{do_tree, get_inlined_variables, remove_phi, Base54, StructuredFlow, ToAstContext};
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {
@@ -28,21 +28,32 @@ pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
 }
 
 fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
-    let variable_use_count = count_variable_uses(&block_module);
-    let inlined_variables = get_inlined_variables(&block_module, &variable_use_count);
+    let phied = block_module
+        .iter_all_instructions()
+        .flat_map(|(_, _, varname, ins)| match ins {
+            BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
+                .into_iter()
+                .flatten()
+                .copied()
+                .collect(),
+            _ => vec![],
+        })
+        .collect();
 
     block_module.mutate_all_block_groups(&mut |block_group| {
         remove_phi(block_group);
     });
 
+    let variable_use_count = count_variable_uses(&block_module);
+    let inlined_variables = get_inlined_variables(&block_module, &variable_use_count, phied);
+
     let mut ctx = ToAstContext {
         caught_error: None,
-        error_counter: 0,
         module: &block_module,
         inlined_variables,
         variable_use_count,
-        emitted_vars: BTreeSet::new(),
-        emitted_nonlocals: BTreeSet::new(),
+        emitted_vars: BTreeMap::new(),
+        gen_var_index: Base54::new(0),
     };
 
     let tree = do_tree(&block_module.top_level_stats());
@@ -69,9 +80,7 @@ fn to_statements(
 
             stats
                 .iter()
-                .flat_map(|(variable, instruction)| {
-                    instruction_to_statement(ctx, variable, instruction)
-                })
+                .flat_map(|(varname, ins)| instruction_to_statement(ctx, *varname, ins))
                 .collect::<Vec<_>>()
         }
         StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {
@@ -175,47 +184,55 @@ fn to_statements(
 /// If a name is necessary, we emit a variable declaration or assignment.
 fn instruction_to_statement(
     ctx: &mut ToAstContext<'_>,
-    variable: &usize,
+    variable: usize,
     instruction: &BasicBlockInstruction,
-) -> Option<Stmt> {
-    if ctx.will_be_inlined(*variable) {
-        None
+) -> Vec<Stmt> {
+    if ctx.will_be_inlined(variable) {
+        // This will come up as a parameter to something else later.
+        vec![]
+    } else if !ctx.variable_has_uses(variable) && !instruction.may_have_side_effects() {
+        // This is a dead instruction, but its contents, when inlined, may have side effects
+        instruction
+            .used_vars()
+            .into_iter()
+            .flat_map(|var_idx| {
+                if let Some(instruction) = ctx.get_inlined_expression(var_idx) {
+                    instruction_to_statement(ctx, var_idx, &instruction)
+                } else {
+                    vec![]
+                }
+            })
+            .collect()
     } else {
-        // only used vars get "var X = ..."
-        if let BasicBlockInstruction::WriteNonLocal(id, value_of) = instruction {
-            let expression = ref_or_inlined_expr(ctx, *value_of);
-
-            if ctx.emitted_nonlocals.contains(id) {
-                Some(write_name(id.0, expression))
+        let (expression, variable) =
+            if let BasicBlockInstruction::WriteNonLocal(id, value_of) = instruction {
+                let expression = ref_or_inlined_expr(ctx, *value_of);
+                (expression, id.0)
             } else {
-                ctx.emitted_nonlocals.insert(*id);
-                Some(define_name(id.0, expression))
+                let expression = to_expr_ast(ctx, instruction);
+                (expression, variable)
+            };
+
+        if ctx.variable_has_uses(variable) {
+            if ctx.emitted_vars.contains_key(&variable) {
+                vec![write_name(ctx, variable, expression)]
+            } else {
+                vec![define_name(ctx, variable, expression)]
             }
         } else {
-            let expression = to_expr_ast(ctx, instruction);
-
-            if ctx.variable_has_uses(*variable) {
-                if ctx.emitted_vars.contains(variable) {
-                    Some(write_name(*variable, expression))
-                } else {
-                    ctx.emitted_vars.insert(*variable);
-                    Some(define_name(*variable, expression))
-                }
-            } else {
-                Some(Stmt::Expr(ExprStmt {
-                    span: Default::default(),
-                    expr: Box::new(expression),
-                }))
-            }
+            vec![Stmt::Expr(ExprStmt {
+                span: Default::default(),
+                expr: Box::new(expression),
+            })]
         }
     }
 }
 
 fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
-    if let Some(varname) = ctx.get_inlined_expression(var_idx) {
-        to_expr_ast(ctx, &varname)
+    if let Some(ins) = ctx.get_inlined_expression(var_idx) {
+        to_expr_ast(ctx, &ins)
     } else {
-        get_identifier(get_variable(var_idx))
+        get_identifier(ctx.get_varname_for(var_idx))
     }
 }
 
@@ -332,15 +349,13 @@ fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             })
         }
 
-        BasicBlockInstruction::ReadNonLocal(id) => {
-            Expr::Ident(Ident::new(get_variable(id.0).into(), Default::default()))
+        BasicBlockInstruction::ReadNonLocal(id) => Expr::Ident(Ident::new(
+            ctx.get_varname_for(id.0).into(),
+            Default::default(),
+        )),
+        BasicBlockInstruction::WriteNonLocal(_, _) => {
+            unreachable!("handled in instruction_to_statement")
         }
-        BasicBlockInstruction::WriteNonLocal(id, value) => Expr::Assign(AssignExpr {
-            op: AssignOp::Assign,
-            span: Default::default(),
-            left: PatOrExpr::Pat(Box::new(get_binding_identifier(&get_variable(id.0)))),
-            right: Box::new(ref_or_inlined_expr(ctx, *value)),
-        }),
 
         BasicBlockInstruction::TempExit(typ, arg) => match typ {
             TempExitType::Yield => Expr::Yield(YieldExpr {
@@ -367,10 +382,6 @@ fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
     }
 }
 
-fn get_variable(var_idx: usize) -> String {
-    format!("${}", var_idx)
-}
-
 fn get_identifier(i: String) -> Expr {
     Expr::Ident(Ident::new(i.into(), Default::default()))
 }
@@ -382,8 +393,8 @@ fn get_binding_identifier(i: &str) -> Pat {
     })
 }
 
-fn write_name(variable: usize, value: Expr) -> Stmt {
-    let varname = get_variable(variable);
+fn write_name(ctx: &mut ToAstContext, variable: usize, value: Expr) -> Stmt {
+    let varname = ctx.get_varname_for(variable);
 
     Stmt::Expr(ExprStmt {
         span: Default::default(),
@@ -396,8 +407,8 @@ fn write_name(variable: usize, value: Expr) -> Stmt {
     })
 }
 
-fn define_name(variable: usize, value: Expr) -> Stmt {
-    let varname = get_variable(variable);
+fn define_name(ctx: &mut ToAstContext, variable: usize, value: Expr) -> Stmt {
+    let varname = ctx.create_varname_for(variable);
 
     let vardecl = swc_ecma_ast::VarDecl {
         span: Default::default(),
@@ -438,16 +449,16 @@ mod tests {
 
     #[test]
     fn to_tree_cond() {
-        let block_group = test_basic_blocks_module("1 ? 2 : 3");
+        let block_group = test_basic_blocks_module("return (1 ? 2 : 3)");
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         if (1) {
-            2;
+            var a = 2;
         } else {
-            3;
+            a = 3;
         }
-        return undefined;
+        return a;
         "###);
     }
 
@@ -481,17 +492,16 @@ mod tests {
     fn to_scopes() {
         let block_group = test_basic_blocks_module(
             "var outer = 1
-            var bar = function bar() { return outer; }",
+            return function bar() { return outer; }",
         );
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $1 = undefined;
-        $1 = 1;
-        function() {
-            return $1;
+        var a = undefined;
+        a = 1;
+        return function() {
+            return a;
         };
-        return undefined;
         "###);
     }
 
@@ -499,19 +509,17 @@ mod tests {
     fn to_scopes_rw() {
         let block_group = test_basic_blocks_module(
             "var outer = 1
-            var bar = function bar() { outer = 9 }",
+            return function bar() { outer = outer + 1 }",
         );
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $1 = undefined;
-        $1 = 1;
-        function() {
-            $1;
-            $1 = 9;
+        var a = undefined;
+        a = 1;
+        return function() {
+            a = a + 1;
             return undefined;
         };
-        return undefined;
         "###);
     }
 
@@ -537,19 +545,18 @@ mod tests {
         let block_group = test_basic_blocks_module(
             "var x = 10;
             if (123) { x = 456; } else { x = 789; }
-            x + 1",
+            return x + 1",
         );
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        10;
+        var a = 10;
         if (123) {
-            var $4 = 456;
+            a = 456;
         } else {
-            $4 = 789;
+            a = 789;
         }
-        $4 + 1;
-        return undefined;
+        return a + 1;
         "###);
     }
 
@@ -569,14 +576,15 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var a = 10;
         try {
-            if (10 + 10) {
+            if (a + 10) {
                 throw 123;
             } else {}
-        } catch ($error1) {
-            $error1;
+        } catch (b) {
+            a = 456;
         }
-        return 456;
+        return a;
         "###);
     }
 
@@ -585,12 +593,12 @@ mod tests {
         let block_group = test_basic_blocks_module(
             "var x = 10;
             try {
-                if (x > 10) {
+                if (x > 10) { // TODO: non-`+` operator
                     throw 123;
                 }
             } catch (e) {
                 try {
-                    123
+                    return 123
                 } catch (e2) {
                     return e + e2;
                 }
@@ -600,20 +608,20 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var $0 = 10;
+        var a = 10;
         try {
-            if ($0 + 10) {
+            if (a + 10) {
                 throw 123;
             } else {}
-        } catch ($error1) {
-            var $5 = $error1;
+        } catch (b) {
+            var c = b;
             try {
-                123;
-            } catch ($error2) {
-                return $5 + $error2;
+                return 123;
+            } catch (d) {
+                return c + d;
             }
         }
-        return $0;
+        return a;
         "###);
     }
 }
