@@ -262,7 +262,7 @@ fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                     let expr_idx = expr_to_basic_blocks(ctx, &assign.right);
                     ctx.assign_name(&sym, expr_idx);
 
-                    return expr_idx;
+                    BasicBlockInstruction::Ref(expr_idx)
                 }
                 _ => todo!(),
             },
@@ -524,6 +524,40 @@ mod tests {
     }
 
     #[test]
+    fn cond_assign() {
+        let s = test_basic_blocks(
+            "let x = 999;
+            1 ? (x = 2) : 3;
+            return x;",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 999
+            exit = jump @1
+        }
+        @1: {
+            $1 = 1
+            exit = cond $1 ? jump @2 : jump @3
+        }
+        @2: {
+            $2 = 2
+            $3 = $2
+            exit = jump @4
+        }
+        @3: {
+            $4 = 3
+            exit = jump @4
+        }
+        @4: {
+            $5 = either($0, $2)
+            $6 = either($3, $4)
+            $7 = $5
+            exit = return $7
+        }
+        "###);
+    }
+
+    #[test]
     fn cond_nested() {
         let s = test_basic_blocks_expr("1 ? (2 ? 10 : 15) : 20;");
         insta::assert_debug_snapshot!(s, @r###"
@@ -592,29 +626,34 @@ mod tests {
         }
         @2: {
             $2 = 2
-            $3 = 1
+            $3 = $2
+            $4 = 1
             exit = jump @4
         }
         @3: {
-            $4 = 3
+            $5 = 3
+            $6 = $5
             exit = jump @4
         }
         @4: {
-            $5 = either($0, $2, $4)
-            $6 = either($3, $4)
-            $7 = $5
-            $8 = 2
-            $9 = $7 + $8
-            $10 = undefined
-            exit = return $10
+            $7 = either($0, $2, $5)
+            $8 = either($4, $6)
+            $9 = $7
+            $10 = 2
+            $11 = $9 + $10
+            $12 = undefined
+            exit = return $12
         }
         "###);
     }
 
     #[test]
     fn cond_nested_reassign_2() {
-        let s =
-            test_basic_blocks("var x = 1; 123 ? ((x = 1234) ? (x = 567) : 890, 1) : x = 3; x + 2");
+        let s = test_basic_blocks(
+            "var x = 1;
+            123 ? ((x = 1234) ? (x = 567) : 890, 1) : x = 3;
+            x + 2",
+        );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
@@ -626,37 +665,40 @@ mod tests {
         }
         @2: {
             $2 = 1234
-            exit = cond $2 ? jump @3 : jump @4
+            $3 = $2
+            exit = cond $3 ? jump @3 : jump @4
         }
         @3: {
-            $3 = 567
+            $4 = 567
+            $5 = $4
             exit = jump @5
         }
         @4: {
-            $4 = 890
+            $6 = 890
             exit = jump @5
         }
         @5: {
-            $5 = either($2, $3)
+            $7 = either($2, $4)
             exit = jump @6
         }
         @6: {
-            $6 = either($3, $4)
-            $7 = 1
+            $8 = either($5, $6)
+            $9 = 1
             exit = jump @8
         }
         @7: {
-            $8 = 3
+            $10 = 3
+            $11 = $10
             exit = jump @8
         }
         @8: {
-            $9 = either($0, $2, $8)
-            $10 = either($7, $8)
-            $11 = $9
-            $12 = 2
-            $13 = $11 + $12
-            $14 = undefined
-            exit = return $14
+            $12 = either($0, $2, $10)
+            $13 = either($9, $11)
+            $14 = $12
+            $15 = 2
+            $16 = $14 + $15
+            $17 = undefined
+            exit = return $17
         }
         "###);
     }

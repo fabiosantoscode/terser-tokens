@@ -215,9 +215,9 @@ mod tests {
             $2 = write_non_local $$1 $0
             $3 = 1
             $4 = write_non_local $$1 $3
-            $9 = FunctionId(1)
-            $10 = undefined
-            exit = return $10
+            $10 = FunctionId(1)
+            $11 = undefined
+            exit = return $11
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
@@ -226,8 +226,9 @@ mod tests {
             $5 = read_non_local $$1
             $6 = 9
             $7 = write_non_local $$1 $6
-            $8 = undefined
-            exit = return $8
+            $8 = $6
+            $9 = undefined
+            exit = return $9
         }
         "###);
     }

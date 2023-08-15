@@ -17,12 +17,10 @@ pub fn remove_phi(group: &mut BasicBlockGroup) {
 fn collect_phi(group: &BasicBlockGroup) -> HashMap<usize, usize> {
     let mut phies_to_final_name: HashMap<usize, usize> = Default::default();
 
-    for block in group.blocks.iter() {
-        for (varname, ins) in block.1.instructions.iter() {
-            if let BasicBlockInstruction::Phi(phies) = ins {
-                for phi in phies {
-                    phies_to_final_name.insert(*phi, *varname);
-                }
+    for (_, varname, ins) in group.iter_all_instructions() {
+        if let BasicBlockInstruction::Phi(alternatives) = ins {
+            for phi in alternatives {
+                phies_to_final_name.insert(*phi, varname);
             }
         }
     }
@@ -31,20 +29,10 @@ fn collect_phi(group: &BasicBlockGroup) -> HashMap<usize, usize> {
 }
 
 fn remove_phi_inner(block: &mut BasicBlock, phies_to_final_name: &mut HashMap<usize, usize>) {
-    let mut phies_found: HashSet<usize> = Default::default();
-
-    for (varname, ins) in block.instructions.iter() {
-        if let BasicBlockInstruction::Phi(phies) = ins {
-            phies_found.insert(*varname);
-            for phi in phies {
-                phies_to_final_name.insert(*phi, *varname);
-            }
-        }
-    }
-
-    block
-        .instructions
-        .retain(|(varname, _)| phies_found.contains(varname) == false);
+    block.instructions.retain(|(_, ins)| match ins {
+        BasicBlockInstruction::Phi(_) => false,
+        _ => true,
+    });
 
     for x in block.instructions.iter_mut() {
         if let Some(final_name) = phies_to_final_name.get(&x.0) {
@@ -67,7 +55,7 @@ mod tests {
     use crate::testutils::*;
 
     #[test]
-    fn test_remove_phi() {
+    fn test_remove_phi_1() {
         let mut blocks = parse_instructions(
             r###"
             @0: {
@@ -87,6 +75,65 @@ mod tests {
             $2 = 777
             $2 = $2
             exit = return $2
+        }
+        "###
+        );
+    }
+
+    #[test]
+    fn test_remove_phi_2() {
+        let mut blocks = parse_instructions(
+            r###"
+            @0: {
+                $0 = 999
+                exit = jump @1
+            }
+            @1: {
+                $1 = 1
+                exit = cond $1 ? jump @2 : jump @3
+            }
+            @2: {
+                $2 = 2
+                $3 = $2
+                exit = jump @4
+            }
+            @3: {
+                $4 = 3
+                exit = jump @4
+            }
+            @4: {
+                $5 = either($0, $2)
+                $6 = either($3, $4)
+                $7 = $5
+                exit = return $7
+            }
+            "###,
+        );
+
+        remove_phi(&mut blocks);
+
+        insta::assert_debug_snapshot!(blocks,
+        @r###"
+        @0: {
+            $5 = 999
+            exit = jump @1
+        }
+        @1: {
+            $1 = 1
+            exit = cond $1 ? jump @2 : jump @3
+        }
+        @2: {
+            $5 = 2
+            $6 = $5
+            exit = jump @4
+        }
+        @3: {
+            $6 = 3
+            exit = jump @4
+        }
+        @4: {
+            $7 = $5
+            exit = return $7
         }
         "###
         );

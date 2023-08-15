@@ -209,7 +209,7 @@ fn instruction_to_statement(
                 let expression = ref_or_inlined_expr(ctx, *value_of);
                 (expression, id.0)
             } else {
-                let expression = to_expr_ast(ctx, instruction);
+                let expression = to_expression(ctx, instruction);
                 (expression, variable)
             };
 
@@ -230,13 +230,13 @@ fn instruction_to_statement(
 
 fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
     if let Some(ins) = ctx.get_inlined_expression(var_idx) {
-        to_expr_ast(ctx, &ins)
+        to_expression(ctx, &ins)
     } else {
         get_identifier(ctx.get_varname_for(var_idx))
     }
 }
 
-fn to_expr_ast(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
+fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
     match expr {
         BasicBlockInstruction::LitNumber(num) => (*num).into(),
         BasicBlockInstruction::Undefined => {
@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn to_tree_cond() {
+    fn to_tree_cond_1() {
         let block_group = test_basic_blocks_module("return (1 ? 2 : 3)");
 
         let tree = to_ast_inner(block_group);
@@ -458,6 +458,24 @@ mod tests {
         } else {
             a = 3;
         }
+        return a;
+        "###);
+    }
+
+    #[test]
+    fn to_tree_cond_2() {
+        let block_group = test_basic_blocks_module(
+            "let x = 0;
+            1 ? x = 2 : 3;
+            return x",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var a = 0;
+        if (1) {
+            a = 2;
+        } else {}
         return a;
         "###);
     }
@@ -517,7 +535,8 @@ mod tests {
         var a = undefined;
         a = 1;
         return function() {
-            a = a + 1;
+            var b = a + 1;
+            a = b;
             return undefined;
         };
         "###);

@@ -32,10 +32,14 @@ pub fn run_checks(s: &str) -> String {
         panic!("failed to run compressed code {comp_s}")
     };
 
-    assert_eq!(
-        reference, compressed,
-        "reference and compressed code should have the same output"
-    );
+    if reference != compressed {
+        panic!(
+            "reference and compressed code should have the same output\n\
+            code: \n{s}// outputs: {reference}\n\
+            compressed code:\n{comp_s}// outputs: {compressed}\n\
+            "
+        );
+    }
 
     reference // return reference for snapshot
 }
