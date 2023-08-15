@@ -1,4 +1,4 @@
 { pkgs ? import <nixpkgs> {} }:
 pkgs.mkShell {
-  buildInputs = with pkgs; [ rustup rust-analyzer ];
+  buildInputs = with pkgs; [ rustup rust-analyzer python38 ];
 }

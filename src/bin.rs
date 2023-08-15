@@ -5,6 +5,7 @@ mod analyze;
 mod basic_blocks;
 mod compress;
 mod from_ast;
+mod functional_tests;
 mod scope;
 mod swc_parse;
 mod swc_stringify;
