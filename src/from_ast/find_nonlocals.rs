@@ -51,7 +51,7 @@ pub fn find_module_nonlocals(module: &Module) -> NonLocalInfo {
 }
 
 struct NonLocalsContext<'a> {
-    pub scopes: ScopeTree<String>,
+    pub scopes: ScopeTree<()>,
     pub depth: u32,
     pub found_nonlocals: Vec<String>,
     pub deferred_fns: Vec<(FunctionLike<'a>, ScopeTreeHandle)>,
@@ -63,7 +63,7 @@ impl<'a> NonLocalsContext<'a> {
         if funscoped && self.depth == 0 && !self.found_funscoped.contains(&name) {
             self.found_funscoped.push(name.clone());
         }
-        self.scopes.insert(name.clone(), name.clone());
+        self.scopes.insert(name.clone(), ());
     }
 
     fn read_name(&mut self, name: String) {
@@ -150,6 +150,12 @@ impl<'a> NonLocalsContext<'a> {
     pub fn do_module(&mut self, module: &'a Module) {
         module.body.iter().for_each(|item| match item {
             ModuleItem::Stmt(stmt) => {
+                stat_hoist(self, stmt);
+            }
+            _ => {}
+        });
+        module.body.iter().for_each(|item| match item {
+            ModuleItem::Stmt(stmt) => {
                 stat_nonlocals(self, stmt);
             }
             ModuleItem::ModuleDecl(_) => {
@@ -169,9 +175,24 @@ impl<'a> NonLocalsContext<'a> {
 fn block_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a [Stmt]) {
     ctx.scopes.go_into_block_scope();
     for stat in stat {
+        stat_hoist(ctx, stat);
+    }
+    for stat in stat {
         stat_nonlocals(ctx, stat);
     }
     ctx.scopes.leave_scope();
+}
+
+fn stat_hoist(ctx: &mut NonLocalsContext<'_>, stat: &Stmt) {
+    match stat {
+        Stmt::Decl(Decl::Fn(fn_decl)) => {
+            ctx.assign_name(fn_decl.ident.sym.to_string(), false);
+        }
+        Stmt::Labeled(labeled) => {
+            stat_hoist(ctx, &labeled.body);
+        }
+        _ => {}
+    }
 }
 
 fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {

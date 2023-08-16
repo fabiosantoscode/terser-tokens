@@ -9,7 +9,7 @@ use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{parse_file_as_expr, EsConfig};
 
 use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule};
-use crate::from_ast::{module_to_basic_blocks, statements_to_basic_blocks, FromAstCtx};
+use crate::from_ast::{block_to_basic_blocks, module_to_basic_blocks, FromAstCtx};
 use crate::swc_parse::swc_parse;
 
 pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
@@ -38,13 +38,14 @@ pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
 
     let mut c = FromAstCtx::new();
     let bg = c.go_into_function(0, None, |c: &mut FromAstCtx| {
-        statements_to_basic_blocks(
+        block_to_basic_blocks(
             c,
-            &vec![&Stmt::Expr(ExprStmt {
+            &vec![Stmt::Expr(ExprStmt {
                 span: Default::default(),
                 expr: Box::new(m),
             })],
-        );
+        )
+        .unwrap();
 
         Ok(())
     });

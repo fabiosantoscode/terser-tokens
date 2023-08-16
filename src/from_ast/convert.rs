@@ -1,19 +1,21 @@
 use std::borrow::Borrow;
 
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmt, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt,
-    ThrowStmt, YieldExpr,
+    AwaitExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt, ThrowStmt,
+    YieldExpr,
 };
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
 };
 
-use super::{function_to_basic_blocks, FromAstCtx, FunctionLike, NestedIntoStatement};
+use super::{
+    block_to_basic_blocks, function_to_basic_blocks, FromAstCtx, FunctionLike, NestedIntoStatement,
+};
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
-fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
+pub fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
     let is_loop = |stat: &Stmt| match stat {
         Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::ForIn(_) | Stmt::ForOf(_) => true,
         _ => false,
@@ -48,14 +50,6 @@ fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
     }
 }
 
-fn block_scoped_to_basic_blocks(ctx: &mut FromAstCtx, stats: &[Stmt]) {
-    // TODO actually implement block scope
-    for stat in stats {
-        stat_to_basic_blocks(ctx, stat);
-    }
-    ctx.wrap_up_block();
-}
-
 /// Turn a statement into basic blocks. Wrapped by `stat_to_basic_blocks` to handle labels.
 fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
     match stat {
@@ -68,6 +62,9 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 let expr = expr_to_basic_blocks(ctx, decl.init.as_ref().unwrap().borrow());
                 ctx.assign_name(&ident.sym.to_string(), expr);
             }
+        }
+        Stmt::Decl(Decl::Fn(_)) => {
+            unreachable!("function declarations should be handled by block_to_basic_blocks")
         }
         Stmt::DoWhile(_) => todo!(),
         Stmt::For(_) => todo!(),
@@ -151,7 +148,9 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 );
             }
         }
-        Stmt::Block(block) => block_stmt_to_basic_blocks(ctx, &block),
+        Stmt::Block(block) => {
+            block_to_basic_blocks(ctx, &block.stmts).expect("todo error handling")
+        }
         Stmt::Break(br) => ctx.register_break(&br.label),
         Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
@@ -182,7 +181,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             ctx.enter_conditional_branch();
 
-            block_scoped_to_basic_blocks(ctx, &stmt.block.stmts);
+            block_to_basic_blocks(ctx, &stmt.block.stmts).expect("todo error handling");
 
             let before_catch_idx = ctx.wrap_up_block();
             let catch_idx = ctx.wrap_up_block();
@@ -193,14 +192,14 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                     let catcherr = ctx.push_instruction(BasicBlockInstruction::CaughtError);
                     ctx.assign_name(&sym.sym, catcherr);
                 }
-                block_scoped_to_basic_blocks(ctx, &handler.body.stmts);
+                block_to_basic_blocks(ctx, &handler.body.stmts).expect("todo error handling");
             }
 
             let after_catch_idx = ctx.wrap_up_block();
             let finally_idx = ctx.wrap_up_block();
 
             if let Some(ref finalizer) = stmt.finalizer {
-                block_scoped_to_basic_blocks(ctx, &finalizer.stmts);
+                block_to_basic_blocks(ctx, &finalizer.stmts).expect("todo error handling");
             }
 
             let after_finally_idx = ctx.wrap_up_block();
@@ -235,17 +234,6 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             todo!("statements_to_ssa: stat_to_ssa: {:?} not implemented", stat)
         }
     }
-}
-
-pub fn statements_to_basic_blocks(ctx: &mut FromAstCtx, statements: &[&Stmt]) {
-    for stat in statements {
-        stat_to_basic_blocks(ctx, stat);
-        ctx.wrap_up_block();
-    }
-}
-
-pub fn block_stmt_to_basic_blocks(ctx: &mut FromAstCtx, block: &BlockStmt) {
-    block_scoped_to_basic_blocks(ctx, &block.stmts)
 }
 
 pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
@@ -346,14 +334,14 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Member(_) => todo!(),
         Expr::SuperProp(_) => todo!(),
         Expr::Arrow(arrow_expr) => {
-            let func = function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr))
+            let func_id = function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr))
                 .expect("todo error handling");
-            BasicBlockInstruction::Function(func.id)
+            BasicBlockInstruction::Function(func_id)
         }
         Expr::Fn(fn_expr) => {
-            let func = function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr))
+            let func_id = function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr))
                 .expect("todo error handling");
-            BasicBlockInstruction::Function(func.id)
+            BasicBlockInstruction::Function(func_id)
         }
         Expr::Call(call) => {
             // TODO non-expr callees (super, import)

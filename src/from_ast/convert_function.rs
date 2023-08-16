@@ -1,19 +1,19 @@
 use swc_ecma_ast::Pat;
 
 use super::{
-    block_stmt_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, FromAstCtx,
-    FuncBlockOrRetExpr, FunctionLike,
+    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, FromAstCtx, FuncBlockOrRetExpr,
+    FunctionLike,
 };
-use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, ExitType};
+use crate::basic_blocks::{BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId};
 
-pub fn function_to_basic_blocks<'a>(
-    ctx: &'a mut FromAstCtx,
-    function: FunctionLike<'a>,
-) -> Result<&'a BasicBlockGroup, String> {
+pub fn function_to_basic_blocks(
+    ctx: &mut FromAstCtx,
+    function: FunctionLike,
+) -> Result<FunctionId, String> {
     // count function.length
     let arg_count: usize = function.function_length();
 
-    ctx.go_into_function(arg_count, Some(find_nonlocals(function.clone())), |ctx| {
+    let group = ctx.go_into_function(arg_count, Some(find_nonlocals(function.clone())), |ctx| {
         function
             .get_params()
             .into_iter()
@@ -32,7 +32,7 @@ pub fn function_to_basic_blocks<'a>(
             });
 
         match function.get_body() {
-            FuncBlockOrRetExpr::Block(block) => block_stmt_to_basic_blocks(ctx, block),
+            FuncBlockOrRetExpr::Block(block) => block_to_basic_blocks(ctx, &block.stmts)?,
             FuncBlockOrRetExpr::RetExpr(expr) => {
                 let varname = expr_to_basic_blocks(ctx, expr);
                 let block_ret = ctx.wrap_up_block();
@@ -41,7 +41,9 @@ pub fn function_to_basic_blocks<'a>(
         };
 
         Ok(())
-    })
+    })?;
+
+    Ok(group.id)
 }
 
 #[cfg(test)]

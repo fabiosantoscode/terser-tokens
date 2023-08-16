@@ -52,6 +52,29 @@ impl FromAstCtx {
         id
     }
 
+    /// This is used to arbitrarily set a variable name. Get it from .bump_var_index() to ensure it won't be used elsewhere, and then call this function later.
+    /// This is used for function declarations, which are hoisted to the top of the scope before they're even converted.
+    pub fn arbitrarily_set_id(&mut self, id: usize, node: BasicBlockInstruction) {
+        assert!(
+            id < self.var_index,
+            "fulfill_deferred_instruction: id {} is out of bounds {}",
+            id,
+            self.var_index
+        );
+        assert!(
+            self.basic_blocks
+                .last()
+                .unwrap()
+                .iter()
+                .find(|(i, _)| *i == id)
+                .is_none(),
+            "fulfill_deferred_instruction: id {} is already used",
+            id
+        );
+        self.basic_blocks.last_mut().unwrap().push((id, node));
+    }
+
+    /// Get a new ID. It can be used to make sure varnames don't collide with other kinds of IDs, or to generate an ID that will be fulfilled later.
     pub fn bump_var_index(&mut self) -> usize {
         let id = self.var_index;
         self.var_index += 1;

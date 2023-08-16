@@ -2,7 +2,7 @@ use swc_ecma_ast::{
     ExportSpecifier, ImportSpecifier, Module, ModuleDecl, ModuleExportName, ModuleItem, Stmt,
 };
 
-use super::{find_module_nonlocals, statements_to_basic_blocks, FromAstCtx};
+use super::{block_statrefs_to_basic_blocks, find_module_nonlocals, FromAstCtx};
 use crate::basic_blocks::{BasicBlockModule, Export, Import, ModuleSummary};
 
 pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBlockModule, String> {
@@ -20,7 +20,7 @@ pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBl
         })
         .collect();
 
-    statements_to_basic_blocks(&mut ctx, &top_level_stats);
+    block_statrefs_to_basic_blocks(&mut ctx, top_level_stats)?;
 
     Ok(ctx.wrap_up_module(summary))
 }

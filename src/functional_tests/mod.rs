@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod calls;
+mod functions;
 #[cfg(test)]
 mod conditions;
 
