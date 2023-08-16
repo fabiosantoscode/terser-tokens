@@ -1,4 +1,4 @@
-use swc_ecma_ast::{ArrowExpr, FnDecl, FnExpr, Pat, Stmt};
+use swc_ecma_ast::{ArrowExpr, BlockStmt, BlockStmtOrExpr, Expr, FnDecl, FnExpr, Pat};
 
 #[derive(Clone)]
 pub enum FunctionLike<'a> {
@@ -7,20 +7,28 @@ pub enum FunctionLike<'a> {
     ArrowExpr(&'a ArrowExpr),
 }
 
+pub enum FuncBlockOrRetExpr<'a> {
+    Block(&'a BlockStmt),
+    RetExpr(&'a Expr),
+}
+
 impl<'a> FunctionLike<'a> {
     pub fn function_length(&self) -> usize {
+        let param_counts = |pat: &Pat| match pat {
+            swc_ecma_ast::Pat::Ident(_) => true,
+            swc_ecma_ast::Pat::Rest(_) => false,
+            _ => todo!("non-ident function param"),
+        };
         match self {
             FunctionLike::FnDecl(FnDecl { function, .. })
             | FunctionLike::FnExpr(FnExpr { function, .. }) => function
                 .params
                 .iter()
-                .filter(|param| match param.pat {
-                    swc_ecma_ast::Pat::Ident(_) => true,
-                    swc_ecma_ast::Pat::Rest(_) => false,
-                    _ => todo!("non-ident function param"),
-                })
+                .filter(|param| param_counts(&param.pat))
                 .count(),
-            _ => todo!(),
+            FunctionLike::ArrowExpr(ArrowExpr { params, .. }) => {
+                params.iter().filter(|pat| param_counts(pat)).count()
+            }
         }
     }
 
@@ -30,21 +38,20 @@ impl<'a> FunctionLike<'a> {
             | FunctionLike::FnExpr(FnExpr { function, .. }) => {
                 function.params.iter().map(|param| &param.pat).collect()
             }
-            _ => todo!(),
+            FunctionLike::ArrowExpr(ArrowExpr { params, .. }) => params.iter().collect(),
         }
     }
 
-    pub(crate) fn get_statements(&'a self) -> Vec<&'a Stmt> {
+    pub(crate) fn get_body(&'a self) -> FuncBlockOrRetExpr<'a> {
         match self {
             FunctionLike::FnDecl(FnDecl { function, .. })
-            | FunctionLike::FnExpr(FnExpr { function, .. }) => function
-                .body
-                .as_ref()
-                .expect("function body is empty")
-                .stmts
-                .iter()
-                .collect(),
-            _ => todo!(),
+            | FunctionLike::FnExpr(FnExpr { function, .. }) => {
+                FuncBlockOrRetExpr::Block(function.body.as_ref().expect("function body is empty"))
+            }
+            FunctionLike::ArrowExpr(ArrowExpr { body, .. }) => match body.as_ref() {
+                BlockStmtOrExpr::BlockStmt(block) => FuncBlockOrRetExpr::Block(block),
+                BlockStmtOrExpr::Expr(expr) => FuncBlockOrRetExpr::RetExpr(&**expr),
+            },
         }
     }
 }

@@ -1,5 +1,10 @@
-use super::{find_nonlocals, statements_to_basic_blocks, FromAstCtx, FunctionLike};
-use crate::basic_blocks::{BasicBlockGroup, BasicBlockInstruction};
+use swc_ecma_ast::Pat;
+
+use super::{
+    block_stmt_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, FromAstCtx,
+    FuncBlockOrRetExpr, FunctionLike,
+};
+use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, ExitType};
 
 pub fn function_to_basic_blocks<'a>(
     ctx: &'a mut FromAstCtx,
@@ -14,11 +19,11 @@ pub fn function_to_basic_blocks<'a>(
             .into_iter()
             .enumerate()
             .for_each(|(i, pat)| match pat {
-                swc_ecma_ast::Pat::Ident(ident) => {
+                Pat::Ident(ident) => {
                     let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
                     ctx.assign_name(&ident.id.sym.to_string(), arg);
                 }
-                swc_ecma_ast::Pat::Rest(ident) => {
+                Pat::Rest(ident) => {
                     let name = ident.arg.as_ident().as_ref().unwrap().id.sym.to_string();
                     let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
                     ctx.assign_name(&name, arg);
@@ -26,7 +31,14 @@ pub fn function_to_basic_blocks<'a>(
                 _ => todo!("non-ident function param"),
             });
 
-        statements_to_basic_blocks(ctx, &function.get_statements());
+        match function.get_body() {
+            FuncBlockOrRetExpr::Block(block) => block_stmt_to_basic_blocks(ctx, block),
+            FuncBlockOrRetExpr::RetExpr(expr) => {
+                let varname = expr_to_basic_blocks(ctx, expr);
+                let block_ret = ctx.wrap_up_block();
+                ctx.set_exit(block_ret, BasicBlockExit::ExitFn(ExitType::Return, varname));
+            }
+        };
 
         Ok(())
     })

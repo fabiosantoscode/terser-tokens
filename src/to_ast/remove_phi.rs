@@ -2,7 +2,7 @@
 // This is no longer useful
 // We need to find these and replace $1 $2 $3, whenever they're found, with just $0
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::basic_blocks::{BasicBlock, BasicBlockGroup, BasicBlockInstruction};
 

@@ -1,8 +1,8 @@
 use std::borrow::Borrow;
 
 use swc_ecma_ast::{
-    AwaitExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt, ThrowStmt,
-    YieldExpr,
+    AwaitExpr, BlockStmt, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt,
+    ThrowStmt, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -151,7 +151,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 );
             }
         }
-        Stmt::Block(block) => block_scoped_to_basic_blocks(ctx, &block.stmts),
+        Stmt::Block(block) => block_stmt_to_basic_blocks(ctx, &block),
         Stmt::Break(br) => ctx.register_break(&br.label),
         Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
@@ -244,7 +244,11 @@ pub fn statements_to_basic_blocks(ctx: &mut FromAstCtx, statements: &[&Stmt]) {
     }
 }
 
-fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
+pub fn block_stmt_to_basic_blocks(ctx: &mut FromAstCtx, block: &BlockStmt) {
+    block_scoped_to_basic_blocks(ctx, &block.stmts)
+}
+
+pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
     let node = match exp {
         Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
         Expr::Bin(bin) => {
@@ -341,8 +345,13 @@ fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Update(_) => todo!(),
         Expr::Member(_) => todo!(),
         Expr::SuperProp(_) => todo!(),
-        Expr::Fn(function) => {
-            let func = function_to_basic_blocks(ctx, FunctionLike::FnExpr(function))
+        Expr::Arrow(arrow_expr) => {
+            let func = function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr))
+                .expect("todo error handling");
+            BasicBlockInstruction::Function(func.id)
+        }
+        Expr::Fn(fn_expr) => {
+            let func = function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr))
                 .expect("todo error handling");
             BasicBlockInstruction::Function(func.id)
         }
@@ -363,7 +372,6 @@ fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::New(_) => todo!(),
         Expr::Tpl(_) => todo!(),
         Expr::TaggedTpl(_) => todo!(),
-        Expr::Arrow(_) => todo!(),
         Expr::Class(_) => todo!(),
         Expr::MetaProp(_) => todo!(),
         Expr::Yield(YieldExpr { arg, delegate, .. }) => {
