@@ -245,7 +245,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             let l = expr_to_basic_blocks(ctx, &bin.left);
             let r = expr_to_basic_blocks(ctx, &bin.right);
 
-            return ctx.push_instruction(BasicBlockInstruction::BinOp("+".into(), l, r));
+            return ctx.push_instruction(BasicBlockInstruction::BinOp(bin.op.clone(), l, r));
         }
         Expr::Assign(assign) => match &assign.left {
             PatOrExpr::Pat(e) => match e.borrow() {

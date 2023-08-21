@@ -88,11 +88,18 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             let (input, left) = parse_ref(input)?;
             let input = whitespace!(input);
             let (input, op) = one_of("+-*/")(input)?;
+            let op = match op {
+                '+' => swc_ecma_ast::BinaryOp::Add,
+                '-' => swc_ecma_ast::BinaryOp::Sub,
+                '*' => swc_ecma_ast::BinaryOp::Mul,
+                '/' => swc_ecma_ast::BinaryOp::Div,
+                _ => unreachable!(),
+            };
             let input = whitespace!(input);
             let (input, right) = parse_ref(input)?;
             Ok((
                 input,
-                BasicBlockInstruction::BinOp(String::from(op), left, right),
+                BasicBlockInstruction::BinOp(op, left, right),
             ))
         }
 

@@ -242,13 +242,13 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         BasicBlockInstruction::Undefined => {
             Expr::Ident(Ident::new("undefined".into(), Default::default()))
         }
-        BasicBlockInstruction::BinOp(_name, left, right) => {
+        BasicBlockInstruction::BinOp(op, left, right) => {
             let left = ref_or_inlined_expr(ctx, *left);
             let right = ref_or_inlined_expr(ctx, *right);
 
             Expr::Bin(swc_ecma_ast::BinExpr {
                 span: Default::default(),
-                op: swc_ecma_ast::BinaryOp::Add, /* major TODO lol */
+                op: op.clone(),
                 left: Box::new(left),
                 right: Box::new(right),
             })
@@ -612,7 +612,7 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var a = 10;
         try {
-            if (a + 10) {
+            if (a > 10) {
                 throw 123;
             } else {}
         } catch (b) {
@@ -627,7 +627,7 @@ mod tests {
         let block_group = test_basic_blocks_module(
             "var x = 10;
             try {
-                if (x > 10) { // TODO: non-`+` operator
+                if (x > 10) {
                     throw 123;
                 }
             } catch (e) {
@@ -644,7 +644,7 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var a = 10;
         try {
-            if (a + 10) {
+            if (a > 10) {
                 throw 123;
             } else {}
         } catch (b) {

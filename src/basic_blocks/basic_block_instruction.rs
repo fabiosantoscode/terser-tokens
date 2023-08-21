@@ -4,7 +4,7 @@ use super::FunctionId;
 pub enum BasicBlockInstruction {
     LitNumber(f64),
     Ref(usize),
-    BinOp(String, usize, usize),
+    BinOp(swc_ecma_ast::BinaryOp, usize, usize),
     Undefined,
     This,
     CaughtError,
