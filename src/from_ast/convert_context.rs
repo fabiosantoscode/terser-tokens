@@ -20,7 +20,7 @@ pub struct FromAstCtx {
     pub scope_tree: ScopeTree<NonLocalOrLocal>,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,
-    function_index: FunctionId,
+    pub function_index: FunctionId,
     pub functions: BTreeMap<FunctionId, BasicBlockGroup>,
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
@@ -167,7 +167,8 @@ impl FromAstCtx {
             }
         }
 
-        let (exits, basic_blocks) = normalize_basic_blocks(&exits, &self.basic_blocks);
+        let basic_blocks = std::mem::replace(&mut self.basic_blocks, vec![]);
+        let (exits, basic_blocks) = normalize_basic_blocks(exits, basic_blocks);
 
         self.basic_blocks = vec![];
         self.exits = vec![];

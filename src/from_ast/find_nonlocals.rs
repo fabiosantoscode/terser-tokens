@@ -266,13 +266,16 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
 fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
     match exp {
         // WRITES
-        Expr::Assign(assign) => match &assign.left {
-            PatOrExpr::Pat(e) => match e.as_ref() {
-                Pat::Ident(ident) => ctx.read_name(ident.id.sym.to_string()),
+        Expr::Assign(assign) => {
+            match &assign.left {
+                PatOrExpr::Pat(e) => match e.as_ref() {
+                    Pat::Ident(ident) => ctx.read_name(ident.id.sym.to_string()),
+                    _ => todo!(),
+                },
                 _ => todo!(),
-            },
-            _ => todo!(),
-        },
+            };
+            expr_nonlocals(ctx, &assign.right)
+        }
         // READS
         Expr::Ident(ident) => {
             ctx.read_name(ident.sym.to_string());

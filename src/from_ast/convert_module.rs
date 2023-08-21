@@ -142,22 +142,22 @@ mod tests {
                 filename: "index.js",
             },
             top_level_stats: @0: {
-                $6 = FunctionId(1)
+                $0 = FunctionId(1)
                 $7 = undefined
                 exit = return $7
             },
             functions: [
                 function():
                 @0: {
-                    $2 = FunctionId(2)
-                    $3 = $2
-                    $4 = call $3()
-                    exit = return $4
+                    $1 = FunctionId(2)
+                    $4 = $1
+                    $5 = call $4()
+                    exit = return $5
                 },
                 function():
                 @0: {
-                    $0 = 2
-                    exit = return $0
+                    $2 = 2
+                    exit = return $2
                 },
             ],
         }
@@ -181,20 +181,20 @@ mod tests {
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $0 = undefined
-            $2 = write_non_local $$1 $0
-            $3 = 1
-            $4 = write_non_local $$1 $3
-            $8 = FunctionId(2)
-            exit = return $8
+            $1 = undefined
+            $3 = write_non_local $$2 $1
+            $4 = 1
+            $5 = write_non_local $$2 $4
+            $6 = FunctionId(2)
+            exit = return $6
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(2)).unwrap(), @r###"
         function():
         @0: {
-            $5 = read_non_local $$1
-            $6 = $5
-            exit = return $6
+            $7 = read_non_local $$2
+            $8 = $7
+            exit = return $8
         }
         "###);
     }
@@ -215,20 +215,24 @@ mod tests {
             $2 = write_non_local $$1 $0
             $3 = 1
             $4 = write_non_local $$1 $3
-            $10 = FunctionId(1)
-            $11 = undefined
-            exit = return $11
+            $5 = undefined
+            $7 = write_non_local $$6 $5
+            $8 = FunctionId(1)
+            $9 = write_non_local $$6 $8
+            $16 = undefined
+            exit = return $16
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $5 = read_non_local $$1
-            $6 = 9
-            $7 = write_non_local $$1 $6
-            $8 = $6
-            $9 = undefined
-            exit = return $9
+            $10 = read_non_local $$6
+            $11 = read_non_local $$1
+            $12 = 9
+            $13 = write_non_local $$1 $12
+            $14 = $12
+            $15 = undefined
+            exit = return $15
         }
         "###);
     }
@@ -252,34 +256,46 @@ mod tests {
         insta::assert_debug_snapshot!(module.functions, @r###"
         {
             FunctionId(0): @0: {
-                $8 = FunctionId(1)
-                $11 = FunctionId(3)
-                $12 = $8
-                $13 = call $12()
-                $14 = $11
-                $15 = call $14()
-                $16 = $13 + $15
-                $17 = undefined
-                exit = return $17
+                $0 = undefined
+                $2 = write_non_local $$1 $0
+                $3 = FunctionId(1)
+                $4 = write_non_local $$1 $3
+                $19 = undefined
+                $21 = write_non_local $$20 $19
+                $22 = FunctionId(3)
+                $23 = write_non_local $$20 $22
+                $27 = $3
+                $28 = call $27()
+                $29 = $22
+                $30 = call $29()
+                $31 = $28 + $30
+                $32 = undefined
+                exit = return $32
             },
             FunctionId(1): function():
             @0: {
-                $3 = FunctionId(2)
-                $4 = $3
-                $5 = 123
-                $6 = call $4($5)
-                exit = return $6
+                $5 = read_non_local $$1
+                $6 = undefined
+                $8 = write_non_local $$7 $6
+                $9 = FunctionId(2)
+                $10 = write_non_local $$7 $9
+                $15 = $9
+                $16 = 123
+                $17 = call $15($16)
+                exit = return $17
             },
             FunctionId(2): function():
             @0: {
-                $0 = arguments[0]
-                $1 = $0
-                exit = return $1
+                $11 = arguments[0]
+                $12 = read_non_local $$7
+                $13 = $11
+                exit = return $13
             },
             FunctionId(3): function():
             @0: {
-                $9 = 456
-                exit = return $9
+                $24 = read_non_local $$20
+                $25 = 456
+                exit = return $25
             },
         }
         "###);

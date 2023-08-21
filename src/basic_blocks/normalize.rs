@@ -4,13 +4,13 @@ use std::collections::HashSet;
 use crate::basic_blocks::{BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction};
 
 pub fn normalize_basic_blocks(
-    exits: &Vec<BasicBlockExit>,
-    basic_blocks: &Vec<Vec<(usize, BasicBlockInstruction)>>,
+    exits: Vec<BasicBlockExit>,
+    basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
 ) -> (
     Vec<BasicBlockExit>,
     Vec<Vec<(usize, BasicBlockInstruction)>>,
 ) {
-    let jumped_to = get_blocks_jumped_to(exits);
+    let jumped_to = get_blocks_jumped_to(&exits);
 
     // keep track of eliminated block and how labels change around
     let mut eliminated_count = 0;
@@ -19,9 +19,9 @@ pub fn normalize_basic_blocks(
     let out_exits: Vec<BasicBlockExit> = vec![];
     let out_basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>> = vec![];
 
-    let reachable_blocks = get_reachable_blocks(exits, basic_blocks);
+    let reachable_blocks = get_reachable_blocks(&exits, &basic_blocks);
 
-    let (mut out_exits, out_basic_blocks) = exits.iter().zip(basic_blocks.iter()).enumerate().fold(
+    let (mut exits, basic_blocks) = exits.iter().zip(basic_blocks.into_iter()).enumerate().fold(
         (out_exits, out_basic_blocks),
         |(mut out_exits, mut out_basic_blocks), (i, (exit, block))| {
             if !reachable_blocks.contains(&i) {
@@ -30,7 +30,7 @@ pub fn normalize_basic_blocks(
             }
 
             let do_merge = match (out_exits.last(), out_basic_blocks.last()) {
-                prevvy if prevvy == (Some(exit), Some(block)) => true,
+                prevvy if prevvy == (Some(exit), Some(&block)) => true,
                 (Some(BasicBlockExit::Jump(j)), _) if *j == i => {
                     !jumped_to.contains(j)
                         && !jumped_to.contains(&(*j + 1))
@@ -42,13 +42,13 @@ pub fn normalize_basic_blocks(
             match (do_merge, out_exits.last_mut(), out_basic_blocks.last_mut()) {
                 (true, Some(prev_exit), Some(prev_block)) => {
                     *prev_exit = exit.clone();
-                    prev_block.extend(block.clone());
+                    prev_block.extend(block);
 
                     eliminated_count += 1;
                 }
                 _ => {
                     out_exits.push(exit.clone());
-                    out_basic_blocks.push(block.clone());
+                    out_basic_blocks.push(block);
                 }
             };
 
@@ -58,13 +58,13 @@ pub fn normalize_basic_blocks(
     );
 
     // adjust labels for however many blocks were eliminated
-    for exit in out_exits.iter_mut() {
+    for exit in exits.iter_mut() {
         *exit = exit.swap_labels(&swapped_labels);
     }
 
-    assert_eq!(out_exits.len(), out_basic_blocks.len());
+    assert_eq!(exits.len(), basic_blocks.len());
 
-    (out_exits, out_basic_blocks)
+    (exits, basic_blocks)
 }
 
 fn get_blocks_jumped_to(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {

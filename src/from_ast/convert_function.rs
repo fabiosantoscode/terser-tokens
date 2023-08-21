@@ -1,19 +1,47 @@
-use swc_ecma_ast::Pat;
+use swc_ecma_ast::{FnExpr, Pat};
 
 use super::{
     block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, FromAstCtx, FuncBlockOrRetExpr,
     FunctionLike,
 };
-use crate::basic_blocks::{BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId};
+use crate::basic_blocks::{
+    BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId, NonLocalId,
+};
 
 pub fn function_to_basic_blocks(
     ctx: &mut FromAstCtx,
     function: FunctionLike,
-) -> Result<FunctionId, String> {
+) -> Result<usize, String> {
+    // Only a named FnExpr can have two simultaneous bindings. Outside (maybe) and inside.
+    let (outer_varname, inner_varname) = match function {
+        FunctionLike::FnExpr(FnExpr {
+            ident: Some(ident), ..
+        }) => {
+            let undef = ctx.push_instruction(BasicBlockInstruction::Undefined);
+            let non_local_id = NonLocalId(ctx.bump_var_index());
+            ctx.push_instruction(BasicBlockInstruction::WriteNonLocal(non_local_id, undef));
+
+            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(FunctionId(
+                ctx.function_index.0 + 1, // future function name
+            )));
+
+            let write_non_local = BasicBlockInstruction::WriteNonLocal(non_local_id, outer_varname);
+            ctx.push_instruction(write_non_local);
+
+            (outer_varname, Some((ident.sym.to_string(), non_local_id)))
+        }
+        _ => {
+            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(FunctionId(
+                ctx.function_index.0 + 1, // future function name
+            )));
+
+            (outer_varname, None)
+        }
+    };
+
     // count function.length
     let arg_count: usize = function.function_length();
-
-    let group = ctx.go_into_function(arg_count, Some(find_nonlocals(function.clone())), |ctx| {
+    ctx.go_into_function(arg_count, Some(find_nonlocals(function.clone())), |ctx| {
         function
             .get_params()
             .into_iter()
@@ -31,6 +59,12 @@ pub fn function_to_basic_blocks(
                 _ => todo!("non-ident function param"),
             });
 
+        // If this is a named FnExpr, we need another binding here.
+        if let Some((name, nloc)) = inner_varname {
+            let nloc = ctx.push_instruction(BasicBlockInstruction::ReadNonLocal(nloc));
+            ctx.assign_name(&name, nloc);
+        }
+
         match function.get_body() {
             FuncBlockOrRetExpr::Block(block) => block_to_basic_blocks(ctx, &block.stmts)?,
             FuncBlockOrRetExpr::RetExpr(expr) => {
@@ -43,7 +77,7 @@ pub fn function_to_basic_blocks(
         Ok(())
     })?;
 
-    Ok(group.id)
+    Ok(outer_varname)
 }
 
 #[cfg(test)]
@@ -74,12 +108,12 @@ mod tests {
         {
             FunctionId(1): function():
             @0: {
-                $0 = arguments[0]
-                $1 = arguments[1]
-                $2 = $0
+                $1 = arguments[0]
+                $2 = arguments[1]
                 $3 = $1
-                $4 = $2 + $3
-                exit = return $4
+                $4 = $2
+                $5 = $3 + $4
+                exit = return $5
             },
         }
         "###);
@@ -92,10 +126,10 @@ mod tests {
         {
             FunctionId(1): function():
             @0: {
-                $0 = arguments[0]
-                $1 = arguments[1...]
-                $2 = $1
-                exit = return $2
+                $1 = arguments[0]
+                $2 = arguments[1...]
+                $3 = $2
+                exit = return $3
             },
         }
         "###);
@@ -113,19 +147,23 @@ mod tests {
         {
             FunctionId(1): function():
             @0: {
-                $0 = undefined
-                $2 = write_non_local $$1 $0
-                $3 = 1
-                $4 = write_non_local $$1 $3
-                $8 = FunctionId(2)
-                $9 = undefined
-                exit = return $9
+                $1 = undefined
+                $3 = write_non_local $$2 $1
+                $4 = 1
+                $5 = write_non_local $$2 $4
+                $6 = undefined
+                $8 = write_non_local $$7 $6
+                $9 = FunctionId(2)
+                $10 = write_non_local $$7 $9
+                $15 = undefined
+                exit = return $15
             },
             FunctionId(2): function():
             @0: {
-                $5 = read_non_local $$1
-                $6 = $5
-                exit = return $6
+                $11 = read_non_local $$7
+                $12 = read_non_local $$2
+                $13 = $12
+                exit = return $13
             },
         }
         "###);
@@ -142,19 +180,23 @@ mod tests {
         {
             FunctionId(1): function():
             @0: {
-                $0 = undefined
-                $2 = write_non_local $$1 $0
-                $3 = arguments[0]
-                $4 = write_non_local $$1 $3
-                $8 = FunctionId(2)
-                $9 = undefined
-                exit = return $9
+                $1 = undefined
+                $3 = write_non_local $$2 $1
+                $4 = arguments[0]
+                $5 = write_non_local $$2 $4
+                $6 = undefined
+                $8 = write_non_local $$7 $6
+                $9 = FunctionId(2)
+                $10 = write_non_local $$7 $9
+                $15 = undefined
+                exit = return $15
             },
             FunctionId(2): function():
             @0: {
-                $5 = read_non_local $$1
-                $6 = $5
-                exit = return $6
+                $11 = read_non_local $$7
+                $12 = read_non_local $$2
+                $13 = $12
+                exit = return $13
             },
         }
         "###);
@@ -178,36 +220,48 @@ mod tests {
         {
             FunctionId(1): function():
             @0: {
-                $0 = undefined
-                $2 = write_non_local $$1 $0
-                $3 = 1
-                $4 = write_non_local $$1 $3
-                $8 = FunctionId(2)
-                $19 = FunctionId(3)
-                $20 = undefined
-                exit = return $20
+                $1 = undefined
+                $3 = write_non_local $$2 $1
+                $4 = 1
+                $5 = write_non_local $$2 $4
+                $6 = undefined
+                $8 = write_non_local $$7 $6
+                $9 = FunctionId(2)
+                $10 = write_non_local $$7 $9
+                $15 = undefined
+                $17 = write_non_local $$16 $15
+                $18 = FunctionId(3)
+                $19 = write_non_local $$16 $18
+                $36 = undefined
+                exit = return $36
             },
             FunctionId(2): function():
             @0: {
-                $5 = read_non_local $$1
-                $6 = $5
-                exit = return $6
+                $11 = read_non_local $$7
+                $12 = read_non_local $$2
+                $13 = $12
+                exit = return $13
             },
             FunctionId(3): function():
             @0: {
-                $9 = undefined
-                $11 = write_non_local $$10 $9
-                $12 = 2
-                $13 = write_non_local $$10 $12
-                $17 = FunctionId(4)
-                $18 = undefined
-                exit = return $18
+                $20 = undefined
+                $22 = write_non_local $$21 $20
+                $23 = read_non_local $$16
+                $24 = 2
+                $25 = write_non_local $$21 $24
+                $26 = undefined
+                $28 = write_non_local $$27 $26
+                $29 = FunctionId(4)
+                $30 = write_non_local $$27 $29
+                $35 = undefined
+                exit = return $35
             },
             FunctionId(4): function():
             @0: {
-                $14 = read_non_local $$10
-                $15 = $14
-                exit = return $15
+                $31 = read_non_local $$27
+                $32 = read_non_local $$21
+                $33 = $32
+                exit = return $33
             },
         }
         "###);
@@ -228,21 +282,25 @@ mod tests {
         {
             FunctionId(1): function():
             @0: {
-                $0 = undefined
-                $2 = write_non_local $$1 $0
-                $3 = read_non_local $$1
-                $4 = $3
-                $5 = 999
-                $6 = write_non_local $$1 $5
-                $10 = FunctionId(2)
-                $11 = undefined
-                exit = return $11
+                $1 = undefined
+                $3 = write_non_local $$2 $1
+                $4 = read_non_local $$2
+                $5 = $4
+                $6 = 999
+                $7 = write_non_local $$2 $6
+                $8 = undefined
+                $10 = write_non_local $$9 $8
+                $11 = FunctionId(2)
+                $12 = write_non_local $$9 $11
+                $17 = undefined
+                exit = return $17
             },
             FunctionId(2): function():
             @0: {
-                $7 = read_non_local $$1
-                $8 = $7
-                exit = return $8
+                $13 = read_non_local $$9
+                $14 = read_non_local $$2
+                $15 = $14
+                exit = return $15
             },
         }
         "###);

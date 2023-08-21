@@ -37,7 +37,7 @@ where
 
     for (varname, fn_decl) in fn_decls.iter() {
         let func_id = function_to_basic_blocks(ctx, FunctionLike::FnDecl(fn_decl))?;
-        ctx.arbitrarily_set_id(*varname, BasicBlockInstruction::Function(func_id));
+        ctx.arbitrarily_set_id(*varname, BasicBlockInstruction::Ref(func_id));
     }
 
     for stat in non_fn_decls {

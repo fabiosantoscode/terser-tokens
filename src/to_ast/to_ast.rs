@@ -495,13 +495,22 @@ mod tests {
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function() {
-            return function() {
+        var a = undefined;
+        var d = function() {
+            var b = undefined;
+            var c = function() {
                 return arguments[0];
-            }(123);
-        }() + function() {
+            };
+            b = c;
+            return c(123);
+        };
+        a = d;
+        var e = undefined;
+        var f = function() {
             return 456;
-        }();
+        };
+        e = f;
+        d() + f();
         return undefined;
         "###);
     }
@@ -517,9 +526,12 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var a = undefined;
         a = 1;
-        return function() {
+        var b = undefined;
+        var c = function() {
             return a;
         };
+        b = c;
+        return c;
         "###);
     }
 
@@ -534,11 +546,14 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var a = undefined;
         a = 1;
-        return function() {
-            var b = a + 1;
-            a = b;
+        var b = undefined;
+        var d = function() {
+            var c = a + 1;
+            a = c;
             return undefined;
         };
+        b = d;
+        return d;
         "###);
     }
 

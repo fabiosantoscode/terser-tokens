@@ -237,13 +237,15 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 }
 
 pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
-    let node = match exp {
-        Expr::Lit(Lit::Num(num)) => BasicBlockInstruction::LitNumber(num.value),
+    match exp {
+        Expr::Lit(Lit::Num(num)) => {
+            return ctx.push_instruction(BasicBlockInstruction::LitNumber(num.value))
+        }
         Expr::Bin(bin) => {
             let l = expr_to_basic_blocks(ctx, &bin.left);
             let r = expr_to_basic_blocks(ctx, &bin.right);
 
-            BasicBlockInstruction::BinOp("+".into(), l, r)
+            return ctx.push_instruction(BasicBlockInstruction::BinOp("+".into(), l, r));
         }
         Expr::Assign(assign) => match &assign.left {
             PatOrExpr::Pat(e) => match e.borrow() {
@@ -254,7 +256,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                     let expr_idx = expr_to_basic_blocks(ctx, &assign.right);
                     ctx.assign_name(&sym, expr_idx);
 
-                    BasicBlockInstruction::Ref(expr_idx)
+                    return ctx.push_instruction(BasicBlockInstruction::Ref(expr_idx));
                 }
                 _ => todo!(),
             },
@@ -301,16 +303,16 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             ctx.wrap_up_block();
 
             // the retval of our ternary is a phi node
-            BasicBlockInstruction::Phi(vec![cons, alt])
+            return ctx.push_instruction(BasicBlockInstruction::Phi(vec![cons, alt]));
         }
         Expr::Ident(ident) => {
             let Some(var_idx) = ctx.read_name(&ident.sym.to_string()) else {
                 todo!("{} not found in scope", ident.sym.to_string())
             };
 
-            BasicBlockInstruction::Ref(var_idx)
+            return ctx.push_instruction(BasicBlockInstruction::Ref(var_idx));
         }
-        Expr::This(_) => BasicBlockInstruction::This,
+        Expr::This(_) => return ctx.push_instruction(BasicBlockInstruction::This),
         Expr::Array(array_lit) => {
             let mut elements = vec![];
 
@@ -326,7 +328,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 elements.push(elem);
             }
 
-            BasicBlockInstruction::Array(elements)
+            return ctx.push_instruction(BasicBlockInstruction::Array(elements));
         }
         Expr::Object(_) => todo!(),
         Expr::Unary(_) => todo!(),
@@ -334,14 +336,12 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Member(_) => todo!(),
         Expr::SuperProp(_) => todo!(),
         Expr::Arrow(arrow_expr) => {
-            let func_id = function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr))
+            return function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr))
                 .expect("todo error handling");
-            BasicBlockInstruction::Function(func_id)
         }
         Expr::Fn(fn_expr) => {
-            let func_id = function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr))
+            return function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr))
                 .expect("todo error handling");
-            BasicBlockInstruction::Function(func_id)
         }
         Expr::Call(call) => {
             // TODO non-expr callees (super, import)
@@ -355,7 +355,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 }
             }
 
-            BasicBlockInstruction::Call(callee, args)
+            return ctx.push_instruction(BasicBlockInstruction::Call(callee, args));
         }
         Expr::New(_) => todo!(),
         Expr::Tpl(_) => todo!(),
@@ -374,12 +374,12 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 None => ctx.current_block_index(),
             };
 
-            BasicBlockInstruction::TempExit(typ, arg)
+            return ctx.push_instruction(BasicBlockInstruction::TempExit(typ, arg));
         }
         Expr::Await(AwaitExpr { arg, .. }) => {
             let arg = expr_to_basic_blocks(ctx, arg);
 
-            BasicBlockInstruction::TempExit(TempExitType::Await, arg)
+            return ctx.push_instruction(BasicBlockInstruction::TempExit(TempExitType::Await, arg));
         }
         Expr::OptChain(_) => todo!(),
         Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
@@ -399,8 +399,6 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
         }
     };
-
-    ctx.push_instruction(node)
 }
 
 #[cfg(test)]
