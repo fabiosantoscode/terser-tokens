@@ -147,7 +147,7 @@ impl FromAstCtx {
         self.exports.push(export);
     }
 
-    pub(crate) fn wrap_up_blocks(&mut self) -> (FunctionId, Vec<(usize, BasicBlock)>) {
+    pub(crate) fn wrap_up_blocks(&mut self) -> (FunctionId, Vec<BasicBlock>) {
         let exit_count = self.exits.len();
         let mut exits = vec![];
 
@@ -177,7 +177,6 @@ impl FromAstCtx {
             .into_iter()
             .zip(basic_blocks.into_iter())
             .map(|(exit, block)| BasicBlock::new(block, exit))
-            .enumerate()
             .collect::<Vec<_>>();
 
         (

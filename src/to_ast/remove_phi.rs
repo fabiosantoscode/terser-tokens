@@ -9,7 +9,7 @@ use crate::basic_blocks::{BasicBlock, BasicBlockGroup, BasicBlockInstruction};
 pub fn remove_phi(group: &mut BasicBlockGroup) {
     let mut phies_to_final_name: HashMap<usize, usize> = collect_phi(group);
 
-    for (_, block) in group.blocks.iter_mut() {
+    for block in group.blocks.iter_mut() {
         remove_phi_inner(block, &mut phies_to_final_name);
     }
 }
@@ -90,7 +90,7 @@ mod tests {
             }
             @1: {
                 $1 = 1
-                exit = cond $1 ? jump @2 : jump @3
+                exit = cond $1 ? @2..@3 : @3..@4
             }
             @2: {
                 $2 = 2
@@ -120,7 +120,7 @@ mod tests {
         }
         @1: {
             $1 = 1
-            exit = cond $1 ? jump @2 : jump @3
+            exit = cond $1 ? @2..@3 : @3..@4
         }
         @2: {
             $5 = 2

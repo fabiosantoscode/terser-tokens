@@ -64,6 +64,8 @@ fn run_code_for_logs(
     );
     let code = v8::String::new(scope, &code)?;
     let script = v8::Script::compile(scope, code, None)?;
+
+    println!("running code: {}", s);
     let result = script.run(scope)?;
 
     Some(result.to_string(scope)?.to_rust_string_lossy(scope))

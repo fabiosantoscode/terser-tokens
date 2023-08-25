@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use swc_ecma_ast::{
     ArrayLit, AssignExpr, AssignOp, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee,
-    ComputedPropName, Decl, Expr, ExprOrSpread, ExprStmt, FnExpr, Function, Ident, Lit, MemberExpr,
-    MemberProp, Module, ModuleItem, Pat, PatOrExpr, ReturnStmt, Stmt, ThrowStmt, YieldExpr,
+    ComputedPropName, ContinueStmt, Decl, Expr, ExprOrSpread, ExprStmt, FnExpr, Function, Ident,
+    Lit, MemberExpr, MemberProp, Module, ModuleItem, Pat, PatOrExpr, ReturnStmt, Stmt, ThrowStmt,
+    TryStmt, WhileStmt, YieldExpr,
 };
 
 use crate::{
@@ -54,6 +55,8 @@ fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
         variable_use_count,
         emitted_vars: BTreeMap::new(),
         gen_var_index: Base54::new(0),
+        breakable_stack: vec![],
+        gen_label_index: Base54::new(0),
     };
 
     let tree = do_tree(&block_module.top_level_stats());
@@ -74,9 +77,9 @@ fn to_statements(
     };
 
     match node {
-        StructuredFlow::Block(_, stats) => to_stat_vec(ctx, stats),
+        StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(block_idx) => {
-            let stats = &block_group.blocks[*block_idx].1.instructions;
+            let stats = &block_group.blocks[*block_idx].instructions;
 
             stats
                 .iter()
@@ -99,80 +102,89 @@ fn to_statements(
 
             vec![throw_stmt]
         }
-        StructuredFlow::Branch(_, branch_expr, cons, alt) => {
-            let branch_expr = ref_or_inlined_expr(ctx, *branch_expr);
-            let cons = to_stat_vec(ctx, cons);
-            let alt = to_stat_vec(ctx, alt);
+        StructuredFlow::Branch(brk_id, branch_expr, cons, alt) => {
+            let if_stmt = ctx.enter_breakable(brk_id, false, |ctx| {
+                let branch_expr = ref_or_inlined_expr(ctx, *branch_expr);
+                let cons = to_stat_vec(ctx, cons);
+                let alt = to_stat_vec(ctx, alt);
 
-            let if_stmt = Stmt::If(swc_ecma_ast::IfStmt {
-                span: Default::default(),
-                test: Box::new(branch_expr),
-                cons: Box::new(get_block(cons)),
-                alt: Some(Box::new(get_block(alt))),
+                Stmt::If(swc_ecma_ast::IfStmt {
+                    span: Default::default(),
+                    test: Box::new(branch_expr),
+                    cons: Box::new(get_block(cons)),
+                    alt: Some(Box::new(get_block(alt))),
+                })
             });
 
             vec![if_stmt]
         }
-        StructuredFlow::Break(_to_id) => {
+        StructuredFlow::Break(brk_id) => {
             let break_stmt = Stmt::Break(swc_ecma_ast::BreakStmt {
                 span: Default::default(),
-                label: None, /* TODO */
+                label: ctx
+                    .break_label_for(brk_id)
+                    .map(|l| Ident::new(l.to_string().into(), Default::default())),
             });
 
             vec![break_stmt]
         }
-        StructuredFlow::Continue(_to_id) => {
-            let break_stmt = Stmt::Continue(swc_ecma_ast::ContinueStmt {
+        StructuredFlow::Continue(brk_id) => {
+            let break_stmt = Stmt::Continue(ContinueStmt {
                 span: Default::default(),
-                label: None, /* TODO */
+                label: ctx
+                    .break_label_for(brk_id)
+                    .map(|l| Ident::new(l.to_string().into(), Default::default())),
             });
 
             vec![break_stmt]
         }
-        StructuredFlow::Loop(_id, body) => {
-            let body = to_stat_vec(ctx, body);
+        StructuredFlow::Loop(brk_id, body) => {
+            let while_stmt = ctx.enter_breakable(brk_id, true, |ctx| {
+                let body = to_stat_vec(ctx, body);
 
-            let while_stmt = Stmt::While(swc_ecma_ast::WhileStmt {
-                span: Default::default(),
-                test: Box::new(Expr::Lit(true.into())),
-                body: Box::new(get_block(body)),
+                Stmt::While(WhileStmt {
+                    span: Default::default(),
+                    test: Box::new(Expr::Lit(true.into())),
+                    body: Box::new(get_block(body)),
+                })
             });
 
             vec![while_stmt]
         }
-        StructuredFlow::TryCatch(_id, try_block, catch_block, finally_block, after_block) => {
-            let try_block = to_stat_vec(ctx, try_block);
+        StructuredFlow::TryCatch(brk_id, try_block, catch_block, finally_block) => {
+            let try_stmt = ctx.enter_breakable(brk_id, true, |ctx| {
+                let try_block = to_stat_vec(ctx, try_block);
 
-            let catch_handler = ctx.set_caught_error();
-            let catch_block = to_stat_vec(ctx, catch_block);
+                let catch_handler = ctx.set_caught_error();
+                let catch_block = to_stat_vec(ctx, catch_block);
 
-            let finally_block = to_stat_vec(ctx, finally_block);
-            let after_block = to_stat_vec(ctx, after_block);
+                let finally_block = to_stat_vec(ctx, finally_block);
 
-            let try_catch_stmt = Stmt::Try(Box::new(swc_ecma_ast::TryStmt {
-                span: Default::default(),
-                block: BlockStmt {
+                Stmt::Try(Box::new(TryStmt {
                     span: Default::default(),
-                    stmts: try_block,
-                },
-                handler: Some(swc_ecma_ast::CatchClause {
-                    span: Default::default(),
-                    param: Some(get_binding_identifier(&catch_handler)),
-                    body: BlockStmt {
+                    block: BlockStmt {
                         span: Default::default(),
-                        stmts: catch_block,
+                        stmts: try_block,
                     },
-                }),
-                finalizer: match finally_block.len() {
-                    0 => None,
-                    _ => Some(BlockStmt {
+                    handler: Some(swc_ecma_ast::CatchClause {
                         span: Default::default(),
-                        stmts: finally_block,
+                        param: Some(get_binding_identifier(&catch_handler)),
+                        body: BlockStmt {
+                            span: Default::default(),
+                            stmts: catch_block,
+                        },
                     }),
-                },
-            }));
+                    finalizer: match finally_block.len() {
+                        0 => None,
+                        _ => Some(BlockStmt {
+                            span: Default::default(),
+                            stmts: finally_block,
+                        }),
+                    },
+                }))
+            });
 
-            vec![vec![try_catch_stmt], after_block].concat()
+            vec![try_stmt]
         }
         _ => {
             todo!("to_stat: {:?}", node)
@@ -565,12 +577,88 @@ mod tests {
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         while(true){
             if (123) {
-                if (456) {} else {
-                    continue;
-                }
-            } else {}
-            return undefined;
+                if (456) {
+                    break;
+                } else {}
+                continue;
+            } else {
+                break;
+            }
         }
+        return undefined;
+        "###);
+    }
+
+    #[test]
+    fn to_loop_nested() {
+        let block_group = test_basic_blocks_module(
+            "while (123) {
+                if (456) { break; }
+                while (789) { if (1234) { break; } }
+            }",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        while(true){
+            if (123) {
+                if (456) {
+                    break;
+                } else {}
+                while(true){
+                    if (789) {
+                        if (1234) {
+                            break;
+                        } else {}
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            } else {
+                break;
+            }
+        }
+        return undefined;
+        "###);
+    }
+
+    #[test]
+    fn to_loop_nested_labelled() {
+        let block_group = test_basic_blocks_module(
+            "a: while (123) {
+                if (456) { break a; }
+                b: while (789) {
+                    if (1234) { break a; } else { break b; }
+                }
+            }",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        a: while(true){
+            if (123) {
+                if (456) {
+                    break;
+                } else {}
+                while(true){
+                    if (789) {
+                        if (1234) {
+                            break a;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            } else {
+                break;
+            }
+        }
+        return undefined;
         "###);
     }
 

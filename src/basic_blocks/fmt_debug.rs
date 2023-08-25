@@ -101,11 +101,24 @@ impl Debug for BasicBlockInstruction {
 impl Debug for BasicBlockExit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            BasicBlockExit::Cond(cond, cons, alt) => {
-                write!(f, "cond ${} ? jump @{} : jump @{}", cond, cons, alt)
+            BasicBlockExit::Cond(cond, cons, cons_end, alt, alt_end) => {
+                write!(
+                    f,
+                    "cond ${} ? @{}..@{} : @{}..@{}",
+                    cond, cons, cons_end, alt, alt_end
+                )
+            }
+            BasicBlockExit::Loop(start, end) => {
+                write!(f, "loop @{}..@{}", start, end)
             }
             BasicBlockExit::Jump(to) => {
                 write!(f, "jump @{}", to)
+            }
+            BasicBlockExit::Break(to) => {
+                write!(f, "break @{}", to)
+            }
+            BasicBlockExit::Continue(to) => {
+                write!(f, "continue @{}", to)
             }
             BasicBlockExit::ExitFn(exit_type, val) => match exit_type {
                 ExitType::Return => {
@@ -189,11 +202,11 @@ impl Debug for BasicBlockGroup {
             BasicBlockEnvironmentType::Module => {}
             BasicBlockEnvironmentType::Function(_argc) => writeln!(f, "function():")?,
         }
-        for (i, (k, v)) in self.iter().enumerate() {
+        for (i, v) in self.iter().enumerate() {
             if i > 0 {
                 write!(f, "\n")?;
             }
-            write!(f, "@{}: {:?}", k, v)?;
+            write!(f, "@{}: {:?}", i, v)?;
         }
         Ok(())
     }

@@ -5,6 +5,8 @@ use crate::{
     to_ast::Base54,
 };
 
+use super::BreakableId;
+
 #[derive(Debug)]
 pub struct ToAstContext<'a> {
     pub caught_error: Option<Base54>,
@@ -13,6 +15,18 @@ pub struct ToAstContext<'a> {
     pub variable_use_count: BTreeMap<usize, u32>,
     pub emitted_vars: BTreeMap<usize, Base54>,
     pub gen_var_index: Base54,
+
+    /// break/continue - tracking
+    pub breakable_stack: Vec<BreakableStackItem>,
+    pub gen_label_index: Base54,
+}
+
+#[derive(Debug)]
+pub struct BreakableStackItem {
+    brk_id: BreakableId,
+    label: Option<Base54>,
+    /// loop and switch don't need labels
+    is_anonymous: bool,
 }
 
 impl ToAstContext<'_> {
@@ -55,5 +69,58 @@ impl ToAstContext<'_> {
         self.gen_var_index = gen.next();
         self.emitted_vars.insert(var_idx, gen);
         gen.to_string()
+    }
+
+    pub(crate) fn enter_breakable(
+        &mut self,
+        brk_id: &BreakableId,
+        is_anonymous: bool,
+        in_breakable: impl Fn(&mut ToAstContext<'_>) -> swc_ecma_ast::Stmt,
+    ) -> swc_ecma_ast::Stmt {
+        self.breakable_stack.push(BreakableStackItem {
+            brk_id: brk_id.clone(),
+            label: None,
+            is_anonymous,
+        });
+        let stmt = in_breakable(self);
+        let collected = self.breakable_stack.pop().unwrap();
+
+        if let Some(label) = collected.label {
+            swc_ecma_ast::Stmt::Labeled(swc_ecma_ast::LabeledStmt {
+                label: swc_ecma_ast::Ident::new(label.to_string().into(), Default::default()),
+                body: Box::new(stmt),
+                span: Default::default(),
+            })
+        } else {
+            stmt
+        }
+    }
+
+    pub(crate) fn break_label_for(&mut self, brk_id: &BreakableId) -> Option<Base54> {
+        let closest_anonymous = self.breakable_stack.iter().rev().find_map(|b| {
+            if b.is_anonymous {
+                Some(b.brk_id)
+            } else {
+                None
+            }
+        });
+
+        let ref mut target = self
+            .breakable_stack
+            .iter_mut()
+            .rev()
+            .find_map(|b| if b.brk_id == *brk_id { Some(b) } else { None })
+            .expect("breakable id must be in breakable stack");
+
+        if closest_anonymous == Some(*brk_id) {
+            None // no label needed
+        } else if let Some(label) = target.label {
+            Some(label)
+        } else {
+            let new_label = Some(self.gen_label_index);
+            self.gen_label_index = self.gen_label_index.next();
+            target.label = new_label;
+            new_label
+        }
     }
 }

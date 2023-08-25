@@ -19,7 +19,7 @@ impl BasicBlockModule {
 impl BasicBlockGroup {
     pub fn iter_all_instructions<'a>(&'a self) -> BasicBlockGroupInstructionIterator<'a> {
         BasicBlockGroupInstructionIterator {
-            block_iter: CurIterator::from_iterator(self.blocks.iter()),
+            block_iter: CurIterator::from_iterator(self.blocks.iter().enumerate()),
             instruction_iter: None,
         }
     }
@@ -54,7 +54,10 @@ where
 }
 
 pub struct BasicBlockGroupInstructionIterator<'a> {
-    block_iter: CurIterator<&'a (usize, BasicBlock), std::slice::Iter<'a, (usize, BasicBlock)>>,
+    block_iter: CurIterator<
+        (usize, &'a BasicBlock),
+        core::iter::Enumerate<core::slice::Iter<'a, BasicBlock>>,
+    >,
     instruction_iter: Option<std::slice::Iter<'a, (usize, BasicBlockInstruction)>>,
 }
 
@@ -65,10 +68,10 @@ impl<'a> Iterator for BasicBlockGroupInstructionIterator<'a> {
         let ((block_index, _), (ins_id, instruction)) = nested_iter_advance(
             &mut self.block_iter,
             &mut self.instruction_iter,
-            &mut |(_, current_block): &(usize, BasicBlock)| current_block.instructions.iter(),
+            &mut |(_, current_block): (usize, &BasicBlock)| current_block.instructions.iter(),
         )?;
 
-        Some((*block_index, *ins_id, instruction))
+        Some((block_index, *ins_id, instruction))
     }
 }
 
@@ -77,7 +80,7 @@ pub struct ModuleBlockIterator<'a> {
         (&'a FunctionId, &'a BasicBlockGroup),
         std::collections::btree_map::Iter<'a, FunctionId, BasicBlockGroup>,
     >,
-    block_iter: Option<std::slice::Iter<'a, (usize, BasicBlock)>>,
+    block_iter: Option<core::iter::Enumerate<core::slice::Iter<'a, BasicBlock>>>,
 }
 
 impl<'a> Iterator for ModuleBlockIterator<'a> {
@@ -88,11 +91,11 @@ impl<'a> Iterator for ModuleBlockIterator<'a> {
             &mut self.blockgroup_iter,
             &mut self.block_iter,
             &mut |(_, current_blockgroup): (&FunctionId, &BasicBlockGroup)| {
-                current_blockgroup.blocks.iter()
+                current_blockgroup.blocks.iter().enumerate()
             },
         )?;
 
-        Some((*function_id, *block_id, block))
+        Some((*function_id, block_id, block))
     }
 }
 

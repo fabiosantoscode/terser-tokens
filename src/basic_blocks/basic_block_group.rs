@@ -3,7 +3,7 @@ use super::{BasicBlock, FunctionId, NonLocalId};
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
     pub id: FunctionId,
-    pub blocks: Vec<(usize, BasicBlock)>,
+    pub blocks: Vec<BasicBlock>,
     pub environment: BasicBlockEnvironment,
 }
 
@@ -24,12 +24,12 @@ pub enum BasicBlockEnvironmentType {
 impl BasicBlockGroup {
     pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {
         Self {
-            blocks: blocks.into_iter().enumerate().collect(),
+            blocks,
             ..Default::default()
         }
     }
 
-    pub fn iter<'a>(&'a self) -> core::slice::Iter<'_, (usize, BasicBlock)> {
+    pub fn iter<'a>(&'a self) -> core::slice::Iter<'_, BasicBlock> {
         self.blocks.iter()
     }
 }

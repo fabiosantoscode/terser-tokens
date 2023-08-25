@@ -97,10 +97,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             };
             let input = whitespace!(input);
             let (input, right) = parse_ref(input)?;
-            Ok((
-                input,
-                BasicBlockInstruction::BinOp(op, left, right),
-            ))
+            Ok((input, BasicBlockInstruction::BinOp(op, left, right)))
         }
 
         fn ins_call(input: &str) -> IResult<&str, BasicBlockInstruction> {
@@ -244,6 +241,20 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         Ok((input, (var_name, instruction)))
     }
 
+    fn parse_blockref_range(input: &str) -> IResult<&str, (usize, usize)> {
+        // @123..@456
+
+        let input = whitespace!(input);
+        let (input, start) = parse_blockref(input)?;
+        let input = whitespace!(input);
+        let (input, _) = tag("..")(input)?;
+        let input = whitespace!(input);
+        let (input, end) = parse_blockref(input)?;
+        let input = whitespace!(input);
+
+        Ok((input, (start, end)))
+    }
+
     fn parse_basic_block_exit(input: &str) -> IResult<&str, BasicBlockExit> {
         // exit = jump @123
 
@@ -255,7 +266,10 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
 
         let (input, word) = alt((
             tag("jump"),
+            tag("break"),
+            tag("continue"),
             tag("cond"),
+            tag("loop"),
             tag("return"),
             tag("try"),
             tag("error"),
@@ -274,25 +288,38 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
                 let (input, ref_) = parse_blockref(input)?;
                 (input, BasicBlockExit::Jump(ref_))
             }
+            "break" => {
+                let (input, ref_) = parse_blockref(input)?;
+                (input, BasicBlockExit::Break(ref_))
+            }
+            "continue" => {
+                let (input, ref_) = parse_blockref(input)?;
+                (input, BasicBlockExit::Continue(ref_))
+            }
             "cond" => {
-                // cond {ref} ? jump @123 : jump @456
+                // cond {ref} ? @1..@2 : @3..@4
                 let (input, condition) = parse_ref(input)?;
                 let input = whitespace!(input);
                 let (input, _) = tag("?")(input)?;
                 let input = whitespace!(input);
-                let (input, _) = tag("jump")(input)?;
-                let input = whitespace!(input);
-                let (input, consequent) = parse_blockref(input)?;
+                let (input, cons) = parse_blockref_range(input)?;
                 let input = whitespace!(input);
                 let (input, _) = tag(":")(input)?;
                 let input = whitespace!(input);
-                let (input, _) = tag("jump")(input)?;
+                let (input, alt) = parse_blockref_range(input)?;
                 let input = whitespace!(input);
-                let (input, alternate) = parse_blockref(input)?;
+
                 (
                     input,
-                    BasicBlockExit::Cond(condition, consequent, alternate),
+                    BasicBlockExit::Cond(condition, cons.0, cons.1, alt.0, alt.1),
                 )
+            }
+            "loop" => {
+                // loop @123..@456
+                let (input, (loop_start, loop_end)) = parse_blockref_range(input)?;
+                let input = whitespace!(input);
+
+                (input, BasicBlockExit::Loop(loop_start, loop_end))
             }
             "try" => {
                 // try @123 catch @456 finally @789 after @101112
@@ -455,14 +482,14 @@ mod tests {
                 exit = jump @1
             }
             @1: {
-                exit = cond $0 ? jump @2 : jump @7
+                exit = cond $0 ? @2..@4 : @7..@8
             }
             @2: {
                 $1 = 888
                 exit = jump @3
             }
             @3: {
-                exit = cond $1 ? jump @4 : jump @5
+                exit = cond $1 ? @4..@4 : @5..@8
             }
             @4: {
                 exit = jump @7
@@ -502,14 +529,14 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            exit = cond $0 ? jump @2 : jump @7
+            exit = cond $0 ? @2..@4 : @7..@8
         }
         @2: {
             $1 = 888
             exit = jump @3
         }
         @3: {
-            exit = cond $1 ? jump @4 : jump @5
+            exit = cond $1 ? @4..@4 : @5..@8
         }
         @4: {
             exit = jump @7
