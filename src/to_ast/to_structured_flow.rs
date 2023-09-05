@@ -1,133 +1,84 @@
 use std::cell::RefCell;
-use std::collections::HashSet;
-use std::fmt::{Debug, Formatter};
-use std::ops::RangeInclusive;
-use std::rc::Rc;
+use std::fmt::Debug;
 
-use deep_bind::contextual;
-
-use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup, ExitType};
-
-// https://dl.acm.org/doi/pdf/10.1145/3547621
-// This paper really unlocked this project.
-// It explains how one can turn basic blocks into a structured AST.
-// It's focused on WASM, but I've heard JS also has "if", "break" and "loops"
-// So it's probably helpful here too!
-//
-// What follows is a translation of this paper into Rust.
+use super::{BreakableId, StructuredFlow};
+use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
-pub struct BreakableId(pub Option<usize>);
-
-impl std::fmt::Display for BreakableId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(brk) = self.0 {
-            write!(f, "#{}", brk)?;
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-pub enum StructuredFlow {
-    Block(Vec<StructuredFlow>),
-    Loop(BreakableId, Vec<StructuredFlow>),
-    Branch(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
-    TryCatch(
-        BreakableId,
-        Vec<StructuredFlow>,
-        Vec<StructuredFlow>,
-        Vec<StructuredFlow>,
-    ),
-    Break(BreakableId),
-    Continue(BreakableId),
-    Return(ExitType, Option<usize>),
-    BasicBlock(usize),
-}
+pub struct BreakAndRange(pub BreakableId, pub usize, pub usize);
 
 struct Ctx {
-    pub containing_syntax: RefCell<Vec<(BreakableId, RangeInclusive<usize>, bool)>>,
+    containing_syntax: RefCell<Vec<BreakAndRange>>,
+    last_breakable_id: usize,
 }
 
 impl Ctx {
     pub fn new() -> Self {
         Ctx {
             containing_syntax: Default::default(),
+            last_breakable_id: 1,
         }
     }
 
-    pub fn push_within<T, Fnc>(
-        &self,
-        syn: BreakableId,
-        range: RangeInclusive<usize>,
-        is_loop: bool,
-        func: Fnc,
-    ) -> T
+    pub fn push_within<T, Fnc>(&mut self, syn: BreakAndRange, func: Fnc) -> T
     where
-        Fnc: FnOnce() -> T,
+        Fnc: FnOnce(&mut Ctx) -> T,
     {
-        self.containing_syntax
-            .borrow_mut()
-            .push((syn, range, is_loop));
-        let ret = func();
+        self.containing_syntax.borrow_mut().push(syn);
+        let ret = func(self);
         self.containing_syntax.borrow_mut().pop();
         ret
     }
 
-    ///
+    /// Given a break target, find the enclosing loop or labelled block
     pub fn break_index(&self, target: usize) -> BreakableId {
         let containing_syntax = self.containing_syntax.borrow();
 
         let brk_id = containing_syntax
             .iter()
-            .find_map(|(item, range, _is_loop)| {
-                if range.end() + 1 == target {
-                    Some(item)
-                } else {
-                    None
-                }
-            })
+            .find_map(
+                |BreakAndRange(item, _start, end)| {
+                    if end + 1 == target {
+                        Some(item)
+                    } else {
+                        None
+                    }
+                },
+            )
             .expect(&format!("break @{target} without matching to a container"));
 
         *brk_id
     }
 
-    ///
+    /// Given a continue target, find the enclosing loop
     pub fn continue_index(&self, target: usize) -> BreakableId {
         let containing_syntax = self.containing_syntax.borrow();
 
         let brk_id = containing_syntax
             .iter()
-            .find_map(|(item, range, _is_loop)| {
-                if *range.start() == target {
-                    Some(item)
-                } else {
-                    None
-                }
-            })
+            .find_map(
+                |BreakAndRange(item, start, _end)| {
+                    if *start == target {
+                        Some(item)
+                    } else {
+                        None
+                    }
+                },
+            )
             .expect(&format!("break @{target} without matching to a container"));
 
         *brk_id
     }
-}
 
-contextual!(Context(CONTEXT_2): Option<Rc<Ctx>> = None);
-contextual!(BreakableIdCounter(BREAKABLE_ID): usize = 1);
-
-fn context() -> Rc<Ctx> {
-    Context::clone().unwrap()
-}
-
-fn get_breakable_id() -> BreakableId {
-    BREAKABLE_ID.with(|id| {
-        *id.borrow_mut() += 1;
-        BreakableId(Some(*id.borrow()))
-    })
+    pub fn get_breakable_id(&mut self) -> BreakableId {
+        self.last_breakable_id += 1;
+        BreakableId(Some(self.last_breakable_id))
+    }
 }
 
 pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
     fn do_tree_chunk(
+        ctx: &mut Ctx,
         func: &BasicBlockGroup,
         start_blk: usize,
         end_blk: usize,
@@ -140,32 +91,32 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
 
                 match block.exit {
                     BasicBlockExit::Break(tgt) => {
-                        blocks.extend(vec![StructuredFlow::Break(context().break_index(tgt))])
+                        blocks.extend(vec![StructuredFlow::Break(ctx.break_index(tgt))])
                     }
-                    BasicBlockExit::Continue(tgt) => blocks.extend(vec![StructuredFlow::Continue(
-                        context().continue_index(tgt),
-                    )]),
+                    BasicBlockExit::Continue(tgt) => {
+                        blocks.extend(vec![StructuredFlow::Continue(ctx.continue_index(tgt))])
+                    }
                     BasicBlockExit::Cond(cond, cons_start, cons_end, alt_start, alt_end) => {
                         rest = alt_end + 1;
 
-                        let brk_id = get_breakable_id();
-                        context().push_within(brk_id, cons_start..=alt_end, false, || {
+                        let brk_id = ctx.get_breakable_id();
+                        ctx.push_within(BreakAndRange(brk_id, cons_start, alt_end), |ctx| {
                             blocks.extend(vec![StructuredFlow::Branch(
                                 brk_id,
                                 cond,
-                                do_tree_chunk(func, cons_start, cons_end),
-                                do_tree_chunk(func, alt_start, alt_end),
+                                do_tree_chunk(ctx, func, cons_start, cons_end),
+                                do_tree_chunk(ctx, func, alt_start, alt_end),
                             )])
                         })
                     }
                     BasicBlockExit::Loop(start, end) => {
                         rest = end + 1;
 
-                        let loop_brk_id = get_breakable_id();
-                        context().push_within(loop_brk_id, start..=end, true, || {
+                        let loop_brk_id = ctx.get_breakable_id();
+                        ctx.push_within(BreakAndRange(loop_brk_id, start, end), |ctx| {
                             blocks.extend(vec![StructuredFlow::Loop(
                                 loop_brk_id,
-                                do_tree_chunk(func, start, end),
+                                do_tree_chunk(ctx, func, start, end),
                             )])
                         })
                     }
@@ -183,20 +134,20 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
                     ) => {
                         rest = end_finally + 1;
 
-                        let brk_id = get_breakable_id();
-                        context().push_within(brk_id, try_block..=end_finally, false, || {
+                        let brk_id = ctx.get_breakable_id();
+                        ctx.push_within(BreakAndRange(brk_id, try_block, end_finally), |ctx| {
                             blocks.extend(vec![StructuredFlow::TryCatch(
                                 brk_id,
-                                do_tree_chunk(func, try_block, catch_block - 1),
-                                do_tree_chunk(func, catch_block, finally_block - 1),
-                                do_tree_chunk(func, finally_block, end_finally),
+                                do_tree_chunk(ctx, func, try_block, catch_block - 1),
+                                do_tree_chunk(ctx, func, catch_block, finally_block - 1),
+                                do_tree_chunk(ctx, func, finally_block, end_finally),
                             )])
                         })
                     }
                     _ => blocks.extend(vec![]),
                 };
 
-                blocks.extend(do_tree_chunk(func, rest, end_blk));
+                blocks.extend(do_tree_chunk(ctx, func, rest, end_blk));
 
                 blocks
             }
@@ -204,13 +155,10 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
         }
     }
 
-    BreakableIdCounter::replace_within(1, || {
-        Context::replace_within(Some(Rc::new(Ctx::new())), || {
-            let tree = StructuredFlow::Block(do_tree_chunk(&func, 0, func.blocks.len() - 1));
+    let mut ctx = Ctx::new();
+    let tree = StructuredFlow::Block(do_tree_chunk(&mut ctx, &func, 0, func.blocks.len() - 1));
 
-            tree.simplify()
-        })
-    })
+    tree.simplify()
 }
 
 #[cfg(test)]
@@ -810,204 +758,5 @@ mod tests {
             ), BasicBlockRef(12), Return]
         )
         "###);
-    }
-}
-
-// For printing out these trees
-
-impl StructuredFlow {
-    fn str_head(&self) -> String {
-        match self {
-            StructuredFlow::Branch(_, _, _, _) => "Branch".to_string(),
-            StructuredFlow::Break(_) => "Break".to_string(),
-            StructuredFlow::Continue(_) => "Continue".to_string(),
-            StructuredFlow::Loop(_, _) => "Loop".to_string(),
-            StructuredFlow::Block(_) => "Block".to_string(),
-            StructuredFlow::Return(_, _) => "Return".to_string(),
-            StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
-            StructuredFlow::TryCatch(_, _, _, _) => "TryCatch".to_string(),
-        }
-    }
-    fn simplify(self) -> Self {
-        let break_targets = self.get_all_break_targets();
-        let mut flat = self.flatten();
-        flat.remove_unused_break_ids(&break_targets);
-        flat
-    }
-    fn flatten(self) -> StructuredFlow {
-        let map = fix_fn::fix_fn!(|map, items: Vec<StructuredFlow>| -> Vec<StructuredFlow> {
-            items
-                .into_iter()
-                .flat_map(|item| match item {
-                    StructuredFlow::Block(items) => map(items),
-                    _ => vec![item.flatten()],
-                })
-                .collect::<Vec<_>>()
-        });
-
-        match self {
-            StructuredFlow::Block(items) => {
-                let items = map(items);
-                if items.len() == 1 {
-                    items.into_iter().next().unwrap()
-                } else {
-                    StructuredFlow::Block(items)
-                }
-            }
-            StructuredFlow::Branch(id, cond, cons, alt) => {
-                StructuredFlow::Branch(id, cond, map(cons), map(alt))
-            }
-            StructuredFlow::TryCatch(id, try_, catch, finally) => {
-                StructuredFlow::TryCatch(id, map(try_), map(catch), map(finally))
-            }
-            StructuredFlow::Loop(id, items) => StructuredFlow::Loop(id, map(items)),
-            no_children => no_children,
-        }
-    }
-    fn remove_unused_break_ids(&mut self, used_break_targets: &HashSet<BreakableId>) {
-        if let Some(id) = self.breakable_id() {
-            if !used_break_targets.contains(&id) {
-                self.remove_break_id();
-            }
-        }
-
-        for children in self.children_mut().iter_mut() {
-            for child in children.iter_mut() {
-                child.remove_unused_break_ids(used_break_targets);
-            }
-        }
-    }
-
-    fn children(&self) -> Vec<&Vec<StructuredFlow>> {
-        match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y, z],
-            StructuredFlow::Break(_) => vec![],
-            StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => vec![x],
-            StructuredFlow::Block(x) => vec![x],
-            StructuredFlow::Return(_, _) => vec![],
-            StructuredFlow::BasicBlock(_) => vec![],
-            StructuredFlow::TryCatch(_, t, v, fin) => {
-                vec![t, v, fin]
-            }
-        }
-    }
-
-    fn children_mut(&mut self) -> Vec<&mut Vec<StructuredFlow>> {
-        match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y, z],
-            StructuredFlow::Break(_) => vec![],
-            StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => vec![x],
-            StructuredFlow::Block(x) => vec![x],
-            StructuredFlow::Return(_, _) => vec![],
-            StructuredFlow::BasicBlock(_) => vec![],
-            StructuredFlow::TryCatch(_, t, v, fin) => {
-                vec![t, v, fin]
-            }
-        }
-    }
-
-    fn get_all_break_targets(&self) -> HashSet<BreakableId> {
-        let mut ret = HashSet::new();
-        if let Some(breakable_id) = self.breaks_to_id() {
-            ret.insert(breakable_id);
-        }
-
-        for child in self.children() {
-            for child in child {
-                for t in child.get_all_break_targets() {
-                    ret.insert(t);
-                }
-            }
-        }
-
-        ret
-    }
-
-    fn breaks_to_id(&self) -> Option<BreakableId> {
-        match self {
-            StructuredFlow::Break(id) | StructuredFlow::Continue(id) => Some(*id),
-            _ => None,
-        }
-    }
-    fn remove_break_id(&mut self) {
-        match self {
-            StructuredFlow::Branch(id, _, _, _) | StructuredFlow::Loop(id, _) => {
-                *id = BreakableId(None)
-            }
-            _ => {}
-        }
-    }
-
-    fn breakable_id(&self) -> Option<BreakableId> {
-        match self {
-            StructuredFlow::Branch(id, _, _, _)
-            | StructuredFlow::Break(id)
-            | StructuredFlow::Continue(id)
-            | StructuredFlow::Loop(id, _)
-            | StructuredFlow::TryCatch(id, _, _, _) => Some(*id),
-            _ => None,
-        }
-    }
-
-    fn index_for_formatting(&self) -> Option<usize> {
-        match self {
-            StructuredFlow::Branch(_, _, _, _) => None,
-            StructuredFlow::Break(x) | StructuredFlow::Continue(x) => x.0,
-            StructuredFlow::Loop(_, _) => None,
-            StructuredFlow::Block(_) => None,
-            StructuredFlow::Return(_, _) => None,
-            StructuredFlow::BasicBlock(x) => Some(*x),
-            StructuredFlow::TryCatch(_, _, _, _) => None,
-        }
-    }
-}
-
-impl Debug for StructuredFlow {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let indent_str_lines = |s: &str| {
-            let lines = s.lines();
-            let indented_lines = lines.map(|line| format!("    {}", line));
-            indented_lines.collect::<Vec<String>>().join("\n")
-        };
-
-        write!(f, "{}", self.str_head())?;
-        if let Some(breakable_idx) = self.breakable_id() {
-            write!(f, " {}", breakable_idx)?;
-        }
-
-        match self {
-            StructuredFlow::Continue(_) | StructuredFlow::Break(_) => return Ok(()),
-            _ => {}
-        };
-
-        if let StructuredFlow::Branch(_, var, cons, alt) = self {
-            let cons = format!("{:?}", cons);
-            let alt = format!("{:?}", alt);
-
-            return write!(
-                f,
-                " (${}) {{\n{}\n{}\n}}",
-                var,
-                indent_str_lines(&cons),
-                indent_str_lines(&alt)
-            );
-        } else if let Some(index) = self.index_for_formatting() {
-            write!(f, "({})", index)
-        } else {
-            let children = self.children();
-            if children.len() > 0 {
-                let lines = children
-                    .iter()
-                    .map(|child| indent_str_lines(&format!("{:?}", child)))
-                    .collect::<Vec<String>>()
-                    .join("\n");
-
-                write!(f, "(\n{}\n)", lines)?;
-            }
-
-            Ok(())
-        }
     }
 }
