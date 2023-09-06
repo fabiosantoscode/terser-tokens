@@ -33,6 +33,27 @@ fn if_stat() {
 }
 
 #[test]
+fn if_nested() {
+    let res = run_checks(
+        r###"
+            let x = 1;
+            if (x == 1) {
+                if (x == 1) {
+                    x = x + 2000;
+                } else {
+                    x = 3;
+                }
+                x = x + 1000;
+            } else {
+                x = 3;
+            }
+            return x;
+        "###,
+    );
+    insta::assert_display_snapshot!(res, @"3001");
+}
+
+#[test]
 fn ternary() {
     let res = run_checks(
         r###"

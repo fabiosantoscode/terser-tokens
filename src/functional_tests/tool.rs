@@ -33,12 +33,13 @@ pub fn run_checks(s: &str) -> String {
     };
 
     if reference != compressed {
-        panic!(
+        println!(
             "reference and compressed code should have the same output\n\
             code: \n{s}// outputs: {reference}\n\
             compressed code:\n{comp_s}// outputs: {compressed}\n\
             "
         );
+        assert_eq!(reference, compressed);
     }
 
     reference // return reference for snapshot

@@ -87,12 +87,16 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             // {ref} {operator} {ref}
             let (input, left) = parse_ref(input)?;
             let input = whitespace!(input);
-            let (input, op) = one_of("+-*/")(input)?;
-            let op = match op {
-                '+' => swc_ecma_ast::BinaryOp::Add,
-                '-' => swc_ecma_ast::BinaryOp::Sub,
-                '*' => swc_ecma_ast::BinaryOp::Mul,
-                '/' => swc_ecma_ast::BinaryOp::Div,
+            let (input, op) = one_of("+-*/=")(input)?;
+            let (input, op) = match op {
+                '+' => (input, swc_ecma_ast::BinaryOp::Add),
+                '-' => (input, swc_ecma_ast::BinaryOp::Sub),
+                '*' => (input, swc_ecma_ast::BinaryOp::Mul),
+                '/' => (input, swc_ecma_ast::BinaryOp::Div),
+                '=' => alt((
+                    map(tag("="), |_| swc_ecma_ast::BinaryOp::EqEq),
+                    map(tag("=="), |_| swc_ecma_ast::BinaryOp::EqEqEq),
+                ))(input)?,
                 _ => unreachable!(),
             };
             let input = whitespace!(input);

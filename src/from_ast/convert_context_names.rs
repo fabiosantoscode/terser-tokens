@@ -68,7 +68,10 @@ impl FromAstCtx {
     }
 
     pub fn enter_conditional_branch(&mut self) {
-        self.conditionals.push(BTreeMap::new());
+        self.conditionals.push(match self.conditionals.last() {
+            Some(cond) => cond.clone(),
+            _ => BTreeMap::new(),
+        });
     }
 
     pub fn leave_conditional_branch(&mut self) {
@@ -76,14 +79,23 @@ impl FromAstCtx {
         let to_phi = self
             .conditionals
             .pop()
-            .expect("unbalanced conditional branch");
-        let mut to_phi = to_phi
+            .expect("unbalanced conditional branch")
             .into_iter()
-            .filter(|(_, phies)| phies.len() > 1)
-            .collect::<Vec<_>>();
-        to_phi.sort_by(|(a, _), (b, _)| a.cmp(b));
+            .filter(|(_, phies)| phies.len() > 1);
 
-        for (varname, phies) in to_phi.into_iter() {
+        for (varname, phies) in to_phi {
+            if let Some(existing_phies) = self
+                .conditionals
+                .last_mut()
+                .and_then(|cond| cond.get_mut(&varname))
+            {
+                for phi in phies.iter() {
+                    if !existing_phies.contains(&phi) {
+                        existing_phies.push(*phi);
+                    }
+                }
+            }
+
             let phi = BasicBlockInstruction::Phi(phies);
             let phi_idx = self.push_instruction(phi);
             self.scope_tree
@@ -434,6 +446,72 @@ mod tests {
                     either($21, $22),
                 ),
             ],
+        ]
+        "###);
+    }
+
+    #[test]
+    fn test_nested_phi() {
+        let mut ctx = FromAstCtx::new();
+
+        ctx.assign_name("varname", 11);
+        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
+
+        ctx.enter_conditional_branch();
+        ctx.assign_name("varname", 12);
+        insta::assert_debug_snapshot!(ctx.conditionals[0].get("varname").unwrap(), @r###"
+        [
+            11,
+            12,
+        ]
+        "###);
+
+        ctx.enter_conditional_branch();
+        ctx.assign_name("varname", 13);
+        insta::assert_debug_snapshot!(ctx.conditionals[1].get("varname").unwrap(), @r###"
+        [
+            11,
+            12,
+            13,
+        ]
+        "###);
+
+        ctx.leave_conditional_branch();
+        insta::assert_debug_snapshot!(ctx.conditionals[0].get("varname").unwrap(), @r###"
+        [
+            11,
+            12,
+            13,
+        ]
+        "###);
+
+        ctx.leave_conditional_branch();
+        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
+
+        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
+        ScopeTree {
+            scopes: [
+                ScopeTreeNode {
+                    parent: None,
+                    is_block: false,
+                    vars: {
+                        "varname": Local(1),
+                    },
+                },
+            ],
+            current_scope: ScopeTreeHandle(0),
+        }
+        "###);
+        insta::assert_debug_snapshot!(ctx.basic_blocks[0], @r###"
+        [
+            (
+                0,
+                either($11, $12, $13),
+            ),
+            (
+                1,
+                either($11, $12, $13),
+            ),
         ]
         "###);
     }

@@ -94,9 +94,9 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             let blockidx_cond_else = ctx.wrap_up_block(); // '4
 
-            ctx.leave_conditional_branch();
-
             let blockidx_outside = ctx.wrap_up_block(); // '5
+
+            ctx.leave_conditional_branch();  // insert phi nodes in '5
 
             ctx.set_exit(
                 blockidx_loop,
@@ -138,8 +138,8 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             }
             let blockidx_alternate_after = ctx.current_block_index();
 
-            ctx.leave_conditional_branch();
             let after = ctx.wrap_up_block();
+            ctx.leave_conditional_branch();
 
             ctx.set_exit(
                 blockidx_before,
@@ -301,6 +301,10 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             let blockidx_alternate_after = ctx.current_block_index();
             let blockidx_after = ctx.wrap_up_block();
 
+            ctx.wrap_up_block();
+
+            ctx.leave_conditional_branch();
+
             // block before gets a Cond node added
             ctx.set_exit(
                 blockidx_before,
@@ -322,9 +326,6 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 blockidx_alternate_after,
                 BasicBlockExit::Jump(blockidx_after),
             );
-
-            ctx.leave_conditional_branch();
-            ctx.wrap_up_block();
 
             // the retval of our ternary is a phi node
             return ctx.push_instruction(BasicBlockInstruction::Phi(vec![cons, alt]));
@@ -687,10 +688,10 @@ mod tests {
             exit = jump @4
         }
         @4: {
-            $7 = either($2, $4)
             exit = jump @5
         }
         @5: {
+            $7 = either($0, $2, $4)
             $8 = either($5, $6)
             $9 = 1
             exit = jump @7
@@ -701,7 +702,7 @@ mod tests {
             exit = jump @7
         }
         @7: {
-            $12 = either($0, $2, $10)
+            $12 = either($0, $2, $4, $10)
             $13 = either($9, $11)
             $14 = $12
             $15 = 2
@@ -767,6 +768,211 @@ mod tests {
         @5: {
             $1 = undefined
             exit = return $1
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_loop_nested() {
+        let s = test_basic_blocks(
+            "var x = 1;
+            outer: while (111) {
+                x = x + 1000;
+                while (222) {
+                    x = x + 2000;
+                    break outer;
+                }
+            }
+            return x;",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            exit = jump @1
+        }
+        @1: {
+            exit = loop @2..@10
+        }
+        @2: {
+            $1 = 111
+            exit = cond $1 ? @3..@9 : @10..@10
+        }
+        @3: {
+            $2 = $0
+            $3 = 1000
+            $4 = $2 + $3
+            $5 = $4
+            exit = jump @4
+        }
+        @4: {
+            exit = loop @5..@7
+        }
+        @5: {
+            $6 = 222
+            exit = cond $6 ? @6..@6 : @7..@7
+        }
+        @6: {
+            $7 = $4
+            $8 = 2000
+            $9 = $7 + $8
+            $10 = $9
+            exit = break @11
+        }
+        @7: {
+            exit = break @8
+        }
+        @8: {
+            $11 = either($0, $4, $9)
+            exit = jump @9
+        }
+        @9: {
+            exit = continue @2
+        }
+        @10: {
+            exit = break @11
+        }
+        @11: {
+            $12 = either($0, $4, $9)
+            $13 = $12
+            exit = return $13
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_if_nested() {
+        let s = test_basic_blocks(
+            "var x = 1;
+            if (111) {
+                x = x + 1000;
+                if (222) {
+                    x = x + 2000;
+                }
+            }
+            return x;",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            $1 = 111
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $1 ? @2..@7 : @7..@7
+        }
+        @2: {
+            $2 = $0
+            $3 = 1000
+            $4 = $2 + $3
+            $5 = $4
+            $6 = 222
+            exit = jump @3
+        }
+        @3: {
+            exit = cond $6 ? @4..@5 : @5..@5
+        }
+        @4: {
+            $7 = $4
+            $8 = 2000
+            $9 = $7 + $8
+            $10 = $9
+            exit = jump @5
+        }
+        @5: {
+            exit = jump @6
+        }
+        @6: {
+            $11 = either($0, $4, $9)
+            exit = jump @7
+        }
+        @7: {
+            exit = jump @8
+        }
+        @8: {
+            $12 = either($0, $4, $9)
+            $13 = $12
+            exit = return $13
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_if_nested_2() {
+        let s = test_basic_blocks(
+            "let x = 1;
+            if (x == 1) {
+                if (x == 1) {
+                    x = x + 2000;
+                } else {
+                    x = 3;
+                }
+                x = x + 1000;
+            } else {
+                x = 3;
+            }
+            return x;",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            $1 = $0
+            $2 = 1
+            $3 = $1 == $2
+            exit = jump @1
+        }
+        @1: {
+            exit = cond $3 ? @2..@9 : @10..@11
+        }
+        @2: {
+            $4 = $0
+            $5 = 1
+            $6 = $4 == $5
+            exit = jump @3
+        }
+        @3: {
+            exit = cond $6 ? @4..@5 : @6..@7
+        }
+        @4: {
+            $7 = $0
+            $8 = 2000
+            $9 = $7 + $8
+            $10 = $9
+            exit = jump @5
+        }
+        @5: {
+            exit = jump @8
+        }
+        @6: {
+            $11 = 3
+            $12 = $11
+            exit = jump @7
+        }
+        @7: {
+            exit = jump @8
+        }
+        @8: {
+            $13 = either($0, $9, $11)
+            $14 = $13
+            $15 = 1000
+            $16 = $14 + $15
+            $17 = $16
+            exit = jump @9
+        }
+        @9: {
+            exit = jump @12
+        }
+        @10: {
+            $18 = 3
+            $19 = $18
+            exit = jump @11
+        }
+        @11: {
+            exit = jump @12
+        }
+        @12: {
+            $20 = either($13, $16, $18)
+            $21 = $20
+            exit = return $21
         }
         "###);
     }
@@ -994,11 +1200,12 @@ mod tests {
             exit = jump @8
         }
         @8: {
+            $3 = either($0, $1)
             exit = end finally after @9
         }
         @9: {
-            $3 = $2
-            exit = return $3
+            $4 = $3
+            exit = return $4
         }
         "###);
     }
