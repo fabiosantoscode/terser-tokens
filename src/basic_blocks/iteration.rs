@@ -19,7 +19,7 @@ impl BasicBlockModule {
 impl BasicBlockGroup {
     pub fn iter_all_instructions<'a>(&'a self) -> BasicBlockGroupInstructionIterator<'a> {
         BasicBlockGroupInstructionIterator {
-            block_iter: CurIterator::from_iterator(self.blocks.iter().enumerate()),
+            block_iter: CurIterator::from_iterator(self.iter().enumerate()),
             instruction_iter: None,
         }
     }
@@ -91,7 +91,7 @@ impl<'a> Iterator for ModuleBlockIterator<'a> {
             &mut self.blockgroup_iter,
             &mut self.block_iter,
             &mut |(_, current_blockgroup): (&FunctionId, &BasicBlockGroup)| {
-                current_blockgroup.blocks.iter().enumerate()
+                current_blockgroup.iter().enumerate()
             },
         )?;
 

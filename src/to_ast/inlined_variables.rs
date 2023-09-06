@@ -20,7 +20,7 @@ pub fn get_inlined_variables(
             .map(|(_blk, ins_id, ins)| (ins_id, ins))
             .collect();
 
-        for block in block_group.blocks.iter() {
+        for block in block_group.iter() {
             ctx.non_reorderable_candidates = Default::default();
 
             for (var_idx, instruction) in block.instructions.iter() {

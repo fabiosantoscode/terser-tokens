@@ -22,13 +22,6 @@ pub enum BasicBlockEnvironmentType {
 }
 
 impl BasicBlockGroup {
-    pub fn from_asts(blocks: Vec<BasicBlock>) -> Self {
-        Self {
-            blocks,
-            ..Default::default()
-        }
-    }
-
     pub fn iter<'a>(&'a self) -> core::slice::Iter<'_, BasicBlock> {
         self.blocks.iter()
     }

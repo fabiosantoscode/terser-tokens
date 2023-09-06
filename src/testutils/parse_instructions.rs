@@ -448,7 +448,13 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
 
     assert_eq!(input, "");
 
-    Ok((input, BasicBlockGroup::from_asts(blocks)))
+    Ok((
+        input,
+        BasicBlockGroup {
+            blocks,
+            ..Default::default()
+        },
+    ))
 }
 
 #[cfg(test)]

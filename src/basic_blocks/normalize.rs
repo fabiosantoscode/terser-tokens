@@ -173,13 +173,16 @@ mod tests {
         let (block_exits, block_instructions) =
             normalize_basic_blocks(block_exits, block_instructions);
 
-        BasicBlockGroup::from_asts(
-            block_instructions
-                .into_iter()
-                .zip(block_exits.into_iter())
-                .map(|(block, exit)| BasicBlock::new(block, exit))
-                .collect(),
-        )
+        let blocks = block_instructions
+            .into_iter()
+            .zip(block_exits.into_iter())
+            .map(|(block, exit)| BasicBlock::new(block, exit))
+            .collect();
+
+        BasicBlockGroup {
+            blocks,
+            ..Default::default()
+        }
     }
 
     #[test]
