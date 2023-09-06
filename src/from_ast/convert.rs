@@ -96,7 +96,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             let blockidx_outside = ctx.wrap_up_block(); // '5
 
-            ctx.leave_conditional_branch();  // insert phi nodes in '5
+            ctx.leave_conditional_branch(); // insert phi nodes in '5
 
             ctx.set_exit(
                 blockidx_loop,
@@ -580,7 +580,7 @@ mod tests {
         function():
         @0: {
             $0 = 1
-            exit = cond $0 ? @1..@5 : @6..@6
+            exit = cond $0 ? @1..@4 : @5..@5
         }
         @1: {
             $1 = 2
@@ -595,17 +595,14 @@ mod tests {
             exit = jump @4
         }
         @4: {
-            exit = jump @5
+            $4 = either($2, $3)
+            exit = jump @6
         }
         @5: {
-            $4 = either($2, $3)
-            exit = jump @7
+            $5 = 20
+            exit = jump @6
         }
         @6: {
-            $5 = 20
-            exit = jump @7
-        }
-        @7: {
             $6 = either($4, $5)
             $7 = undefined
             exit = return $7
@@ -671,7 +668,7 @@ mod tests {
         @0: {
             $0 = 1
             $1 = 123
-            exit = cond $1 ? @1..@5 : @6..@6
+            exit = cond $1 ? @1..@4 : @5..@5
         }
         @1: {
             $2 = 1234
@@ -688,20 +685,17 @@ mod tests {
             exit = jump @4
         }
         @4: {
-            exit = jump @5
-        }
-        @5: {
             $7 = either($0, $2, $4)
             $8 = either($5, $6)
             $9 = 1
-            exit = jump @7
+            exit = jump @6
         }
-        @6: {
+        @5: {
             $10 = 3
             $11 = $10
-            exit = jump @7
+            exit = jump @6
         }
-        @7: {
+        @6: {
             $12 = either($0, $2, $4, $10)
             $13 = either($9, $11)
             $14 = $12
@@ -719,26 +713,20 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 123
-            exit = jump @1
+            exit = loop @1..@3
         }
         @1: {
-            exit = loop @2..@5
+            $1 = 123
+            exit = cond $1 ? @2..@2 : @3..@3
         }
         @2: {
-            $1 = 123
-            exit = cond $1 ? @3..@4 : @5..@5
+            $2 = 456
+            exit = continue @1
         }
         @3: {
-            $2 = 456
-            exit = jump @4
+            exit = break @4
         }
         @4: {
-            exit = continue @2
-        }
-        @5: {
-            exit = break @6
-        }
-        @6: {
             $3 = undefined
             exit = return $3
         }
@@ -750,22 +738,19 @@ mod tests {
         let s = test_basic_blocks("while (123) { break }");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = jump @1
+            exit = loop @1..@3
         }
         @1: {
-            exit = loop @2..@4
+            $0 = 123
+            exit = cond $0 ? @2..@2 : @3..@3
         }
         @2: {
-            $0 = 123
-            exit = cond $0 ? @3..@3 : @4..@4
+            exit = break @4
         }
         @3: {
-            exit = break @5
+            exit = break @4
         }
         @4: {
-            exit = break @5
-        }
-        @5: {
             $1 = undefined
             exit = return $1
         }
@@ -788,50 +773,41 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
-            exit = jump @1
+            exit = loop @1..@7
         }
         @1: {
-            exit = loop @2..@10
+            $1 = 111
+            exit = cond $1 ? @2..@6 : @7..@7
         }
         @2: {
-            $1 = 111
-            exit = cond $1 ? @3..@9 : @10..@10
-        }
-        @3: {
             $2 = $0
             $3 = 1000
             $4 = $2 + $3
             $5 = $4
-            exit = jump @4
+            exit = loop @3..@5
+        }
+        @3: {
+            $6 = 222
+            exit = cond $6 ? @4..@4 : @5..@5
         }
         @4: {
-            exit = loop @5..@7
-        }
-        @5: {
-            $6 = 222
-            exit = cond $6 ? @6..@6 : @7..@7
-        }
-        @6: {
             $7 = $4
             $8 = 2000
             $9 = $7 + $8
             $10 = $9
-            exit = break @11
+            exit = break @8
+        }
+        @5: {
+            exit = break @6
+        }
+        @6: {
+            $11 = either($0, $4, $9)
+            exit = continue @1
         }
         @7: {
             exit = break @8
         }
         @8: {
-            $11 = either($0, $4, $9)
-            exit = jump @9
-        }
-        @9: {
-            exit = continue @2
-        }
-        @10: {
-            exit = break @11
-        }
-        @11: {
             $12 = either($0, $4, $9)
             $13 = $12
             exit = return $13
@@ -855,40 +831,34 @@ mod tests {
         @0: {
             $0 = 1
             $1 = 111
-            exit = jump @1
+            exit = cond $1 ? @1..@4 : @5..@5
         }
         @1: {
-            exit = cond $1 ? @2..@7 : @7..@7
-        }
-        @2: {
             $2 = $0
             $3 = 1000
             $4 = $2 + $3
             $5 = $4
             $6 = 222
-            exit = jump @3
+            exit = cond $6 ? @2..@2 : @3..@3
         }
-        @3: {
-            exit = cond $6 ? @4..@5 : @5..@5
-        }
-        @4: {
+        @2: {
             $7 = $4
             $8 = 2000
             $9 = $7 + $8
             $10 = $9
-            exit = jump @5
+            exit = jump @4
+        }
+        @3: {
+            exit = jump @4
+        }
+        @4: {
+            $11 = either($0, $4, $9)
+            exit = jump @6
         }
         @5: {
             exit = jump @6
         }
         @6: {
-            $11 = either($0, $4, $9)
-            exit = jump @7
-        }
-        @7: {
-            exit = jump @8
-        }
-        @8: {
             $12 = either($0, $4, $9)
             $13 = $12
             exit = return $13
@@ -918,58 +888,40 @@ mod tests {
             $1 = $0
             $2 = 1
             $3 = $1 == $2
-            exit = jump @1
+            exit = cond $3 ? @1..@4 : @5..@5
         }
         @1: {
-            exit = cond $3 ? @2..@9 : @10..@11
-        }
-        @2: {
             $4 = $0
             $5 = 1
             $6 = $4 == $5
-            exit = jump @3
+            exit = cond $6 ? @2..@2 : @3..@3
         }
-        @3: {
-            exit = cond $6 ? @4..@5 : @6..@7
-        }
-        @4: {
+        @2: {
             $7 = $0
             $8 = 2000
             $9 = $7 + $8
             $10 = $9
-            exit = jump @5
+            exit = jump @4
         }
-        @5: {
-            exit = jump @8
-        }
-        @6: {
+        @3: {
             $11 = 3
             $12 = $11
-            exit = jump @7
+            exit = jump @4
         }
-        @7: {
-            exit = jump @8
-        }
-        @8: {
+        @4: {
             $13 = either($0, $9, $11)
             $14 = $13
             $15 = 1000
             $16 = $14 + $15
             $17 = $16
-            exit = jump @9
+            exit = jump @6
         }
-        @9: {
-            exit = jump @12
-        }
-        @10: {
+        @5: {
             $18 = 3
             $19 = $18
-            exit = jump @11
+            exit = jump @6
         }
-        @11: {
-            exit = jump @12
-        }
-        @12: {
+        @6: {
             $20 = either($13, $16, $18)
             $21 = $20
             exit = return $21
@@ -982,41 +934,32 @@ mod tests {
         let s = test_basic_blocks("outer: while (123) { while (456) { break outer } }");
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = jump @1
+            exit = loop @1..@7
         }
         @1: {
-            exit = loop @2..@10
+            $0 = 123
+            exit = cond $0 ? @2..@6 : @7..@7
         }
         @2: {
-            $0 = 123
-            exit = cond $0 ? @3..@9 : @10..@10
+            exit = loop @3..@5
         }
         @3: {
-            exit = jump @4
+            $1 = 456
+            exit = cond $1 ? @4..@4 : @5..@5
         }
         @4: {
-            exit = loop @5..@7
+            exit = break @8
         }
         @5: {
-            $1 = 456
-            exit = cond $1 ? @6..@6 : @7..@7
+            exit = break @6
         }
         @6: {
-            exit = break @11
+            exit = continue @1
         }
         @7: {
             exit = break @8
         }
         @8: {
-            exit = jump @9
-        }
-        @9: {
-            exit = continue @2
-        }
-        @10: {
-            exit = break @11
-        }
-        @11: {
             $2 = undefined
             exit = return $2
         }
@@ -1035,26 +978,17 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 123
-            exit = jump @1
+            exit = cond $0 ? @1..@1 : @2..@2
         }
         @1: {
-            exit = cond $0 ? @2..@3 : @4..@5
-        }
-        @2: {
             $1 = 456
             exit = jump @3
         }
-        @3: {
-            exit = jump @6
-        }
-        @4: {
+        @2: {
             $2 = 789
-            exit = jump @5
+            exit = jump @3
         }
-        @5: {
-            exit = jump @6
-        }
-        @6: {
+        @3: {
             $3 = undefined
             exit = return $3
         }
@@ -1076,39 +1010,27 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 123
-            exit = jump @1
+            exit = cond $0 ? @1..@4 : @5..@5
         }
         @1: {
-            exit = cond $0 ? @2..@7 : @8..@9
+            $1 = 456
+            exit = cond $1 ? @2..@2 : @3..@3
         }
         @2: {
-            $1 = 456
-            exit = jump @3
+            $2 = 789
+            exit = jump @4
         }
         @3: {
-            exit = cond $1 ? @4..@5 : @5..@5
+            exit = jump @4
         }
         @4: {
-            $2 = 789
-            exit = jump @5
+            exit = jump @6
         }
         @5: {
+            $3 = 999
             exit = jump @6
         }
         @6: {
-            exit = jump @7
-        }
-        @7: {
-            exit = jump @10
-        }
-        @8: {
-            $3 = 999
-            exit = jump @9
-        }
-        @9: {
-            exit = jump @10
-        }
-        @10: {
             $4 = undefined
             exit = return $4
         }
@@ -1129,32 +1051,29 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            exit = try @2 catch @4 finally @7 after @8
+            exit = try @2 catch @4 finally @6 after @7
         }
         @2: {
             $0 = 777
             exit = jump @3
         }
         @3: {
-            exit = error ? jump @4 : jump @6
+            exit = error ? jump @4 : jump @5
         }
         @4: {
             $1 = 888
             exit = jump @5
         }
         @5: {
-            exit = jump @6
+            exit = finally @6 after @7
         }
         @6: {
-            exit = finally @7 after @8
+            exit = jump @7
         }
         @7: {
-            exit = jump @8
+            exit = end finally after @8
         }
         @8: {
-            exit = end finally after @9
-        }
-        @9: {
             $2 = undefined
             exit = return $2
         }
@@ -1176,34 +1095,31 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            exit = try @2 catch @4 finally @7 after @8
+            exit = try @2 catch @4 finally @6 after @7
         }
         @2: {
             $0 = 777
             exit = jump @3
         }
         @3: {
-            exit = error ? jump @4 : jump @6
+            exit = error ? jump @4 : jump @5
         }
         @4: {
             $1 = 888
             exit = jump @5
         }
         @5: {
-            exit = jump @6
+            exit = finally @6 after @7
         }
         @6: {
-            exit = finally @7 after @8
+            $2 = either($0, $1)
+            exit = jump @7
         }
         @7: {
-            $2 = either($0, $1)
-            exit = jump @8
+            $3 = either($0, $1)
+            exit = end finally after @8
         }
         @8: {
-            $3 = either($0, $1)
-            exit = end finally after @9
-        }
-        @9: {
             $4 = $3
             exit = return $4
         }
@@ -1226,36 +1142,30 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            exit = try @2 catch @4 finally @7 after @9
+            exit = try @2 catch @4 finally @6 after @7
         }
         @2: {
             $0 = 777
             exit = jump @3
         }
         @3: {
-            exit = error ? jump @4 : jump @6
+            exit = error ? jump @4 : jump @5
         }
         @4: {
             $1 = 888
             exit = jump @5
         }
         @5: {
-            exit = jump @6
+            exit = finally @6 after @7
         }
         @6: {
-            exit = finally @7 after @9
+            $2 = 999
+            exit = jump @7
         }
         @7: {
-            $2 = 999
-            exit = jump @8
+            exit = end finally after @8
         }
         @8: {
-            exit = jump @9
-        }
-        @9: {
-            exit = end finally after @10
-        }
-        @10: {
             $3 = undefined
             exit = return $3
         }

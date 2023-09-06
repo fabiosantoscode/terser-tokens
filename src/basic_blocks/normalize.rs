@@ -30,48 +30,31 @@ pub fn normalize_basic_blocks(
         .fold(
             (out_exits, out_basic_blocks),
             |(mut out_exits, mut out_basic_blocks), (i, (exit, block))| {
-                if just_skip(&exit) {
-                    swapped_labels.insert(i, i - eliminated_count);
+                if unmergeable(&exit) {
                     out_exits.push(exit);
                     out_basic_blocks.push(block);
-
-                    return (out_exits, out_basic_blocks);
-                }
-                if !reachable_blocks.contains(&i) {
+                } else if !reachable_blocks.contains(&i) {
                     eliminated_count += 1;
-                    swapped_labels.insert(i, i - eliminated_count);
-                    return (out_exits, out_basic_blocks);
-                }
+                } else {
+                    let prev_exit = out_exits.last();
+                    let prev_block = out_basic_blocks.last();
 
-                let do_merge = match (out_exits.last(), out_basic_blocks.last()) {
-                    (Some(prev_exit @ BasicBlockExit::Jump(_)), Some(prev_block))
-                        if (prev_exit, prev_block) == (&exit, &block) =>
-                    {
-                        true
-                    }
-                    (Some(BasicBlockExit::Jump(j)), _) if *j == i => {
-                        !jumped_to.contains(j)
-                            && !jumped_to.contains(&(*j + 1))
-                            && !jumped_to.contains(&i)
-                    }
-                    _ => false,
-                };
+                    if should_merge_blocks(&jumped_to, prev_exit, prev_block, &exit, &block, i) {
+                        let prev_exit = out_exits.last_mut().unwrap();
+                        let prev_block = out_basic_blocks.last_mut().unwrap();
 
-                match (do_merge, out_exits.last_mut(), out_basic_blocks.last_mut()) {
-                    (true, Some(prev_exit), Some(prev_block)) => {
                         *prev_exit = exit;
                         prev_block.extend(block);
 
                         eliminated_count += 1;
-                    }
-                    _ => {
+                    } else {
                         out_exits.push(exit);
                         out_basic_blocks.push(block);
-                    }
-                };
+                    };
+                }
 
                 swapped_labels.insert(i, i - eliminated_count);
-                (out_exits, out_basic_blocks)
+                return (out_exits, out_basic_blocks);
             },
         );
 
@@ -85,7 +68,34 @@ pub fn normalize_basic_blocks(
     (exits, basic_blocks)
 }
 
-fn just_skip(exit: &BasicBlockExit) -> bool {
+fn should_merge_blocks(
+    jumped_to: &HashSet<usize>,
+    prev_exit: Option<&BasicBlockExit>,
+    prev_basic_block: Option<&Vec<(usize, BasicBlockInstruction)>>,
+    exit: &BasicBlockExit,
+    block: &Vec<(usize, BasicBlockInstruction)>,
+    block_idx: usize,
+) -> bool {
+    match (prev_exit, prev_basic_block) {
+        (Some(prev_exit @ BasicBlockExit::Jump(jump_target)), Some(prev_block)) => {
+            if
+            // the blocks are the same -- can merge
+            &*prev_exit == exit && block == &*prev_block
+            // the previous block ends with a jump to this block -- can merge unless it's a jump target
+                || *jump_target == block_idx
+                    && !jumped_to.contains(&jump_target)
+                    && !jumped_to.contains(&block_idx)
+            {
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn unmergeable(exit: &BasicBlockExit) -> bool {
     match exit {
         BasicBlockExit::SetTryAndCatch(_, _, _, _) => true,
         BasicBlockExit::PopCatch(_, _) => true,
@@ -293,25 +303,19 @@ mod tests {
         );
         insta::assert_debug_snapshot!(group, @r###"
         @0: {
-            exit = jump @1
+            exit = loop @1..@3
         }
         @1: {
-            exit = loop @2..@4
+            $0 = 123
+            exit = cond $0 ? @2..@2 : @3..@3
         }
         @2: {
-            $0 = 123
-            exit = cond $0 ? @3..@3 : @4..@4
+            exit = jump @4
         }
         @3: {
-            exit = jump @6
+            exit = jump @4
         }
         @4: {
-            exit = jump @5
-        }
-        @5: {
-            exit = jump @6
-        }
-        @6: {
             $1 = undefined
             exit = return $1
         }
@@ -359,22 +363,19 @@ mod tests {
         );
         insta::assert_debug_snapshot!(group, @r###"
         @0: {
-            exit = jump @1
+            exit = loop @1..@3
         }
         @1: {
-            exit = loop @2..@4
+            $0 = 123
+            exit = cond $0 ? @2..@2 : @3..@3
         }
         @2: {
-            $0 = 123
-            exit = cond $0 ? @3..@3 : @4..@4
+            exit = break @4
         }
         @3: {
-            exit = break @5
+            exit = break @4
         }
         @4: {
-            exit = break @5
-        }
-        @5: {
             $1 = undefined
             exit = return $1
         }
