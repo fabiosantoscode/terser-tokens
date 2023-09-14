@@ -256,6 +256,9 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Lit(Lit::Num(num)) => {
             return ctx.push_instruction(BasicBlockInstruction::LitNumber(num.value))
         }
+        Expr::Lit(Lit::Bool(b)) => {
+            return ctx.push_instruction(BasicBlockInstruction::LitBool(b.value))
+        }
         Expr::Bin(bin) => {
             let l = expr_to_basic_blocks(ctx, &bin.left);
             let r = expr_to_basic_blocks(ctx, &bin.right);

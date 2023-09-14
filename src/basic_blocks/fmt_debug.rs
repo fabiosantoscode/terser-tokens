@@ -22,6 +22,9 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::LitNumber(num) => {
                 write!(f, "{}", num)
             }
+            BasicBlockInstruction::LitBool(b) => {
+                write!(f, "{:?}", b)
+            }
             BasicBlockInstruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }

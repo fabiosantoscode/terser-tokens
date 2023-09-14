@@ -15,7 +15,15 @@ pub fn parse_instructions_module(input: Vec<&str>) -> BasicBlockModule {
     let functions: BTreeMap<_, _> = input
         .iter()
         .enumerate()
-        .map(|(i, s)| (FunctionId(i), parse_instructions(s)))
+        .map(|(i, s)| {
+            (
+                FunctionId(i),
+                BasicBlockGroup {
+                    id: FunctionId(i),
+                    ..parse_instructions(s)
+                },
+            )
+        })
         .collect();
 
     BasicBlockModule {
@@ -45,11 +53,19 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             let (input, _) = multispace0(input)?;
             Ok((input, ()))
         }
+
         fn ins_litnumber(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // 10
             let (input, n) = digit1(input)?;
             let n_float: f64 = n.parse().unwrap();
             Ok((input, BasicBlockInstruction::LitNumber(n_float)))
+        }
+
+        fn ins_litbool(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // true | false
+            let (input, bool) = alt((tag("true"), tag("false")))(input)?;
+            let bool: bool = bool == "true";
+            Ok((input, BasicBlockInstruction::LitBool(bool)))
         }
 
         fn ins_ref(input: &str) -> IResult<&str, BasicBlockInstruction> {
@@ -87,18 +103,24 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             // {ref} {operator} {ref}
             let (input, left) = parse_ref(input)?;
             let input = whitespace!(input);
-            let (input, op) = one_of("+-*/=")(input)?;
-            let (input, op) = match op {
-                '+' => (input, swc_ecma_ast::BinaryOp::Add),
-                '-' => (input, swc_ecma_ast::BinaryOp::Sub),
-                '*' => (input, swc_ecma_ast::BinaryOp::Mul),
-                '/' => (input, swc_ecma_ast::BinaryOp::Div),
-                '=' => alt((
-                    map(tag("="), |_| swc_ecma_ast::BinaryOp::EqEq),
-                    map(tag("=="), |_| swc_ecma_ast::BinaryOp::EqEqEq),
-                ))(input)?,
-                _ => unreachable!(),
-            };
+
+            use swc_ecma_ast::BinaryOp::*;
+            let (input, op) = alt((
+                map(tag("+"), |_| Add),
+                map(tag("-"), |_| Sub),
+                map(tag("*"), |_| Mul),
+                map(tag("/"), |_| Div),
+                map(tag("=="), |_| EqEq),
+                map(tag("==="), |_| EqEqEq),
+                map(tag("!="), |_| NotEq),
+                map(tag("!=="), |_| NotEqEq),
+                map(tag(">="), |_| GtEq),
+                map(tag(">"), |_| Gt),
+                map(tag("<="), |_| LtEq),
+                map(tag("<"), |_| Lt),
+                map(tag("<="), |_| LtEq),
+            ))(input)?;
+
             let input = whitespace!(input);
             let (input, right) = parse_ref(input)?;
             Ok((input, BasicBlockInstruction::BinOp(op, left, right)))
@@ -226,6 +248,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             ins_undefined,
             ins_this,
             ins_litnumber,
+            ins_litbool,
             ins_binop,
             ins_call,
             ins_ref,
@@ -275,6 +298,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             tag("cond"),
             tag("loop"),
             tag("return"),
+            tag("throw"),
             tag("try"),
             tag("error"),
             tag("finally"),
@@ -284,10 +308,6 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         let input = whitespace!(input);
 
         let (input, ret) = match word {
-            "return" => {
-                let (input, ref_) = parse_ref(input)?;
-                (input, BasicBlockExit::ExitFn(ExitType::Return, ref_))
-            }
             "jump" => {
                 let (input, ref_) = parse_blockref(input)?;
                 (input, BasicBlockExit::Jump(ref_))
@@ -324,6 +344,14 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
                 let input = whitespace!(input);
 
                 (input, BasicBlockExit::Loop(loop_start, loop_end))
+            }
+            "return" => {
+                let (input, ref_) = parse_ref(input)?;
+                (input, BasicBlockExit::ExitFn(ExitType::Return, ref_))
+            }
+            "throw" => {
+                let (input, ref_) = parse_ref(input)?;
+                (input, BasicBlockExit::ExitFn(ExitType::Throw, ref_))
             }
             "try" => {
                 // try @123 catch @456 finally @789 after @101112

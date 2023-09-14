@@ -251,6 +251,7 @@ fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
 fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
     match expr {
         BasicBlockInstruction::LitNumber(num) => (*num).into(),
+        BasicBlockInstruction::LitBool(s) => (*s).into(),
         BasicBlockInstruction::Undefined => {
             Expr::Ident(Ident::new("undefined".into(), Default::default()))
         }

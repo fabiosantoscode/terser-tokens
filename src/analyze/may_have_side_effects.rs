@@ -4,6 +4,7 @@ impl BasicBlockInstruction {
     pub fn may_have_side_effects(&self) -> bool {
         match self {
             BasicBlockInstruction::LitNumber(_) => false,
+            BasicBlockInstruction::LitBool(_) => false,
             BasicBlockInstruction::Ref(_) => false,
             BasicBlockInstruction::BinOp(_, _, _) => true, // may throw due to bigint
             BasicBlockInstruction::Undefined => false,

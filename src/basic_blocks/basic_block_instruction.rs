@@ -3,6 +3,7 @@ use super::FunctionId;
 #[derive(Clone, PartialEq)]
 pub enum BasicBlockInstruction {
     LitNumber(f64),
+    LitBool(bool),
     Ref(usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
     Undefined,
@@ -41,6 +42,7 @@ impl BasicBlockInstruction {
     pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
             BasicBlockInstruction::LitNumber(_) => vec![],
+            BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![id],
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
             BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
@@ -72,6 +74,7 @@ impl BasicBlockInstruction {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
             BasicBlockInstruction::LitNumber(_) => vec![],
+            BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![*id],
             BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
             BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),

@@ -10,7 +10,8 @@ impl BasicBlockInstruction {
             | BasicBlockInstruction::Function(_)
             | BasicBlockInstruction::Ref(_)
             | BasicBlockInstruction::Undefined
-            | BasicBlockInstruction::LitNumber(_) => true,
+            | BasicBlockInstruction::LitNumber(_)
+            | BasicBlockInstruction::LitBool(_) => true,
             _ => false,
         }
     }
