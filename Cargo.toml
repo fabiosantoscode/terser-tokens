@@ -28,6 +28,7 @@ deep-bind = "0.1.0"
 map-macro = "0.2.6"
 hamt = "0.2.0"
 v8 = "0.75.0"
+ordered-float = "3.9.1"
 
 swc_core = {version = "0.78.3", features = ["ecma_parser", "ecma_ast"] }
 swc_ecma_codegen = "0.141.2"
