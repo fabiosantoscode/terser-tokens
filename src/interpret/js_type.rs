@@ -12,6 +12,7 @@ pub enum JsType {
     Function,
     TheFunction(FunctionId),
     Array,
+    TheArray(Vec<JsType>),
     Any,
 }
 
@@ -48,6 +49,7 @@ impl JsType {
             JsType::Function => Some(true),
             JsType::TheFunction(_) => Some(true),
             JsType::Array => Some(true),
+            JsType::TheArray(_) => Some(true),
             JsType::Any => None,
         }
     }
@@ -65,6 +67,9 @@ impl JsType {
 
         for t in alternatives {
             result = result.union(t);
+            if let JsType::Any = result {
+                break;
+            }
         }
 
         result
@@ -122,6 +127,7 @@ impl std::fmt::Debug for JsType {
             JsType::Function => write!(f, "Function"),
             JsType::TheFunction(id) => write!(f, "TheFunction({})", id.0),
             JsType::Array => write!(f, "Array"),
+            JsType::TheArray(items) => write!(f, "TheArray({:?})", items),
             JsType::Any => write!(f, "Any"),
         }
     }

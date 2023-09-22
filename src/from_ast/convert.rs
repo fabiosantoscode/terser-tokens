@@ -342,7 +342,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         }
         Expr::This(_) => return ctx.push_instruction(BasicBlockInstruction::This),
         Expr::Array(array_lit) => {
-            let mut elements = vec![];
+            let mut elements = Vec::with_capacity(array_lit.elems.len());
 
             for elem in &array_lit.elems {
                 let elem = match elem {
@@ -375,7 +375,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             // TODO non-expr callees (super, import)
             let callee = expr_to_basic_blocks(ctx, &call.callee.clone().expect_expr());
 
-            let mut args = vec![];
+            let mut args = Vec::with_capacity(call.args.len());
             for arg in &call.args {
                 match arg.spread {
                     Some(_) => todo!("spread args"),

@@ -31,6 +31,15 @@ pub enum ArrayElement {
     Spread(usize),
 }
 
+impl ArrayElement {
+    pub fn as_item(&self) -> Option<usize> {
+        match self {
+            ArrayElement::Item(it) => Some(*it),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum TempExitType {
     Yield,
@@ -60,7 +69,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::CaughtError => vec![],
             BasicBlockInstruction::Function(_) => vec![],
             BasicBlockInstruction::Call(callee, args) => {
-                let mut res = vec![callee];
+                let mut res = Vec::with_capacity(args.len() + 1);
+                res.push(callee);
                 res.extend(args);
                 res
             }
@@ -92,7 +102,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::CaughtError => vec![],
             BasicBlockInstruction::Function(_) => vec![],
             BasicBlockInstruction::Call(callee, args) => {
-                let mut res = vec![*callee];
+                let mut res = Vec::with_capacity(args.len() + 1);
+                res.push(*callee);
                 res.extend(args);
                 res
             }

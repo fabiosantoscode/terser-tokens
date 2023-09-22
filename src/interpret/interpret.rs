@@ -4,6 +4,8 @@ use crate::basic_blocks::{ArrayElement, BasicBlockInstruction};
 
 use super::{interpret_function, InterpretCompletion, InterpretCtx, JsType};
 
+static ARRAY_MAX_ELEMENTS: usize = 100;
+
 pub fn interpret(
     ctx: &mut InterpretCtx,
     instruction: &BasicBlockInstruction,
@@ -34,13 +36,28 @@ pub fn interpret(
         BasicBlockInstruction::This => None?, // TODO: grab from context?
         BasicBlockInstruction::CaughtError => None?, // TODO: grab from context?
         BasicBlockInstruction::Array(elements) => {
-            for element in elements {
-                if let ArrayElement::Spread(_) | ArrayElement::Hole = element {
-                    return None;
-                }
+            let plain_items = elements
+                .iter()
+                .all(|elem| matches!(elem, ArrayElement::Item(_)));
+
+            if !plain_items {
+                return None;
             }
 
-            JsType::Array
+            if elements.len() < ARRAY_MAX_ELEMENTS {
+                let elements = elements
+                    .iter()
+                    .map(|elem| elem.as_item())
+                    .collect::<Option<Vec<_>>>()
+                    .and_then(|vars| ctx.get_variables(vars));
+
+                match elements {
+                    Some(elements) => JsType::TheArray(elements),
+                    None => JsType::Array,
+                }
+            } else {
+                JsType::Array
+            }
         }
         BasicBlockInstruction::TempExit(_, _) => None?, // TODO: yield, await
         BasicBlockInstruction::Phi(alternatives) => {
@@ -56,15 +73,16 @@ pub fn interpret(
         BasicBlockInstruction::Call(callee, args) => {
             let the_function = ctx.get_variable(*callee)?.as_function_id()?;
             let func = ctx.get_function(the_function)?.clone(/* TODO */);
-            let args = args
-                .iter()
-                .map(|arg| ctx.get_variable(*arg).cloned())
-                .collect::<Option<Vec<_>>>();
+            let args = args.iter().cloned().collect::<Vec<_>>();
+            let args = ctx.get_variables(args).into();
 
             interpret_function(ctx, &func, args)?.as_return()?
         }
         BasicBlockInstruction::ArgumentRead(n) => ctx.get_argument(*n)?.clone(),
-        BasicBlockInstruction::ArgumentRest(_) => None?, // TODO: grab from context?
+        BasicBlockInstruction::ArgumentRest(n) => match ctx.get_spread_argument(*n) {
+            Some(rest) => JsType::TheArray(rest.into()),
+            None => JsType::Array,
+        },
         BasicBlockInstruction::ReadNonLocal(_) => None?, // TODO: grab from context?
         BasicBlockInstruction::WriteNonLocal(_, _) => None?, // TODO: grab from context?
     };
@@ -108,10 +126,14 @@ fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<Js
 mod tests {
     use super::*;
 
-    use crate::{interpret::JsType, testutils::*};
+    use crate::{basic_blocks::FunctionId, interpret::JsType, testutils::*};
 
     fn test_interp(source: &str) -> Option<InterpretCompletion> {
         let mut ctx = InterpretCtx::new();
+        ctx.start_function(
+            FunctionId(0),
+            Some(vec![0.0.into(), 1.0.into(), 2.0.into()]).into(),
+        );
         ctx.assign_variable(1, JsType::new_number(1.0));
         ctx.assign_variable(2, JsType::new_number(2.0));
         let instructions = parse_instructions(&format!(
@@ -164,9 +186,15 @@ mod tests {
 
     #[test]
     fn test_array() {
-        insta::assert_debug_snapshot!(test_interp_normal("[]"), @"Array");
-        insta::assert_debug_snapshot!(test_interp_normal("[$1]"), @"Array");
+        insta::assert_debug_snapshot!(test_interp_normal("[]"), @"TheArray([])");
+        insta::assert_debug_snapshot!(test_interp_normal("[$1]"), @"TheArray([TheNumber(1)])");
         insta::assert_debug_snapshot!(test_interp_unknown("[$1, ...$2]"), @"true");
+    }
+
+    #[test]
+    fn test_arguments() {
+        insta::assert_debug_snapshot!(test_interp_normal("arguments[0]"), @"TheNumber(0)");
+        insta::assert_debug_snapshot!(test_interp_normal("arguments[1...]"), @"TheArray([TheNumber(1), TheNumber(2)])");
     }
 
     #[test]

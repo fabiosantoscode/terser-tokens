@@ -149,7 +149,7 @@ impl FromAstCtx {
 
     pub(crate) fn wrap_up_blocks(&mut self) -> (FunctionId, Vec<BasicBlock>) {
         let exit_count = self.exits.len();
-        let mut exits = vec![];
+        let mut exits = Vec::with_capacity(exit_count);
 
         for i in 0..exit_count {
             let e = &self.exits[i];

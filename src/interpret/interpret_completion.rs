@@ -24,6 +24,13 @@ impl InterpretCompletion {
         }
     }
 
+    pub(crate) fn as_return_ref(&self) -> Option<&JsType> {
+        match self {
+            InterpretCompletion::Return(t) => Some(t),
+            _ => None,
+        }
+    }
+
     pub fn as_known(self) -> Option<InterpretCompletion> {
         match self {
             InterpretCompletion::Unknown => None,
@@ -41,5 +48,31 @@ impl InterpretCompletion {
             (Continue(c1), Continue(c2)) if c1 == c2 => Some(self.clone()),
             _ => None,
         }
+    }
+
+    /// Merges all possible return types
+    pub(crate) fn merge_all_return<'comp, It>(completions: It) -> Option<JsType>
+    where
+        It: IntoIterator<Item = &'comp InterpretCompletion>,
+    {
+        let mut completions = completions.into_iter();
+
+        let mut accum = match completions.next().and_then(|c| match c {
+            InterpretCompletion::Return(t) => Some(t.clone()),
+            _ => None,
+        }) {
+            Some(first) => first,
+            None => return None,
+        };
+
+        for next_completion in completions {
+            accum = accum.union(next_completion.as_return_ref()?);
+
+            if let JsType::Any = accum {
+                return Some(JsType::Any);
+            }
+        }
+
+        Some(accum)
     }
 }

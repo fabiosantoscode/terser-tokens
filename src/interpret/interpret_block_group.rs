@@ -1,6 +1,6 @@
 use crate::basic_blocks::{BasicBlock, BasicBlockExit, BasicBlockGroup, ExitType};
 
-use super::{interpret, InterpretCompletion, InterpretCtx, JsType};
+use super::{interpret, InterpretCompletion, InterpretCtx, JsArgs};
 
 pub fn interpret_block_group(
     ctx: &mut InterpretCtx,
@@ -17,14 +17,14 @@ pub fn interpret_block_group(
 pub fn interpret_function(
     ctx: &mut InterpretCtx,
     block_group: &BasicBlockGroup,
-    args: Option<Vec<JsType>>,
+    args: JsArgs,
 ) -> Option<InterpretCompletion> {
     if let Some(cached) = ctx.get_cached(block_group.id, &args) {
         cached.clone()
     } else if ctx.can_cache(block_group.id) {
-        ctx.start_function(block_group.id, &args);
+        ctx.start_function(block_group.id, args);
         let interpretation = interpret_block_group(ctx, block_group);
-        ctx.end_function(block_group.id, &args, interpretation.clone());
+        ctx.end_function(block_group.id, interpretation.clone());
         interpretation
     } else {
         println!("interpret_function: {:?} {:?}", block_group.id, args);
