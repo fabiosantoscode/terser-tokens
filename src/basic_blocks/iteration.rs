@@ -1,184 +1,76 @@
 use super::{BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, FunctionId};
 
 impl BasicBlockModule {
-    pub fn iter_all_instructions<'a>(&'a self) -> ModuleInstructionIterator<'a> {
-        ModuleInstructionIterator {
-            blockgroup_iter: CurIterator::from_iterator(self.functions.iter()),
-            instruction_iter: None,
-        }
+    pub fn iter_all_instructions<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (FunctionId, usize, usize, &'a BasicBlockInstruction)> {
+        self.functions.iter().flat_map(|(func_id, block_group)| {
+            block_group
+                .blocks
+                .iter()
+                .enumerate()
+                .flat_map(move |(block_id, block)| {
+                    block
+                        .instructions
+                        .iter()
+                        .map(move |(varname, ins)| (*func_id, block_id, *varname, ins))
+                })
+        })
     }
 
-    pub fn iter_all_blocks<'a>(&'a self) -> ModuleBlockIterator<'a> {
-        ModuleBlockIterator {
-            blockgroup_iter: CurIterator::from_iterator(self.functions.iter()),
-            block_iter: None,
-        }
+    pub fn iter_all_instructions_mut<'a>(
+        &'a mut self,
+    ) -> impl Iterator<Item = (FunctionId, usize, usize, &'a mut BasicBlockInstruction)> {
+        self.functions
+            .iter_mut()
+            .flat_map(|(func_id, block_group)| {
+                block_group
+                    .blocks
+                    .iter_mut()
+                    .enumerate()
+                    .flat_map(move |(block_id, block)| {
+                        block
+                            .instructions
+                            .iter_mut()
+                            .map(move |(varname, ins)| (*func_id, block_id, *varname, ins))
+                    })
+            })
+    }
+
+    pub fn iter_all_blocks<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (FunctionId, usize, &'a BasicBlock)> {
+        self.functions
+            .iter()
+            .flat_map(|(function_id, block_group)| {
+                block_group
+                    .blocks
+                    .iter()
+                    .enumerate()
+                    .map(move |(block_id, block)| (*function_id, block_id, block))
+            })
     }
 }
 
 impl BasicBlockGroup {
-    pub fn iter_all_instructions<'a>(&'a self) -> BasicBlockGroupInstructionIterator<'a> {
-        BasicBlockGroupInstructionIterator {
-            block_iter: CurIterator::from_iterator(self.iter().enumerate()),
-            instruction_iter: None,
-        }
-    }
-}
-
-/// An "iterator" that remembers the last thing that went through it. next() is called automatically at the beginning so that cur() doesn't start with None.
-struct CurIterator<T, TIter>
-where
-    TIter: Iterator<Item = T>,
-{
-    iterator: TIter,
-    current: Option<T>,
-}
-
-impl<T, TIter> CurIterator<T, TIter>
-where
-    TIter: Iterator<Item = T>,
-    T: Copy,
-{
-    pub fn from_iterator(mut iterator: TIter) -> CurIterator<T, TIter> {
-        let current = iterator.next();
-        CurIterator { iterator, current }
-    }
-
-    fn cur(&mut self) -> Option<T> {
-        self.current
-    }
-
-    fn advance(&mut self) {
-        self.current = self.iterator.next();
-    }
-}
-
-pub struct BasicBlockGroupInstructionIterator<'a> {
-    block_iter: CurIterator<
-        (usize, &'a BasicBlock),
-        core::iter::Enumerate<core::slice::Iter<'a, BasicBlock>>,
-    >,
-    instruction_iter: Option<std::slice::Iter<'a, (usize, BasicBlockInstruction)>>,
-}
-
-impl<'a> Iterator for BasicBlockGroupInstructionIterator<'a> {
-    type Item = (usize, usize, &'a BasicBlockInstruction);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let ((block_index, _), (ins_id, instruction)) = nested_iter_advance(
-            &mut self.block_iter,
-            &mut self.instruction_iter,
-            &mut |(_, current_block): (usize, &BasicBlock)| current_block.instructions.iter(),
-        )?;
-
-        Some((block_index, *ins_id, instruction))
-    }
-}
-
-pub struct ModuleBlockIterator<'a> {
-    blockgroup_iter: CurIterator<
-        (&'a FunctionId, &'a BasicBlockGroup),
-        std::collections::btree_map::Iter<'a, FunctionId, BasicBlockGroup>,
-    >,
-    block_iter: Option<core::iter::Enumerate<core::slice::Iter<'a, BasicBlock>>>,
-}
-
-impl<'a> Iterator for ModuleBlockIterator<'a> {
-    type Item = (FunctionId, usize, &'a BasicBlock);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let ((function_id, _), (block_id, block)) = nested_iter_advance(
-            &mut self.blockgroup_iter,
-            &mut self.block_iter,
-            &mut |(_, current_blockgroup): (&FunctionId, &BasicBlockGroup)| {
-                current_blockgroup.iter().enumerate()
-            },
-        )?;
-
-        Some((*function_id, block_id, block))
-    }
-}
-
-pub struct ModuleInstructionIterator<'a> {
-    blockgroup_iter: CurIterator<
-        (&'a FunctionId, &'a BasicBlockGroup),
-        std::collections::btree_map::Iter<'a, FunctionId, BasicBlockGroup>,
-    >,
-    instruction_iter: Option<BasicBlockGroupInstructionIterator<'a>>,
-}
-
-impl<'a> Iterator for ModuleInstructionIterator<'a> {
-    type Item = (FunctionId, usize, usize, &'a BasicBlockInstruction);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let ((function_id, _), (block_id, ins_id, instruction)) = nested_iter_advance(
-            &mut self.blockgroup_iter,
-            &mut self.instruction_iter,
-            &mut |(_, current_blockgroup): (&FunctionId, &BasicBlockGroup)| {
-                current_blockgroup.iter_all_instructions()
-            },
-        )?;
-
-        Some((*function_id, block_id, ins_id, instruction))
-    }
-}
-
-fn nested_iter_advance<OuterT, OuterTIter, InnerT, InnerTIter, CreateInnerIter>(
-    outer_iter: &mut CurIterator<OuterT, OuterTIter>,
-    mut maybe_inner_iter: &mut Option<InnerTIter>,
-    create_inner_iter: &mut CreateInnerIter,
-) -> Option<(OuterT, InnerT)>
-where
-    OuterTIter: Iterator<Item = OuterT>,
-    InnerTIter: Iterator<Item = InnerT>,
-    OuterT: Copy,
-    InnerT: Copy,
-    CreateInnerIter: FnMut(OuterT) -> InnerTIter,
-{
-    loop {
-        let Some(outer_item) = outer_iter.cur() else { return None };
-
-        let inner_iter = match &mut maybe_inner_iter {
-            Some(inner_iter) => inner_iter,
-            None => {
-                *maybe_inner_iter = Some(create_inner_iter(outer_item));
-                maybe_inner_iter.as_mut().unwrap()
-            }
-        };
-
-        match inner_iter.next() {
-            Some(inner_item) => return Some((outer_item, inner_item)),
-            None => {
-                *maybe_inner_iter = None;
-                outer_iter.advance();
-                continue;
-            }
-        }
+    pub fn iter_all_instructions<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (usize, usize, &'a BasicBlockInstruction)> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .flat_map(move |(block_id, block)| {
+                block
+                    .instructions
+                    .iter()
+                    .map(move |(varname, ins)| (block_id, *varname, ins))
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::testutils::*;
-
-    use super::*;
-
-    #[test]
-    fn test_cur_iterator() {
-        let v = vec![1, 2];
-        let inner_it = v.iter();
-
-        let mut it = CurIterator::from_iterator(inner_it);
-
-        assert_eq!(it.cur(), Some(&1));
-        assert_eq!(it.advance(), ());
-        assert_eq!(it.cur(), Some(&2));
-        assert_eq!(it.advance(), ());
-
-        assert_eq!(it.cur(), None);
-        assert_eq!(it.advance(), ());
-        assert_eq!(it.cur(), None);
-    }
 
     #[test]
     fn test_blockgroup_instruction_iterator() {
