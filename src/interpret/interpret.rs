@@ -2,14 +2,14 @@ use ordered_float::NotNan;
 
 use crate::basic_blocks::{ArrayElement, BasicBlockInstruction};
 
-use super::{interpret_function, InterpretCompletion, InterpretCtx, JsType};
+use super::{interpret_function, InterpretCtx, JsCompletion, JsType};
 
 static ARRAY_MAX_ELEMENTS: usize = 100;
 
 pub fn interpret(
     ctx: &mut InterpretCtx,
     instruction: &BasicBlockInstruction,
-) -> Option<InterpretCompletion> {
+) -> Option<JsCompletion> {
     let normal_completion = match instruction {
         BasicBlockInstruction::LitNumber(n) => JsType::new_number(*n),
         BasicBlockInstruction::LitBool(b) => JsType::TheBoolean(*b),
@@ -87,7 +87,7 @@ pub fn interpret(
         BasicBlockInstruction::WriteNonLocal(_, _) => None?, // TODO: grab from context?
     };
 
-    Some(InterpretCompletion::Normal(normal_completion))
+    Some(JsCompletion::Normal(normal_completion))
 }
 
 fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<JsType> {
@@ -128,7 +128,7 @@ mod tests {
 
     use crate::{basic_blocks::FunctionId, interpret::JsType, testutils::*};
 
-    fn test_interp(source: &str) -> Option<InterpretCompletion> {
+    fn test_interp(source: &str) -> Option<JsCompletion> {
         let mut ctx = InterpretCtx::new();
         ctx.start_function(
             FunctionId(0),
@@ -148,7 +148,7 @@ mod tests {
 
     fn test_interp_normal(source: &str) -> JsType {
         match test_interp(source) {
-            Some(InterpretCompletion::Normal(t)) => t,
+            Some(JsCompletion::Normal(t)) => t,
             comp => panic!("expected normal completion, got {:?}", comp),
         }
     }

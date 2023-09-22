@@ -1,7 +1,7 @@
 use super::JsType;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum InterpretCompletion {
+pub enum JsCompletion {
     Normal(JsType),
     Break(usize),
     Continue(usize),
@@ -9,38 +9,38 @@ pub enum InterpretCompletion {
     Unknown,
 }
 
-impl InterpretCompletion {
+impl JsCompletion {
     pub fn as_normal(self) -> Option<JsType> {
         match self {
-            InterpretCompletion::Normal(t) => Some(t),
+            JsCompletion::Normal(t) => Some(t),
             _ => None,
         }
     }
 
     pub(crate) fn as_return(self) -> Option<JsType> {
         match self {
-            InterpretCompletion::Return(t) => Some(t),
+            JsCompletion::Return(t) => Some(t),
             _ => None,
         }
     }
 
     pub(crate) fn as_return_ref(&self) -> Option<&JsType> {
         match self {
-            InterpretCompletion::Return(t) => Some(t),
+            JsCompletion::Return(t) => Some(t),
             _ => None,
         }
     }
 
-    pub fn as_known(self) -> Option<InterpretCompletion> {
+    pub fn as_known(self) -> Option<JsCompletion> {
         match self {
-            InterpretCompletion::Unknown => None,
+            JsCompletion::Unknown => None,
             _ => Some(self),
         }
     }
 
     /// Returns a completion that merges `self` and `other`, or None if the completions are not compatible.
-    pub(crate) fn merge(&self, other: &InterpretCompletion) -> Option<InterpretCompletion> {
-        use InterpretCompletion::*;
+    pub(crate) fn merge(&self, other: &JsCompletion) -> Option<JsCompletion> {
+        use JsCompletion::*;
         match (self, other) {
             (Normal(t1), Normal(t2)) => Some(Normal(t1.union(&t2))),
             (Return(t1), Return(t2)) => Some(Return(t1.union(&t2))),
@@ -53,12 +53,12 @@ impl InterpretCompletion {
     /// Merges all possible return types
     pub(crate) fn merge_all_return<'comp, It>(completions: It) -> Option<JsType>
     where
-        It: IntoIterator<Item = &'comp InterpretCompletion>,
+        It: IntoIterator<Item = &'comp JsCompletion>,
     {
         let mut completions = completions.into_iter();
 
         let mut accum = match completions.next().and_then(|c| match c {
-            InterpretCompletion::Return(t) => Some(t.clone()),
+            JsCompletion::Return(t) => Some(t.clone()),
             _ => None,
         }) {
             Some(first) => first,

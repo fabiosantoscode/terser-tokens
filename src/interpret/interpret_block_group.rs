@@ -1,11 +1,11 @@
 use crate::basic_blocks::{BasicBlock, BasicBlockExit, BasicBlockGroup, ExitType};
 
-use super::{interpret, InterpretCompletion, InterpretCtx, JsArgs};
+use super::{interpret, InterpretCtx, JsArgs, JsCompletion};
 
 pub fn interpret_block_group(
     ctx: &mut InterpretCtx,
     block_group: &BasicBlockGroup,
-) -> Option<InterpretCompletion> {
+) -> Option<JsCompletion> {
     let completion =
         interpret_block_group_inner(ctx, block_group, 0..=(block_group.blocks.len() - 1))?
             .as_known()?;
@@ -18,7 +18,7 @@ pub fn interpret_function(
     ctx: &mut InterpretCtx,
     block_group: &BasicBlockGroup,
     args: JsArgs,
-) -> Option<InterpretCompletion> {
+) -> Option<JsCompletion> {
     if let Some(cached) = ctx.get_cached(block_group.id, &args) {
         cached.clone()
     } else if ctx.can_cache(block_group.id) {
@@ -39,7 +39,7 @@ fn interpret_block_group_inner(
     ctx: &mut InterpretCtx,
     block_group: &BasicBlockGroup,
     range: std::ops::RangeInclusive<usize>,
-) -> Option<InterpretCompletion> {
+) -> Option<JsCompletion> {
     let mut index = *range.start();
 
     for _safety in 0..MAX_ITERATIONS {
@@ -57,7 +57,7 @@ fn interpret_block_group_inner(
                 if jump <= range.end() {
                     index = *jump;
                 } else {
-                    return Some(InterpretCompletion::Break(*jump));
+                    return Some(JsCompletion::Break(*jump));
                 }
             }
             BasicBlockExit::Continue(target) => {
@@ -65,13 +65,13 @@ fn interpret_block_group_inner(
                 if target >= range.start() {
                     index = *target;
                 } else {
-                    return Some(InterpretCompletion::Continue(*target));
+                    return Some(JsCompletion::Continue(*target));
                 }
             }
             BasicBlockExit::ExitFn(exit_type, returned) => match exit_type {
                 ExitType::Return => {
                     let ret = ctx.get_variable(*returned)?.clone();
-                    return Some(InterpretCompletion::Return(ret));
+                    return Some(JsCompletion::Return(ret));
                 }
                 ExitType::Throw => return None,
             },
@@ -92,17 +92,17 @@ fn interpret_block_group_inner(
 
                 // propagate the branch completion. If we returned or broke out of our range, return that.
                 match &branch_completion {
-                    InterpretCompletion::Return(_) | InterpretCompletion::Unknown => {
+                    JsCompletion::Return(_) | JsCompletion::Unknown => {
                         return Some(branch_completion);
                     }
-                    InterpretCompletion::Break(b) | InterpretCompletion::Continue(b) => {
+                    JsCompletion::Break(b) | JsCompletion::Continue(b) => {
                         if range.contains(b) {
                             index = *b;
                         } else {
                             return Some(branch_completion);
                         }
                     }
-                    InterpretCompletion::Normal(_) => {
+                    JsCompletion::Normal(_) => {
                         if index < *range.end() {
                             index += 1;
                         } else {
@@ -128,7 +128,7 @@ mod tests {
     use crate::{interpret::JsType, testutils::*};
 
     const ANY_VAR: usize = 666;
-    fn test_interp(source: &str) -> Option<InterpretCompletion> {
+    fn test_interp(source: &str) -> Option<JsCompletion> {
         let ctx = &mut InterpretCtx::new();
         ctx.assign_variable(ANY_VAR, JsType::Any);
         let block_group = parse_instructions(source);
@@ -137,7 +137,7 @@ mod tests {
 
     fn test_interp_ret(source: &str) -> JsType {
         match test_interp(source) {
-            Some(InterpretCompletion::Return(t)) => t,
+            Some(JsCompletion::Return(t)) => t,
             comp => panic!("expected normal completion, got {:?}", comp),
         }
     }

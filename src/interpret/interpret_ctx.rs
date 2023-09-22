@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::analyze::function_usage_count;
 use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, FunctionId};
 
-use super::{interpret_function, InterpretCompletion, JsArgs, JsType};
+use super::{interpret_function, JsArgs, JsCompletion, JsType};
 
 #[derive(Debug, Default)]
 pub struct InterpretCtx<'module> {
@@ -62,7 +62,7 @@ impl<'module> InterpretCtx<'_> {
         &self,
         fn_id: FunctionId,
         args: &JsArgs,
-    ) -> Option<&Option<InterpretCompletion>> {
+    ) -> Option<&Option<JsCompletion>> {
         self.cached_functions
             .get(&fn_id)
             .and_then(|cached_function| cached_function.get_cached_for_args(args))
@@ -84,11 +84,7 @@ impl<'module> InterpretCtx<'_> {
         self.arguments.push(args);
     }
 
-    pub(crate) fn end_function(
-        &mut self,
-        function_id: FunctionId,
-        result: Option<InterpretCompletion>,
-    ) {
+    pub(crate) fn end_function(&mut self, function_id: FunctionId, result: Option<JsCompletion>) {
         let assigned_vars = self
             .variables
             .pop()
@@ -172,7 +168,7 @@ const CACHED_VARIANTS_LIMIT: usize = 10;
 #[derive(Debug, Default, PartialEq)]
 pub struct CachedFunction {
     caching: BTreeSet<JsArgs>,
-    cached: BTreeMap<JsArgs, Option<InterpretCompletion>>,
+    cached: BTreeMap<JsArgs, Option<JsCompletion>>,
 }
 
 impl CachedFunction {
@@ -184,7 +180,7 @@ impl CachedFunction {
         self.cached.len() < CACHED_VARIANTS_LIMIT
     }
 
-    fn get_cached_for_args(&self, args: &JsArgs) -> Option<&Option<InterpretCompletion>> {
+    fn get_cached_for_args(&self, args: &JsArgs) -> Option<&Option<JsCompletion>> {
         self.cached.get(args)
     }
 
@@ -197,7 +193,7 @@ impl CachedFunction {
         self.caching.insert(args.clone());
     }
 
-    fn end_caching(&mut self, args: &JsArgs, result: Option<InterpretCompletion>) {
+    fn end_caching(&mut self, args: &JsArgs, result: Option<JsCompletion>) {
         let was_cached = self.caching.remove(args);
         assert!(was_cached);
         self.cached.insert(args.clone(), result);
@@ -208,7 +204,11 @@ impl CachedFunction {
             return None;
         }
 
-        assert_eq!(self.caching, BTreeSet::new(), "still caching, cannot consolidate");
+        assert_eq!(
+            self.caching,
+            BTreeSet::new(),
+            "still caching, cannot consolidate"
+        );
 
         let args = JsArgs::consolidate_all(self.cached.iter().map(|(args, _)| args));
         let completions = self
@@ -216,7 +216,7 @@ impl CachedFunction {
             .iter()
             .map(|(_, completion)| completion.as_ref())
             .collect::<Option<Vec<_>>>()
-            .and_then(InterpretCompletion::merge_all_return);
+            .and_then(JsCompletion::merge_all_return);
 
         Some((args, completions))
     }
