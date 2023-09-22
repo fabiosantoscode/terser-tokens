@@ -205,7 +205,7 @@ impl Debug for BasicBlockGroup {
             BasicBlockEnvironmentType::Module => {}
             BasicBlockEnvironmentType::Function(_argc) => writeln!(f, "function():")?,
         }
-        for (i, v) in self.iter().enumerate() {
+        for (i, v) in self.iter() {
             if i > 0 {
                 write!(f, "\n")?;
             }

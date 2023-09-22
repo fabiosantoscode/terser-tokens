@@ -14,7 +14,7 @@ pub fn normalize_basic_blocks(
 
     let jumped_to = get_blocks_jumped_to(&exits);
 
-    // keep track of eliminated block and how labels change around
+    // keep track of eliminated blocks and how labels change around
     let mut eliminated_count = 0;
     let mut swapped_labels: HashMap<usize, usize> = Default::default();
 
@@ -30,15 +30,15 @@ pub fn normalize_basic_blocks(
         .fold(
             (out_exits, out_basic_blocks),
             |(mut out_exits, mut out_basic_blocks), (i, (exit, block))| {
-                if unmergeable(&exit) {
+                let prev_exit = out_exits.last();
+                let prev_block = out_basic_blocks.last();
+
+                if unmergeable(&exit) || prev_exit.map(unmergeable) == Some(true) {
                     out_exits.push(exit);
                     out_basic_blocks.push(block);
                 } else if !reachable_blocks.contains(&i) {
                     eliminated_count += 1;
                 } else {
-                    let prev_exit = out_exits.last();
-                    let prev_block = out_basic_blocks.last();
-
                     if should_merge_blocks(&jumped_to, prev_exit, prev_block, &exit, &block, i) {
                         let prev_exit = out_exits.last_mut().unwrap();
                         let prev_block = out_basic_blocks.last_mut().unwrap();
@@ -80,11 +80,11 @@ fn should_merge_blocks(
         (Some(prev_exit @ BasicBlockExit::Jump(jump_target)), Some(prev_block)) => {
             if
             // the blocks are the same -- can merge
-            &*prev_exit == exit && block == &*prev_block
+            (block, exit) == (prev_block, prev_exit)
             // the previous block ends with a jump to this block -- can merge unless it's a jump target
-                || *jump_target == block_idx
+                || (*jump_target == block_idx
                     && !jumped_to.contains(&jump_target)
-                    && !jumped_to.contains(&block_idx)
+                    && !jumped_to.contains(&block_idx))
             {
                 true
             } else {
@@ -138,6 +138,17 @@ fn get_reachable_blocks(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
     let mut reachable_blocks = HashSet::new();
     let mut stack = vec![0];
 
+    use BasicBlockExit::*;
+
+    // Unconditionally reachable blocks, because try..catch is finnicky
+    stack.extend(exits.iter().flat_map(|exit| match exit {
+        SetTryAndCatch(try_, catch, finally, after) => vec![*try_, *catch, *finally, *after],
+        PopCatch(catch, finally) => vec![*catch, *finally],
+        PopFinally(finally, _) => vec![*finally],
+        EndFinally(after) => vec![*after],
+        _ => Vec::with_capacity(0),
+    }));
+
     while let Some(block) = stack.pop() {
         if reachable_blocks.contains(&block) {
             continue;
@@ -163,11 +174,11 @@ mod tests {
 
         let block_exits = blocks
             .iter()
-            .map(|block| block.exit.clone())
+            .map(|(_, block)| block.exit.clone())
             .collect::<Vec<_>>();
         let block_instructions = blocks
             .into_iter()
-            .map(|block| block.instructions)
+            .map(|(_, block)| block.instructions)
             .collect::<Vec<_>>();
 
         let (block_exits, block_instructions) =
@@ -176,7 +187,8 @@ mod tests {
         let blocks = block_instructions
             .into_iter()
             .zip(block_exits.into_iter())
-            .map(|(block, exit)| BasicBlock::new(block, exit))
+            .enumerate()
+            .map(|(i, (block, exit))| (i, BasicBlock::new(block, exit)))
             .collect();
 
         BasicBlockGroup {

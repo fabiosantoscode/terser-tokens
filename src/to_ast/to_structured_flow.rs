@@ -83,13 +83,20 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
         start_blk: usize,
         end_blk: usize,
     ) -> Vec<StructuredFlow> {
-        match &func.blocks[start_blk..=end_blk] {
-            [block, ..] => {
-                let mut rest = start_blk + 1;
+        if end_blk < start_blk {
+            return vec![];
+        }
 
-                let mut blocks = vec![StructuredFlow::BasicBlock(start_blk)];
+        let first_block = func.blocks.range(start_blk..=end_blk).into_iter().next();
+
+        match first_block {
+            Some((blk_id, block)) => {
+                let mut rest = blk_id + 1;
+
+                let mut blocks = vec![StructuredFlow::BasicBlock(*blk_id)];
 
                 match block.exit {
+                    BasicBlockExit::Jump(to) => rest = to,
                     BasicBlockExit::Break(tgt) => {
                         blocks.extend(vec![StructuredFlow::Break(ctx.break_index(tgt))])
                     }
@@ -144,19 +151,22 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
                             )])
                         })
                     }
-                    _ => blocks.extend(vec![]),
+                    BasicBlockExit::PopCatch(catch, _) => rest = catch,
+                    BasicBlockExit::PopFinally(finally, _) => rest = finally,
+                    BasicBlockExit::EndFinally(after) => rest = after,
                 };
 
                 blocks.extend(do_tree_chunk(ctx, func, rest, end_blk));
 
                 blocks
             }
-            [] => vec![],
+            None => vec![],
         }
     }
 
     let mut ctx = Ctx::new();
-    let tree = StructuredFlow::Block(do_tree_chunk(&mut ctx, &func, 0, func.blocks.len() - 1));
+    let (first, last) = func.get_block_range();
+    let tree = StructuredFlow::Block(do_tree_chunk(&mut ctx, &func, first, last));
 
     tree.simplify()
 }
@@ -756,6 +766,54 @@ mod tests {
                 [BasicBlockRef(8), BasicBlockRef(9)]
                 [BasicBlockRef(10), BasicBlockRef(11)]
             ), BasicBlockRef(12), Return]
+        )
+        "###);
+    }
+
+    #[test]
+    fn mk_sparse() {
+        let func = parse_instructions(
+            r###"
+            @0: {
+                $0 = 1
+                $1 = $0
+                $2 = 1
+                $3 = $1 == $2
+                exit = jump @1
+            }
+            @1: {
+                $4 = $0
+                $5 = 1
+                $6 = $4 == $5
+                exit = jump @2
+            }
+            @2: {
+                $7 = $0
+                $8 = 2000
+                $9 = $7 + $8
+                $10 = $9
+                exit = jump @4
+            }
+            @4: {
+                $13 = either($0, $9)
+                $14 = $13
+                $15 = 1000
+                $16 = $14 + $15
+                $17 = $16
+                exit = jump @6
+            }
+            @6: {
+                $20 = either($13, $16)
+                $21 = $20
+                exit = return $21
+            }
+            "###,
+        );
+
+        let stats = do_tree(&func);
+        insta::assert_debug_snapshot!(stats, @r###"
+        Block(
+            [BasicBlockRef(0), BasicBlockRef(1), BasicBlockRef(2), BasicBlockRef(4), BasicBlockRef(6), Return]
         )
         "###);
     }

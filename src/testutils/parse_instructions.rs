@@ -432,7 +432,9 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         Ok((input, index.parse().unwrap()))
     }
 
-    fn basic_block(input: &str) -> IResult<&str, BasicBlock> {
+    fn basic_block(input: &str) -> IResult<&str, (usize, BasicBlock)> {
+        let (input, index) = basic_block_header(input)?;
+
         let input = whitespace!(input);
         // whitespace
         let input = whitespace!(input);
@@ -451,7 +453,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
 
         let input = whitespace!(input);
 
-        Ok((input, BasicBlock { instructions, exit }))
+        Ok((input, (index, BasicBlock { instructions, exit })))
     }
     fn parse_ref(input: &str) -> IResult<&str, usize> {
         let (input, _) = tag("$")(input)?;
@@ -469,8 +471,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         Ok((input, n.parse().unwrap()))
     }
 
-    let (input, blocks) =
-        many0(preceded(basic_block_header, cut(basic_block)))(input).expect("bad basic blocks");
+    let (input, blocks) = many0(basic_block)(input).expect("bad basic blocks");
 
     let (input, _) = eof(input)?;
 
@@ -479,7 +480,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
     Ok((
         input,
         BasicBlockGroup {
-            blocks,
+            blocks: blocks.into_iter().collect(),
             ..Default::default()
         },
     ))

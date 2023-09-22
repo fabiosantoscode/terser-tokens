@@ -8,12 +8,11 @@ impl BasicBlockModule {
             block_group
                 .blocks
                 .iter()
-                .enumerate()
                 .flat_map(move |(block_id, block)| {
                     block
                         .instructions
                         .iter()
-                        .map(move |(varname, ins)| (*func_id, block_id, *varname, ins))
+                        .map(move |(varname, ins)| (*func_id, *block_id, *varname, ins))
                 })
         })
     }
@@ -27,12 +26,11 @@ impl BasicBlockModule {
                 block_group
                     .blocks
                     .iter_mut()
-                    .enumerate()
                     .flat_map(move |(block_id, block)| {
                         block
                             .instructions
                             .iter_mut()
-                            .map(move |(varname, ins)| (*func_id, block_id, *varname, ins))
+                            .map(move |(varname, ins)| (*func_id, *block_id, *varname, ins))
                     })
             })
     }
@@ -46,8 +44,7 @@ impl BasicBlockModule {
                 block_group
                     .blocks
                     .iter()
-                    .enumerate()
-                    .map(move |(block_id, block)| (*function_id, block_id, block))
+                    .map(move |(block_id, block)| (*function_id, *block_id, block))
             })
     }
 }
@@ -56,15 +53,12 @@ impl BasicBlockGroup {
     pub fn iter_all_instructions<'a>(
         &'a self,
     ) -> impl Iterator<Item = (usize, usize, &'a BasicBlockInstruction)> {
-        self.blocks
-            .iter()
-            .enumerate()
-            .flat_map(move |(block_id, block)| {
-                block
-                    .instructions
-                    .iter()
-                    .map(move |(varname, ins)| (block_id, *varname, ins))
-            })
+        self.blocks.iter().flat_map(move |(block_id, block)| {
+            block
+                .instructions
+                .iter()
+                .map(move |(varname, ins)| (*block_id, *varname, ins))
+        })
     }
 }
 

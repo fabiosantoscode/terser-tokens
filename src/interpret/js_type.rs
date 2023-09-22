@@ -1,6 +1,6 @@
 use ordered_float::NotNan;
 
-use crate::basic_blocks::FunctionId;
+use crate::basic_blocks::{BasicBlockInstruction, FunctionId};
 
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub enum JsType {
@@ -39,6 +39,10 @@ impl JsType {
         }
     }
 
+    /// Returns `Some(true)` if the type is definitely truthy, `Some(false)` if the type is
+    /// definitely falsy, or `None` if the type is unknown.
+    ///
+    /// Usable for "if" statements, "||", "&&", etc.
     pub fn is_truthy(&self) -> Option<bool> {
         match self {
             JsType::Undefined => Some(false),
@@ -111,6 +115,14 @@ impl JsType {
     pub(crate) fn as_function_id(&self) -> Option<FunctionId> {
         match self {
             JsType::TheFunction(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_small_literal_instruction(&self) -> Option<BasicBlockInstruction> {
+        match self {
+            JsType::TheBoolean(b) => Some(BasicBlockInstruction::LitBool(*b)),
+            JsType::TheNumber(n) => Some(BasicBlockInstruction::LitNumber((*n).into())),
             _ => None,
         }
     }

@@ -6,9 +6,12 @@ pub fn interpret_block_group(
     ctx: &mut InterpretCtx,
     block_group: &BasicBlockGroup,
 ) -> Option<JsCompletion> {
+    assert_ne!(block_group.blocks.len(), 0, "block group has no entries");
+
+    let (first_block, last_block) = block_group.get_block_range();
+
     let completion =
-        interpret_block_group_inner(ctx, block_group, 0..=(block_group.blocks.len() - 1))?
-            .as_known()?;
+        interpret_block_group_inner(ctx, block_group, first_block..=last_block)?.as_known()?;
     ctx.mark_function_evaluated(block_group.id);
     Some(completion)
 }
@@ -43,7 +46,7 @@ fn interpret_block_group_inner(
     let mut index = *range.start();
 
     for _safety in 0..MAX_ITERATIONS {
-        let BasicBlock { instructions, exit } = &block_group.blocks[index];
+        let BasicBlock { instructions, exit } = &block_group.blocks[&index];
 
         for (varname, instruction) in instructions {
             let yielded_type = interpret(ctx, instruction)?.as_normal()?;
@@ -96,7 +99,7 @@ fn interpret_block_group_inner(
                         return Some(branch_completion);
                     }
                     JsCompletion::Break(b) | JsCompletion::Continue(b) => {
-                        if range.contains(b) {
+                        if range.contains(&b) {
                             index = *b;
                         } else {
                             return Some(branch_completion);

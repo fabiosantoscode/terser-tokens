@@ -1174,4 +1174,95 @@ mod tests {
         }
         "###);
     }
+
+    #[test]
+    fn a_nested_trycatchfinally() {
+        let s = test_basic_blocks(
+            "var x = 10;
+            try {
+                if (x > 10) {
+                    throw 123;
+                }
+            } catch (e) {
+                try {
+                    return 456;
+                } catch (e2) {
+                    return 789;
+                }
+            }
+            return x;",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 10
+            exit = jump @1
+        }
+        @1: {
+            exit = try @2 catch @7 finally @17 after @18
+        }
+        @2: {
+            $1 = $0
+            $2 = 10
+            $3 = $1 > $2
+            exit = cond $3 ? @3..@3 : @4..@4
+        }
+        @3: {
+            $4 = 123
+            exit = throw $4
+        }
+        @4: {
+            exit = jump @5
+        }
+        @5: {
+            exit = jump @6
+        }
+        @6: {
+            exit = error ? jump @7 : jump @16
+        }
+        @7: {
+            $5 = caught_error()
+            exit = jump @8
+        }
+        @8: {
+            exit = try @9 catch @11 finally @13 after @14
+        }
+        @9: {
+            $6 = 456
+            exit = return $6
+        }
+        @10: {
+            exit = error ? jump @11 : jump @12
+        }
+        @11: {
+            $7 = caught_error()
+            $8 = 789
+            exit = return $8
+        }
+        @12: {
+            exit = finally @13 after @14
+        }
+        @13: {
+            exit = jump @14
+        }
+        @14: {
+            exit = end finally after @15
+        }
+        @15: {
+            exit = jump @16
+        }
+        @16: {
+            exit = finally @17 after @18
+        }
+        @17: {
+            exit = jump @18
+        }
+        @18: {
+            exit = end finally after @19
+        }
+        @19: {
+            $9 = $0
+            exit = return $9
+        }
+        "###);
+    }
 }

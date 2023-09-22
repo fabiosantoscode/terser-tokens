@@ -5,7 +5,7 @@ use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, FunctionId};
 
 use super::{interpret_function, JsArgs, JsCompletion, JsType};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InterpretCtx<'module> {
     variables: Vec<BTreeMap<usize, JsType>>,
     arguments: Vec<JsArgs>,
@@ -14,12 +14,20 @@ pub struct InterpretCtx<'module> {
     functions_evaluated: BTreeMap<FunctionId, usize>,
 }
 
+impl<'module> Default for InterpretCtx<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'module> InterpretCtx<'_> {
     pub(crate) fn new() -> InterpretCtx<'module> {
         InterpretCtx {
             variables: vec![BTreeMap::new()],
             arguments: vec![Default::default()],
-            ..Default::default()
+            cached_functions: Default::default(),
+            module: Default::default(),
+            functions_evaluated: Default::default(),
         }
     }
 
@@ -160,6 +168,17 @@ impl<'module> InterpretCtx<'_> {
     pub(crate) fn mark_function_evaluated(&mut self, id: FunctionId) {
         let count = self.functions_evaluated.entry(id).or_insert(0);
         *count += 1;
+    }
+
+    /// Coalesce this context into an index of all variables and their values
+    pub(crate) fn into_all_variables(mut self) -> BTreeMap<usize, JsType> {
+        assert_eq!(
+            self.variables.len(),
+            1,
+            "this must be called outside of an interpretation phase"
+        );
+
+        std::mem::take(&mut self.variables[0])
     }
 }
 

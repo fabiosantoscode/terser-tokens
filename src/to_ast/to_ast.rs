@@ -79,7 +79,7 @@ fn to_statements(
     match node {
         StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(block_idx) => {
-            let stats = &block_group.blocks[*block_idx].instructions;
+            let stats = &block_group.blocks[block_idx].instructions;
 
             stats
                 .iter()
@@ -525,6 +525,19 @@ mod tests {
         e = f;
         d() + f();
         return undefined;
+        "###);
+    }
+
+    #[test]
+    fn removes_unused() {
+        let block_group = test_basic_blocks_module(
+            "var a = 1
+            return 2",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        return 2;
         "###);
     }
 

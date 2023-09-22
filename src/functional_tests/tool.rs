@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use v8;
 
-use crate::compress::compress;
+use crate::{compress::compress, from_ast::module_to_basic_blocks, swc_parse::swc_parse};
 
 static INITIALIZED: Mutex<bool> = Mutex::new(false);
 
@@ -26,6 +26,15 @@ pub fn run_checks(s: &str) -> String {
     let Some(reference) = run_code_for_logs(scope, s) else {
         panic!("failed to run reference code {s}")
     };
+
+    // Interim log
+    {
+        let module = swc_parse(s);
+
+        let mut module = module_to_basic_blocks("input.js", &module).unwrap();
+
+        println!("instructions: {:?}", module);
+    }
 
     let comp_s = compress(s);
     let Some(compressed) = run_code_for_logs(scope, &comp_s) else {
