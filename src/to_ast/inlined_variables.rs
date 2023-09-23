@@ -23,14 +23,14 @@ pub fn get_inlined_variables(
         for (_, block) in block_group.iter() {
             ctx.non_reorderable_candidates = Default::default();
 
-            for (var_idx, instruction) in block.instructions.iter() {
+            for (var_idx, instruction) in block.iter() {
                 // In reverse, check if we can inline an argument in here.
                 mark_deps(&mut ctx, instruction.used_vars());
 
-                if ctx.is_single_use(*var_idx) {
+                if ctx.is_single_use(var_idx) {
                     // We can inline this variable later. Is it reorderable or not?
                     if !instruction.can_be_reordered() {
-                        ctx.non_reorderable_candidates.push((*var_idx, instruction));
+                        ctx.non_reorderable_candidates.push((var_idx, instruction));
                     }
                 }
             }

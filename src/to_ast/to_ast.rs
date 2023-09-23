@@ -79,11 +79,9 @@ fn to_statements(
     match node {
         StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(block_idx) => {
-            let stats = &block_group.blocks[block_idx].instructions;
-
-            stats
+            block_group.blocks[block_idx]
                 .iter()
-                .flat_map(|(varname, ins)| instruction_to_statement(ctx, *varname, ins))
+                .flat_map(|(varname, ins)| instruction_to_statement(ctx, varname, ins))
                 .collect::<Vec<_>>()
         }
         StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {

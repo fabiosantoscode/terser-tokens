@@ -52,13 +52,13 @@ fn remove_phi_inner(block: &mut BasicBlock, phies_to_final_name: &mut HashMap<us
         _ => true,
     });
 
-    for x in block.instructions.iter_mut() {
-        if let Some(final_name) = phies_to_final_name.get(&x.0) {
-            (*x).0 = *final_name;
+    for x in block.iter_varnames_mut() {
+        if let Some(final_name) = phies_to_final_name.get(&x) {
+            *x = *final_name;
         }
     }
 
-    for (_, ins) in block.instructions.iter_mut() {
+    for (_, ins) in block.iter_mut() {
         for used_var in ins.used_vars_mut() {
             if let Some(final_name) = phies_to_final_name.get(used_var) {
                 *used_var = *final_name;

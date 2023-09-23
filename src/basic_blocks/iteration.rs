@@ -5,47 +5,34 @@ impl BasicBlockModule {
         &'a self,
     ) -> impl Iterator<Item = (FunctionId, usize, usize, &'a BasicBlockInstruction)> {
         self.iter().flat_map(|(func_id, block_group)| {
-            block_group
-                .blocks
-                .iter()
-                .flat_map(move |(block_id, block)| {
-                    block
-                        .instructions
-                        .iter()
-                        .map(move |(varname, ins)| (func_id, *block_id, *varname, ins))
-                })
+            block_group.iter().flat_map(move |(block_id, block)| {
+                block
+                    .iter()
+                    .map(move |(varname, ins)| (func_id, block_id, varname, ins))
+            })
         })
     }
 
     pub fn iter_all_instructions_mut<'a>(
         &'a mut self,
     ) -> impl Iterator<Item = (FunctionId, usize, usize, &'a mut BasicBlockInstruction)> {
-        self.functions
-            .iter_mut()
-            .flat_map(|(func_id, block_group)| {
-                block_group
-                    .blocks
+        self.iter_mut().flat_map(|(func_id, block_group)| {
+            block_group.iter_mut().flat_map(move |(block_id, block)| {
+                block
                     .iter_mut()
-                    .flat_map(move |(block_id, block)| {
-                        block
-                            .instructions
-                            .iter_mut()
-                            .map(move |(varname, ins)| (*func_id, *block_id, *varname, ins))
-                    })
+                    .map(move |(varname, ins)| (func_id, block_id, varname, ins))
             })
+        })
     }
 
     pub fn iter_all_blocks<'a>(
         &'a self,
     ) -> impl Iterator<Item = (FunctionId, usize, &'a BasicBlock)> {
-        self.functions
-            .iter()
-            .flat_map(|(function_id, block_group)| {
-                block_group
-                    .blocks
-                    .iter()
-                    .map(move |(block_id, block)| (*function_id, *block_id, block))
-            })
+        self.iter().flat_map(|(function_id, block_group)| {
+            block_group
+                .iter()
+                .map(move |(block_id, block)| (function_id, block_id, block))
+        })
     }
 }
 
@@ -53,22 +40,20 @@ impl BasicBlockGroup {
     pub fn iter_all_instructions<'a>(
         &'a self,
     ) -> impl Iterator<Item = (usize, usize, &'a BasicBlockInstruction)> {
-        self.blocks.iter().flat_map(move |(block_id, block)| {
+        self.iter().flat_map(move |(block_id, block)| {
             block
-                .instructions
                 .iter()
-                .map(move |(varname, ins)| (*block_id, *varname, ins))
+                .map(move |(varname, ins)| (block_id, varname, ins))
         })
     }
 
     pub fn iter_all_instructions_mut<'a>(
         &'a mut self,
     ) -> impl Iterator<Item = (usize, usize, &'a mut BasicBlockInstruction)> {
-        self.blocks.iter_mut().flat_map(move |(block_id, block)| {
+        self.iter_mut().flat_map(move |(block_id, block)| {
             block
-                .instructions
                 .iter_mut()
-                .map(move |(varname, ins)| (*block_id, *varname, ins))
+                .map(move |(varname, ins)| (block_id, varname, ins))
         })
     }
 }

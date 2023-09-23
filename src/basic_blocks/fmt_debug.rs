@@ -8,7 +8,7 @@ use super::{
 impl Debug for BasicBlock {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{{\n")?;
-        for (id, node) in &self.instructions {
+        for (id, node) in self.iter() {
             write!(f, "    ${} = {:?}\n", id, node)?;
         }
         write!(f, "    exit = {:?}\n", &self.exit)?;

@@ -7,7 +7,7 @@ pub fn count_variable_uses(module: &BasicBlockModule) -> BTreeMap<usize, u32> {
     let mut usages: BTreeMap<usize, u32> = BTreeMap::new();
 
     for (_, _, block) in module.iter_all_blocks() {
-        for (_, ins) in block.instructions.iter() {
+        for (_, ins) in block.iter() {
             // Increment the use count for each operand
             for var in ins.used_vars() {
                 *usages.entry(var).or_insert(0) += 1;
