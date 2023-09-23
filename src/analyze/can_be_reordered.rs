@@ -1,6 +1,7 @@
 use crate::basic_blocks::BasicBlockInstruction;
 
 impl BasicBlockInstruction {
+    /// Whether this instruction can be reordered with other instructions.
     pub fn can_be_reordered(&self) -> bool {
         match self {
             BasicBlockInstruction::This

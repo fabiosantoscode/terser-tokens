@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::BasicBlockInstruction;
 
+/// A basic block encapsulates a control-free sequence of instructions. It contains an "exit" which encodes control flow.
 #[derive(Clone, Default, PartialEq)]
 pub struct BasicBlock {
     pub instructions: Vec<(usize, BasicBlockInstruction)>,
@@ -17,6 +18,8 @@ impl BasicBlock {
     }
 }
 
+/// Conceptually, an exit occurs after the instructions in a block. It denotes what happens to control flow.
+/// Ranges, such as the numbers in Loop(), are inclusive.
 #[derive(Clone, PartialEq)]
 pub enum BasicBlockExit {
     /// unconditional jump to target

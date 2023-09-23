@@ -12,7 +12,7 @@ pub fn get_inlined_variables(
 ) -> BTreeMap<usize, BasicBlockInstruction> {
     let mut ctx = GetInlinedVariablesCtx::new(variable_use_count, phi_participants);
 
-    for (_id, block_group) in module.functions.iter() {
+    for (_id, block_group) in module.iter() {
         // variables used once that are reorderable. Wherever they were defined, they can be inlined.
         ctx.pure_candidates = block_group
             .iter_all_instructions()

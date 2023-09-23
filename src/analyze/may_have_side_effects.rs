@@ -1,6 +1,7 @@
 use crate::basic_blocks::BasicBlockInstruction;
 
 impl BasicBlockInstruction {
+    /// Will this instruction throw an error or change the state of the program besides assigning its variable?
     pub fn may_have_side_effects(&self) -> bool {
         match self {
             BasicBlockInstruction::LitNumber(_) => false,

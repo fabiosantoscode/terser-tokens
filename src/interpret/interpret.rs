@@ -76,7 +76,7 @@ pub fn interpret(
             let args = args.iter().cloned().collect::<Vec<_>>();
             let args = ctx.get_variables(args).into();
 
-            interpret_function(ctx, &func, args)?.as_return()?
+            interpret_function(ctx, &func, args)?.into_return()?
         }
         BasicBlockInstruction::ArgumentRead(n) => ctx.get_argument(*n)?.clone(),
         BasicBlockInstruction::ArgumentRest(n) => match ctx.get_spread_argument(*n) {

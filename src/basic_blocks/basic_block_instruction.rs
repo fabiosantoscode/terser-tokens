@@ -1,5 +1,8 @@
 use super::FunctionId;
 
+/// A single instruction in a basic block. This can encode basic actions, free of syntatic sugar
+/// and multiple ways of doing the same thing.
+/// These cannot do control flow, but can do function calls, binops and other basic operations.
 #[derive(Clone, PartialEq)]
 pub enum BasicBlockInstruction {
     LitNumber(f64),

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use super::{BasicBlock, FunctionId, NonLocalId};
 
+/// Represents a group of basic blocks that are part of the same function or module.
 #[derive(Default, Clone)]
 pub struct BasicBlockGroup {
     pub id: FunctionId,
@@ -32,6 +33,7 @@ impl BasicBlockGroup {
         self.blocks.iter_mut().map(|(id, block)| (*id, block))
     }
 
+    /// Get the range of block ids in this group.
     pub fn get_block_range(&self) -> (usize, usize) {
         (
             *(self.blocks.first_key_value().expect("no blocks").0),

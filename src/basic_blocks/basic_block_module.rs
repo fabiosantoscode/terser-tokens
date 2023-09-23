@@ -30,24 +30,28 @@ pub struct BasicBlockModule {
 }
 
 impl BasicBlockModule {
+    /// Get a function. FunctionId(0) is the top level stats.
     pub fn get_function(&self, id: FunctionId) -> Option<&BasicBlockGroup> {
         self.functions.get(&id)
     }
 
+    /// Get the top level statements of the module.
     pub fn top_level_stats(&self) -> &BasicBlockGroup {
         &self.functions[&FunctionId(0)]
     }
 
-    pub fn mutate_all_block_groups<Mutator>(&mut self, mutator: &mut Mutator)
-    where
-        Mutator: FnMut(&mut BasicBlockGroup),
-    {
-        for (_, function) in self.functions.iter_mut() {
-            mutator(function);
-        }
+    pub fn iter(&self) -> impl Iterator<Item = (FunctionId, &BasicBlockGroup)> {
+        self.functions.iter().map(|(id, function)| (*id, function))
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (FunctionId, &mut BasicBlockGroup)> {
+        self.functions
+            .iter_mut()
+            .map(|(id, function)| (*id, function))
     }
 }
 
+/// A usize that uniquely points to a function.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Hash, PartialOrd, Ord, Eq, Default)]
 pub struct FunctionId(pub usize);

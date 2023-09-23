@@ -1,7 +1,7 @@
 use crate::basic_blocks::{BasicBlockInstruction, BasicBlockModule, FunctionId};
 use std::collections::BTreeMap;
 
-/// How many times each function was seen in text.
+/// How many times each FunctionId was seen in text.
 pub fn function_usage_count(module: &BasicBlockModule) -> BTreeMap<FunctionId, usize> {
     let mut function_vars_report = module
         .functions

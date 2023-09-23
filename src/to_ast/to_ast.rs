@@ -41,9 +41,9 @@ fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
         })
         .collect();
 
-    block_module.mutate_all_block_groups(&mut |block_group| {
+    for (_, block_group) in block_module.iter_mut() {
         remove_phi(block_group);
-    });
+    }
 
     let variable_use_count = count_variable_uses(&block_module);
     let inlined_variables = get_inlined_variables(&block_module, &variable_use_count, phied);

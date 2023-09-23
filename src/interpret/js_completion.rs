@@ -10,28 +10,28 @@ pub enum JsCompletion {
 }
 
 impl JsCompletion {
-    pub fn as_normal(self) -> Option<JsType> {
+    pub fn into_normal(self) -> Option<JsType> {
         match self {
             JsCompletion::Normal(t) => Some(t),
             _ => None,
         }
     }
 
-    pub(crate) fn as_return(self) -> Option<JsType> {
+    pub(crate) fn into_return(self) -> Option<JsType> {
         match self {
             JsCompletion::Return(t) => Some(t),
             _ => None,
         }
     }
 
-    pub(crate) fn as_return_ref(&self) -> Option<&JsType> {
+    pub(crate) fn as_return(&self) -> Option<&JsType> {
         match self {
             JsCompletion::Return(t) => Some(t),
             _ => None,
         }
     }
 
-    pub fn as_known(self) -> Option<JsCompletion> {
+    pub fn into_known(self) -> Option<JsCompletion> {
         match self {
             JsCompletion::Unknown => None,
             _ => Some(self),
@@ -39,13 +39,13 @@ impl JsCompletion {
     }
 
     /// Returns a completion that merges `self` and `other`, or None if the completions are not compatible.
-    pub(crate) fn merge(&self, other: &JsCompletion) -> Option<JsCompletion> {
+    pub(crate) fn merge(self, other: &JsCompletion) -> Option<JsCompletion> {
         use JsCompletion::*;
-        match (self, other) {
+        match (&self, other) {
             (Normal(t1), Normal(t2)) => Some(Normal(t1.union(&t2))),
             (Return(t1), Return(t2)) => Some(Return(t1.union(&t2))),
-            (Break(b1), Break(b2)) if b1 == b2 => Some(self.clone()),
-            (Continue(c1), Continue(c2)) if c1 == c2 => Some(self.clone()),
+            (Break(b1), Break(b2)) if b1 == b2 => Some(self),
+            (Continue(c1), Continue(c2)) if c1 == c2 => Some(self),
             _ => None,
         }
     }
@@ -66,7 +66,7 @@ impl JsCompletion {
         };
 
         for next_completion in completions {
-            accum = accum.union(next_completion.as_return_ref()?);
+            accum = accum.union(next_completion.as_return()?);
 
             if let JsType::Any = accum {
                 return Some(JsType::Any);

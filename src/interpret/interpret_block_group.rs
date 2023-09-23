@@ -11,7 +11,7 @@ pub fn interpret_block_group(
     let (first_block, last_block) = block_group.get_block_range();
 
     let completion =
-        interpret_block_group_inner(ctx, block_group, first_block..=last_block)?.as_known()?;
+        interpret_block_group_inner(ctx, block_group, first_block..=last_block)?.into_known()?;
     ctx.mark_function_evaluated(block_group.id);
     Some(completion)
 }
@@ -49,7 +49,7 @@ fn interpret_block_group_inner(
         let BasicBlock { instructions, exit } = &block_group.blocks[&index];
 
         for (varname, instruction) in instructions {
-            let yielded_type = interpret(ctx, instruction)?.as_normal()?;
+            let yielded_type = interpret(ctx, instruction)?.into_normal()?;
 
             ctx.assign_variable(*varname, yielded_type);
         }
