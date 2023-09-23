@@ -31,7 +31,7 @@ pub fn run_checks(s: &str) -> String {
     {
         let module = swc_parse(s);
 
-        let mut module = module_to_basic_blocks("input.js", &module).unwrap();
+        let module = module_to_basic_blocks("input.js", &module).unwrap();
 
         println!("instructions: {:?}", module);
     }

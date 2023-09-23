@@ -30,7 +30,6 @@ pub fn interpret_function(
         ctx.end_function(block_group.id, interpretation.clone());
         interpretation
     } else {
-        println!("interpret_function: {:?} {:?}", block_group.id, args);
         None
     }
 }
@@ -121,8 +120,6 @@ fn interpret_block_group_inner(
 
     None
 }
-
-// TODO tests
 
 #[cfg(test)]
 mod tests {
