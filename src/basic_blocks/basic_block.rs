@@ -149,6 +149,21 @@ impl BasicBlockExit {
             | BasicBlockExit::Loop(_, _) => vec![],
         }
     }
+
+    pub(crate) fn used_vars_mut(&mut self) -> Vec<&mut usize> {
+        match self {
+            BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![cond_var],
+            BasicBlockExit::ExitFn(_, returned) => vec![returned],
+            BasicBlockExit::Jump(_)
+            | BasicBlockExit::Break(_)
+            | BasicBlockExit::Continue(_)
+            | BasicBlockExit::SetTryAndCatch(_, _, _, _)
+            | BasicBlockExit::PopCatch(_, _)
+            | BasicBlockExit::PopFinally(_, _)
+            | BasicBlockExit::EndFinally(_)
+            | BasicBlockExit::Loop(_, _) => vec![],
+        }
+    }
 }
 
 impl Default for BasicBlockExit {

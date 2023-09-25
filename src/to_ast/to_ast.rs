@@ -10,12 +10,12 @@ use swc_ecma_ast::{
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType,
-        TempExitType,
+        remove_phi, ArrayElement, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,
+        ExitType, TempExitType,
     },
 };
 
-use super::{do_tree, get_inlined_variables, remove_phi, Base54, StructuredFlow, ToAstContext};
+use super::{do_tree, get_inlined_variables, Base54, StructuredFlow, ToAstContext};
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {
@@ -78,12 +78,10 @@ fn to_statements(
 
     match node {
         StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
-        StructuredFlow::BasicBlock(block_idx) => {
-            block_group.blocks[block_idx]
-                .iter()
-                .flat_map(|(varname, ins)| instruction_to_statement(ctx, varname, ins))
-                .collect::<Vec<_>>()
-        }
+        StructuredFlow::BasicBlock(block_idx) => block_group.blocks[block_idx]
+            .iter()
+            .flat_map(|(varname, ins)| instruction_to_statement(ctx, varname, ins))
+            .collect::<Vec<_>>(),
         StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {
             let return_stmt = Stmt::Return(ReturnStmt {
                 span: Default::default(),
