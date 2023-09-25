@@ -18,7 +18,9 @@ impl BasicBlock {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, &BasicBlockInstruction)> {
-        self.instructions.iter().map(|(varname, ins)| (*varname, ins))
+        self.instructions
+            .iter()
+            .map(|(varname, ins)| (*varname, ins))
     }
 
     pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = (usize, &mut BasicBlockInstruction)> {
@@ -27,9 +29,7 @@ impl BasicBlock {
             .map(|(varname, ins)| (*varname, ins))
     }
 
-    pub(crate) fn iter_varnames_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &mut usize> {
+    pub(crate) fn iter_varnames_mut(&mut self) -> impl Iterator<Item = &mut usize> {
         self.instructions.iter_mut().map(|(varname, _)| varname)
     }
 }

@@ -307,7 +307,6 @@ mod tests {
         "###);
     }
 
-    
     #[test]
     fn test_remove_phi_1() {
         let mut blocks = parse_instructions(
