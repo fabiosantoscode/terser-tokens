@@ -1,95 +1,77 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::basic_blocks::{BasicBlockExit, BasicBlockInstruction};
+use crate::basic_blocks::{BasicBlock, BasicBlockExit};
 
-pub fn normalize_basic_blocks(
-    exits: Vec<BasicBlockExit>,
-    basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
-) -> (
-    Vec<BasicBlockExit>,
-    Vec<Vec<(usize, BasicBlockInstruction)>>,
-) {
+pub fn normalize_basic_blocks(blocks: BTreeMap<usize, BasicBlock>) -> BTreeMap<usize, BasicBlock> {
     // return (exits, basic_blocks);
 
-    let jumped_to = get_blocks_jumped_to(&exits);
+    let jumped_to = get_blocks_jumped_to(&blocks);
 
     // keep track of eliminated blocks and how labels change around
     let mut eliminated_count = 0;
     let mut swapped_labels: HashMap<usize, usize> = Default::default();
 
-    let out_exits: Vec<BasicBlockExit> = vec![];
-    let out_basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>> = vec![];
+    let reachable_blocks = get_reachable_blocks(&blocks);
 
-    let reachable_blocks = get_reachable_blocks(&exits);
+    let mut out_blocks: BTreeMap<usize, BasicBlock> = BTreeMap::new();
 
-    let (mut exits, basic_blocks) = exits
-        .into_iter()
-        .zip(basic_blocks.into_iter())
-        .enumerate()
-        .fold(
-            (out_exits, out_basic_blocks),
-            |(mut out_exits, mut out_basic_blocks), (i, (exit, block))| {
-                let prev_exit = out_exits.last();
-                let prev_block = out_basic_blocks.last();
+    for (i, block) in blocks.into_iter() {
+        let prev_block = out_blocks.last_key_value().map(|(_, block)| block);
 
-                if unmergeable(&exit) || prev_exit.map(unmergeable) == Some(true) {
-                    out_exits.push(exit);
-                    out_basic_blocks.push(block);
-                } else if !reachable_blocks.contains(&i) {
-                    eliminated_count += 1;
-                } else {
-                    if should_merge_blocks(&jumped_to, prev_exit, prev_block, &exit, &block, i) {
-                        let prev_exit = out_exits.last_mut().unwrap();
-                        let prev_block = out_basic_blocks.last_mut().unwrap();
+        if !reachable_blocks.contains(&i) {
+            eliminated_count += 1;
+        } else if unmergeable(&block.exit) {
+            out_blocks.insert(i, block);
+        } else if should_merge_blocks(&jumped_to, prev_block, &block, i) {
+            let mut prev_block = out_blocks.last_entry().unwrap();
+            let prev_block = prev_block.get_mut();
 
-                        *prev_exit = exit;
-                        prev_block.extend(block);
+            prev_block.exit = block.exit;
+            prev_block.instructions.extend(block.instructions);
 
-                        eliminated_count += 1;
-                    } else {
-                        out_exits.push(exit);
-                        out_basic_blocks.push(block);
-                    };
-                }
+            eliminated_count += 1;
+        } else {
+            out_blocks.insert(i, block);
+        }
 
-                swapped_labels.insert(i, i - eliminated_count);
-                return (out_exits, out_basic_blocks);
-            },
-        );
-
-    // adjust labels for however many blocks were eliminated
-    for exit in exits.iter_mut() {
-        *exit = exit.swap_labels(&swapped_labels);
+        swapped_labels.insert(i, i - eliminated_count);
     }
 
-    assert_eq!(exits.len(), basic_blocks.len());
+    if eliminated_count == 0 {
+        out_blocks
+    } else {
+        out_blocks
+            .into_values()
+            .enumerate()
+            .map(|(i, mut block)| {
+                for block_label in block.exit.block_labels_mut() {
+                    *block_label = swapped_labels[block_label];
+                }
 
-    (exits, basic_blocks)
+                (i, block)
+            })
+            .collect()
+    }
 }
 
 fn should_merge_blocks(
     jumped_to: &HashSet<usize>,
-    prev_exit: Option<&BasicBlockExit>,
-    prev_basic_block: Option<&Vec<(usize, BasicBlockInstruction)>>,
-    exit: &BasicBlockExit,
-    block: &Vec<(usize, BasicBlockInstruction)>,
+    prev: Option<&BasicBlock>,
+    block: &BasicBlock,
     block_idx: usize,
 ) -> bool {
-    match (prev_exit, prev_basic_block) {
-        (Some(prev_exit @ BasicBlockExit::Jump(jump_target)), Some(prev_block)) => {
-            if
-            // the blocks are the same -- can merge
-            (block, exit) == (prev_block, prev_exit)
-            // the previous block ends with a jump to this block -- can merge unless it's a jump target
-                || (*jump_target == block_idx
-                    && !jumped_to.contains(&jump_target)
-                    && !jumped_to.contains(&block_idx))
-            {
-                true
-            } else {
-                false
-            }
+    match prev {
+        Some(BasicBlock {
+            exit: prev_exit @ BasicBlockExit::Jump(jump_target),
+            instructions: prev_instructions,
+        }) =>
+        // the blocks are the same -- can merge
+        {
+            (&block.instructions, &block.exit) == (prev_instructions, prev_exit)
+                // the previous block ends with a jump to this block -- can merge unless it's a jump target
+                    || (*jump_target == block_idx
+                        && !jumped_to.contains(&jump_target)
+                        && !jumped_to.contains(&block_idx))
         }
         _ => false,
     }
@@ -105,16 +87,23 @@ fn unmergeable(exit: &BasicBlockExit) -> bool {
     }
 }
 
-fn get_blocks_jumped_to(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
-    exits
+fn get_blocks_jumped_to(blocks: &BTreeMap<usize, BasicBlock>) -> HashSet<usize> {
+    blocks
         .iter()
-        .enumerate()
-        .flat_map(|(i, e)| match e {
+        .map(|(i, block)| (*i, &block.exit))
+        .zip(
+            blocks
+                .iter()
+                .map(|(next_i, _)| Some(*next_i))
+                .skip(1)
+                .chain(vec![None].into_iter()),
+        )
+        .flat_map(|((_i, e), next_i)| match e {
             BasicBlockExit::Jump(j) => {
-                if *j != i + 1 {
-                    vec![*j]
-                } else {
+                if next_i == Some(*j) {
                     vec![]
+                } else {
+                    vec![*j]
                 }
             }
             BasicBlockExit::Break(j) => vec![*j],
@@ -134,14 +123,14 @@ fn get_blocks_jumped_to(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
         .collect::<HashSet<_>>()
 }
 
-fn get_reachable_blocks(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
+fn get_reachable_blocks(exits: &BTreeMap<usize, BasicBlock>) -> HashSet<usize> {
     let mut reachable_blocks = HashSet::new();
     let mut stack = vec![0];
 
     use BasicBlockExit::*;
 
     // Unconditionally reachable blocks, because try..catch is finnicky
-    stack.extend(exits.iter().flat_map(|exit| match exit {
+    stack.extend(exits.iter().flat_map(|(_, block)| match &block.exit {
         SetTryAndCatch(try_, catch, finally, after) => vec![*try_, *catch, *finally, *after],
         PopCatch(catch, finally) => vec![*catch, *finally],
         PopFinally(finally, _) => vec![*finally],
@@ -156,7 +145,7 @@ fn get_reachable_blocks(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
 
         reachable_blocks.insert(block);
 
-        stack.extend(exits[block].jump_targets());
+        stack.extend(exits[&block].exit.jump_targets());
     }
 
     reachable_blocks
@@ -165,31 +154,12 @@ fn get_reachable_blocks(exits: &Vec<BasicBlockExit>) -> HashSet<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::{BasicBlock, BasicBlockGroup};
+    use crate::basic_blocks::BasicBlockGroup;
     use crate::testutils::*;
 
     fn test_normalize(instructions: &str) -> BasicBlockGroup {
         let group = parse_instructions(instructions);
-        let blocks = group.blocks;
-
-        let block_exits = blocks
-            .iter()
-            .map(|(_, block)| block.exit.clone())
-            .collect::<Vec<_>>();
-        let block_instructions = blocks
-            .into_iter()
-            .map(|(_, block)| block.instructions)
-            .collect::<Vec<_>>();
-
-        let (block_exits, block_instructions) =
-            normalize_basic_blocks(block_exits, block_instructions);
-
-        let blocks = block_instructions
-            .into_iter()
-            .zip(block_exits.into_iter())
-            .enumerate()
-            .map(|(i, (block, exit))| (i, BasicBlock::new(block, exit)))
-            .collect();
+        let blocks = normalize_basic_blocks(group.blocks);
 
         BasicBlockGroup {
             blocks,

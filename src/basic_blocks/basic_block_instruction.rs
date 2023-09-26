@@ -117,6 +117,14 @@ impl BasicBlockInstruction {
         }
     }
 
+    pub fn get_nonlocal_id_mut(&mut self) -> Option<&mut usize> {
+        match self {
+            BasicBlockInstruction::ReadNonLocal(id) => Some(&mut id.0),
+            BasicBlockInstruction::WriteNonLocal(id, _) => Some(&mut id.0),
+            _ => None,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn unwrap_ref(&self) -> usize {
         match self {

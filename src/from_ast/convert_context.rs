@@ -13,7 +13,7 @@ use super::NonLocalInfo;
 
 #[derive(Debug)]
 pub struct FromAstCtx {
-    pub basic_blocks: Vec<Vec<(usize, BasicBlockInstruction)>>,
+    pub basic_blocks: Vec<Vec<(usize, Option<BasicBlockInstruction>)>>,
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
     pub conditionals: Vec<BTreeMap<String, Vec<usize>>>,
@@ -48,7 +48,7 @@ impl FromAstCtx {
     pub fn push_instruction(&mut self, node: BasicBlockInstruction) -> usize {
         let id = self.var_index;
         self.var_index += 1;
-        self.basic_blocks.last_mut().unwrap().push((id, node));
+        self.basic_blocks.last_mut().unwrap().push((id, Some(node)));
         id
     }
 
@@ -61,23 +61,27 @@ impl FromAstCtx {
             id,
             self.var_index
         );
+
+        let instructions = self.basic_blocks.last_mut().unwrap();
+        let position = instructions
+            .iter()
+            .position(|(i, _)| *i == id)
+            .expect("arbitrarily_set_id: id not found");
+
+        let prev_value = instructions[position].1.replace(node);
+
         assert!(
-            self.basic_blocks
-                .last()
-                .unwrap()
-                .iter()
-                .find(|(i, _)| *i == id)
-                .is_none(),
-            "fulfill_deferred_instruction: id {} is already used",
+            prev_value.is_none(),
+            "arbitrarily_set_id: id {} is already used",
             id
         );
-        self.basic_blocks.last_mut().unwrap().push((id, node));
     }
 
     /// Get a new ID. It can be used to make sure varnames don't collide with other kinds of IDs, or to generate an ID that will be fulfilled later.
     pub fn bump_var_index(&mut self) -> usize {
         let id = self.var_index;
         self.var_index += 1;
+        self.basic_blocks.last_mut().unwrap().push((id, None));
         id
     }
 
@@ -88,7 +92,7 @@ impl FromAstCtx {
     ) -> usize {
         let id = self.var_index;
         self.var_index += 1;
-        self.basic_blocks[n].push((id, node));
+        self.basic_blocks[n].push((id, Some(node)));
         id
     }
 
@@ -168,17 +172,25 @@ impl FromAstCtx {
         }
 
         let basic_blocks = std::mem::replace(&mut self.basic_blocks, vec![]);
-        let (exits, basic_blocks) = normalize_basic_blocks(exits, basic_blocks);
 
-        self.basic_blocks = vec![];
-        self.exits = vec![];
-
-        let blocks = exits
+        let blocks: BTreeMap<usize, BasicBlock> = exits
             .into_iter()
             .zip(basic_blocks.into_iter())
             .enumerate()
-            .map(|(i, (exit, block))| (i, BasicBlock::new(block, exit)))
+            .map(|(i, (exit, block))| {
+                let block = block.into_iter().filter_map(|(varname, ins)| match ins {
+                    Some(ins) => Some((varname, ins)),
+                    None => None,
+                });
+                (i, BasicBlock::new(block.collect(), exit))
+            })
             .collect();
+
+        let blocks = normalize_basic_blocks(blocks);
+
+        // reset state
+        self.basic_blocks.clear();
+        self.exits.clear();
 
         (
             self.current_function_index.take().expect(

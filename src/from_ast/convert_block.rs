@@ -1,7 +1,5 @@
 use swc_ecma_ast::{Decl, FnDecl, Stmt};
 
-use crate::basic_blocks::BasicBlockInstruction;
-
 use super::{function_to_basic_blocks, stat_to_basic_blocks, FromAstCtx, FunctionLike};
 
 /// Convert block to basic blocks. This will deal with block scopes as well.
@@ -36,8 +34,7 @@ where
     }
 
     for (varname, fn_decl) in fn_decls.iter() {
-        let func_id = function_to_basic_blocks(ctx, FunctionLike::FnDecl(fn_decl))?;
-        ctx.arbitrarily_set_id(*varname, BasicBlockInstruction::Ref(func_id));
+        function_to_basic_blocks(ctx, FunctionLike::FnDecl(fn_decl), Some(*varname))?;
     }
 
     for stat in non_fn_decls {

@@ -162,29 +162,39 @@ mod tests {
             None,
         );
 
-        assert_eq!(ctx.basic_blocks[0].len(), 2);
+        assert_eq!(ctx.basic_blocks[0].len(), 3);
 
         ctx.read_name("read_before_assign"); // produces undefined instruction
-        assert_eq!(ctx.basic_blocks[0].len(), 3);
+        assert_eq!(ctx.basic_blocks[0].len(), 4);
 
         ctx.assign_name("read_after_assign", 1);
         ctx.read_name("read_after_assign"); // just reads
-        assert_eq!(ctx.basic_blocks[0].len(), 3);
+        assert_eq!(ctx.basic_blocks[0].len(), 4);
 
         insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
         [
             [
                 (
                     0,
-                    undefined,
+                    Some(
+                        undefined,
+                    ),
+                ),
+                (
+                    1,
+                    None,
                 ),
                 (
                     2,
-                    write_non_local $$1 $0,
+                    Some(
+                        write_non_local $$1 $0,
+                    ),
                 ),
                 (
                     3,
-                    undefined,
+                    Some(
+                        undefined,
+                    ),
                 ),
             ],
         ]
@@ -241,29 +251,35 @@ mod tests {
 
         // time to read a nonlocal
         assert_eq!(ctx.read_name("provided_nonlocal"), Some(7));
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[5], @r###"
+        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[7], @r###"
         (
             7,
-            read_non_local $$1,
+            Some(
+                read_non_local $$1,
+            ),
         )
         "###);
 
         // time to write it!
         ctx.assign_name("provided_nonlocal", 123);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[6], @r###"
+        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[8], @r###"
         (
             8,
-            write_non_local $$1 $123,
+            Some(
+                write_non_local $$1 $123,
+            ),
         )
         "###);
 
         // nonlocals are never conditional
         ctx.enter_conditional_branch();
         ctx.assign_name("provided_nonlocal", 777);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[7], @r###"
+        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[9], @r###"
         (
             9,
-            write_non_local $$1 $777,
+            Some(
+                write_non_local $$1 $777,
+            ),
         )
         "###);
         assert!(ctx.conditionals[0].is_empty());
@@ -381,7 +397,9 @@ mod tests {
             [
                 (
                     1,
-                    either($456, $789),
+                    Some(
+                        either($456, $789),
+                    ),
                 ),
             ],
         ]
@@ -439,11 +457,15 @@ mod tests {
             [
                 (
                     0,
-                    either($11, $12),
+                    Some(
+                        either($11, $12),
+                    ),
                 ),
                 (
                     1,
-                    either($21, $22),
+                    Some(
+                        either($21, $22),
+                    ),
                 ),
             ],
         ]
@@ -506,11 +528,15 @@ mod tests {
         [
             (
                 0,
-                either($11, $12, $13),
+                Some(
+                    either($11, $12, $13),
+                ),
             ),
             (
                 1,
-                either($11, $12, $13),
+                Some(
+                    either($11, $12, $13),
+                ),
             ),
         ]
         "###);

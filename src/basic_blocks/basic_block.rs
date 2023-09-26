@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use super::BasicBlockInstruction;
 
 /// A basic block encapsulates a control-free sequence of instructions. It contains an "exit" which encodes control flow.
@@ -61,53 +59,6 @@ pub enum BasicBlockExit {
 }
 
 impl BasicBlockExit {
-    pub(crate) fn swap_labels(&self, swap_key: &HashMap<usize, usize>) -> BasicBlockExit {
-        let swap = |x: &usize| *swap_key.get(&x).unwrap_or(&x);
-
-        match self {
-            BasicBlockExit::Jump(target) => BasicBlockExit::Jump(swap(target)),
-            BasicBlockExit::Break(target) => BasicBlockExit::Break(swap(target)),
-            BasicBlockExit::Continue(target) => BasicBlockExit::Continue(swap(target)),
-            BasicBlockExit::Cond(
-                cond,
-                true_target,
-                true_target_end,
-                false_target,
-                false_target_end,
-            ) => BasicBlockExit::Cond(
-                *cond,
-                swap(true_target),
-                swap(true_target_end),
-                swap(false_target),
-                swap(false_target_end),
-            ),
-            BasicBlockExit::Loop(start, end) => BasicBlockExit::Loop(swap(start), swap(end)),
-            BasicBlockExit::ExitFn(exit_type, target) => {
-                BasicBlockExit::ExitFn(exit_type.clone(), *target)
-            }
-            BasicBlockExit::SetTryAndCatch(
-                try_block,
-                catch_block,
-                finally_block,
-                after_finally,
-            ) => BasicBlockExit::SetTryAndCatch(
-                swap(try_block),
-                swap(catch_block),
-                swap(finally_block),
-                swap(after_finally),
-            ),
-            BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
-                BasicBlockExit::PopCatch(swap(catch_block), swap(finally_or_after))
-            }
-            BasicBlockExit::PopFinally(finally_block, after_finally) => {
-                BasicBlockExit::PopFinally(swap(finally_block), swap(after_finally))
-            }
-            BasicBlockExit::EndFinally(finally_block) => {
-                BasicBlockExit::EndFinally(swap(finally_block))
-            }
-        }
-    }
-
     pub fn jump_targets(&self) -> Vec<usize> {
         match self {
             BasicBlockExit::Jump(target)
@@ -132,6 +83,25 @@ impl BasicBlockExit {
                 vec![*finally_target]
             }
             BasicBlockExit::EndFinally(after_finally_target) => vec![*after_finally_target],
+        }
+    }
+
+    pub fn block_labels_mut(&mut self) -> Vec<&mut usize> {
+        match self {
+            BasicBlockExit::Jump(target)
+            | BasicBlockExit::Break(target)
+            | BasicBlockExit::Continue(target) => vec![target],
+            BasicBlockExit::Cond(_, true_, true_end, false_, false_end) => {
+                vec![true_, true_end, false_, false_end]
+            }
+            BasicBlockExit::Loop(start, end)
+            | BasicBlockExit::PopCatch(start, end)
+            | BasicBlockExit::PopFinally(start, end) => vec![start, end],
+            BasicBlockExit::ExitFn(_, _) => vec![],
+            BasicBlockExit::SetTryAndCatch(try_target, catch, finally, end_finally) => {
+                vec![try_target, catch, finally, end_finally]
+            }
+            BasicBlockExit::EndFinally(after_finally_target) => vec![after_finally_target],
         }
     }
 

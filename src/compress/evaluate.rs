@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    analyze::count_variable_uses,
-    basic_blocks::{BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule},
+    basic_blocks::{
+        normalize_basic_blocks, normalize_module, BasicBlockExit, BasicBlockGroup, BasicBlockModule,
+    },
     interpret::{interpret_module, InterpretCtx, JsType},
 };
 
@@ -42,11 +43,7 @@ pub fn compress_step_evaluate(module: &mut BasicBlockModule) {
             }
         }
 
-        if blocks_to_suppress.len() > 0 {
-            // Suppress some blocks and book-keep the phi nodes
-
-            remove_blocks(block_group, blocks_to_suppress);
-        }
+        remove_blocks(block_group, blocks_to_suppress);
     }
 
     for (_func_id, _blk_id, varname, ins) in module.iter_all_instructions_mut() {
@@ -60,46 +57,17 @@ pub fn compress_step_evaluate(module: &mut BasicBlockModule) {
             None => {}
         }
     }
+
+    normalize_module(module);
 }
 
 fn remove_blocks(block_group: &mut BasicBlockGroup, blocks_to_suppress: BTreeSet<usize>) {
-    let mut removed_variables = BTreeSet::new();
+    if blocks_to_suppress.len() > 0 {
+        let mut blocks = std::mem::take(&mut block_group.blocks);
 
-    for block in blocks_to_suppress.iter() {
-        let removed = block_group.blocks.remove(block).unwrap();
-        removed_variables.extend(removed.iter().map(|(varname, _)| varname));
-    }
+        blocks.retain(|block_id, _| !blocks_to_suppress.contains(block_id));
 
-    for (blk, _varname, ins) in block_group.iter_all_instructions_mut() {
-        if blocks_to_suppress.contains(&blk) {
-            continue;
-        }
-
-        match ins {
-            BasicBlockInstruction::Phi(phi) => {
-                phi.retain(|var| !removed_variables.contains(var));
-
-                match phi.len() {
-                    0 => *ins = BasicBlockInstruction::Undefined,
-                    1 => *ins = BasicBlockInstruction::Ref(phi[0]),
-                    _ => {}
-                }
-            }
-            _ => {
-                #[cfg(debug_assertions)]
-                {
-                    // Sanity check
-                    for used_var in ins.used_vars() {
-                        debug_assert!(
-                            !removed_variables.contains(&used_var),
-                            "used var {:?} in {:?} is removed",
-                            used_var,
-                            ins
-                        );
-                    }
-                }
-            }
-        }
+        block_group.blocks = normalize_basic_blocks(blocks);
     }
 }
 
@@ -156,9 +124,6 @@ mod tests {
         insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
         @0: {
             $0 = 1
-            exit = jump @1
-        }
-        @1: {
             $1 = 1
             exit = return $1
         }
@@ -221,33 +186,104 @@ mod tests {
             $1 = 1
             $2 = 1
             $3 = true
-            exit = jump @1
-        }
-        @1: {
             $4 = 1
             $5 = 1
             $6 = true
-            exit = jump @2
-        }
-        @2: {
             $7 = 1
             $8 = 2000
             $9 = 2001
             $10 = 2001
-            exit = jump @4
+            $11 = $9
+            $12 = 1000
+            $13 = $11 + $12
+            $14 = $13
+            $15 = $13
+            exit = return $15
         }
-        @4: {
-            $13 = either($0, $9)
+        "###);
+    }
+
+    #[test]
+    fn test_evaluate_cond_nested_2() {
+        let mut module = parse_instructions_module(vec![
+            "@0: {
+                $0 = 1
+                $1 = $0
+                $2 = 1
+                $3 = $1 == $2
+                exit = cond $3 ? @1..@4 : @5..@5
+            }
+            @1: {
+                $4 = $0
+                $5 = true
+                $6 = $4 == $5
+                exit = cond $6 ? @2..@2 : @3..@3
+            }
+            @2: {
+                $7 = $0
+                $8 = 2000
+                $9 = $7 + $8
+                $10 = $9
+                exit = jump @4
+            }
+            @3: {
+                $11 = 3
+                $12 = $11
+                exit = jump @4
+            }
+            @4: {
+                $13 = either($0, $9, $11)
+                $14 = $13
+                $15 = 1000
+                $16 = $14 + $15
+                $17 = $16
+                exit = jump @6
+            }
+            @5: {
+                $18 = 3
+                $19 = $18
+                exit = jump @6
+            }
+            @6: {
+                $20 = either($13, $16, $18)
+                $21 = $20
+                exit = return $21
+            }",
+        ]);
+
+        compress_step_evaluate(&mut module);
+
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
+        @0: {
+            $0 = 1
+            $1 = 1
+            $2 = 1
+            $3 = true
+            $4 = 1
+            $5 = true
+            $6 = $4 == $5
+            exit = cond $6 ? @1..@1 : @2..@2
+        }
+        @1: {
+            $7 = $0
+            $8 = 2000
+            $9 = $7 + $8
+            $10 = $9
+            exit = jump @3
+        }
+        @2: {
+            $11 = 3
+            $12 = $11
+            exit = jump @3
+        }
+        @3: {
+            $13 = either($0, $9, $11)
             $14 = $13
             $15 = 1000
             $16 = $14 + $15
             $17 = $16
-            exit = jump @6
-        }
-        @6: {
-            $20 = either($13, $16)
-            $21 = $20
-            exit = return $21
+            $18 = $16
+            exit = return $18
         }
         "###);
     }

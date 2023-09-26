@@ -8,9 +8,11 @@ use crate::basic_blocks::{
     BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId, NonLocalId,
 };
 
+/// Convert a function declaration to basic blocks. Function declarations are special because since they're hoisted, we don't want to create any variables here.
 pub fn function_to_basic_blocks(
     ctx: &mut FromAstCtx,
     function: FunctionLike,
+    fn_decl_varname: Option<usize>,
 ) -> Result<usize, String> {
     // Only a named FnExpr can have two simultaneous bindings. Outside (maybe) and inside.
     let (outer_varname, inner_varname) = match function {
@@ -29,6 +31,16 @@ pub fn function_to_basic_blocks(
             ctx.push_instruction(write_non_local);
 
             (outer_varname, Some((ident.sym.to_string(), non_local_id)))
+        }
+        FunctionLike::FnDecl(_) => {
+            let outer_varname = fn_decl_varname.expect("FnDecl needs a reserved varname");
+            ctx.arbitrarily_set_id(
+                outer_varname,
+                BasicBlockInstruction::Function(FunctionId(
+                    ctx.function_index.0 + 1, // future function name
+                )),
+            );
+            (outer_varname, None)
         }
         _ => {
             let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(FunctionId(
@@ -96,7 +108,9 @@ mod tests {
             .expect_stmt()
             .expect_decl()
             .expect_fn_decl();
-        function_to_basic_blocks(&mut ctx, FunctionLike::FnDecl(&decl)).unwrap();
+        let fn_decl_varname = ctx.bump_var_index();
+        function_to_basic_blocks(&mut ctx, FunctionLike::FnDecl(&decl), Some(fn_decl_varname))
+            .unwrap();
 
         ctx.functions.into_iter().collect()
     }

@@ -364,11 +364,11 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Member(_) => todo!(),
         Expr::SuperProp(_) => todo!(),
         Expr::Arrow(arrow_expr) => {
-            return function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr))
+            return function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
                 .expect("todo error handling");
         }
         Expr::Fn(fn_expr) => {
-            return function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr))
+            return function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr), None)
                 .expect("todo error handling");
         }
         Expr::Call(call) => {
@@ -1198,7 +1198,7 @@ mod tests {
             exit = jump @1
         }
         @1: {
-            exit = try @2 catch @7 finally @17 after @18
+            exit = try @2 catch @7 finally @16 after @17
         }
         @2: {
             $1 = $0
@@ -1217,49 +1217,46 @@ mod tests {
             exit = jump @6
         }
         @6: {
-            exit = error ? jump @7 : jump @16
+            exit = error ? jump @7 : jump @15
         }
         @7: {
             $5 = caught_error()
             exit = jump @8
         }
         @8: {
-            exit = try @9 catch @11 finally @13 after @14
+            exit = try @9 catch @10 finally @12 after @13
         }
         @9: {
             $6 = 456
             exit = return $6
         }
         @10: {
-            exit = error ? jump @11 : jump @12
-        }
-        @11: {
             $7 = caught_error()
             $8 = 789
             exit = return $8
         }
+        @11: {
+            exit = finally @12 after @13
+        }
         @12: {
-            exit = finally @13 after @14
+            exit = jump @13
         }
         @13: {
-            exit = jump @14
+            exit = end finally after @14
         }
         @14: {
-            exit = end finally after @15
+            exit = jump @15
         }
         @15: {
-            exit = jump @16
+            exit = finally @16 after @17
         }
         @16: {
-            exit = finally @17 after @18
+            exit = jump @17
         }
         @17: {
-            exit = jump @18
+            exit = end finally after @18
         }
         @18: {
-            exit = end finally after @19
-        }
-        @19: {
             $9 = $0
             exit = return $9
         }

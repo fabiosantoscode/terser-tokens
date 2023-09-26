@@ -302,6 +302,49 @@ mod tests {
     }
 
     #[test]
+    fn funs_hoisted() {
+        let module = module_to_basic_blocks(
+            "index.js",
+            &swc_parse(
+                "return fn(1);
+                function fn(x) { return x + y() }
+                function y() { return 100 }",
+            ),
+        )
+        .unwrap();
+        insta::assert_debug_snapshot!(module.functions, @r###"
+        {
+            FunctionId(0): @0: {
+                $0 = undefined
+                $2 = write_non_local $$1 $0
+                $3 = FunctionId(1)
+                $4 = FunctionId(2)
+                $5 = write_non_local $$1 $4
+                $15 = $3
+                $16 = 1
+                $17 = call $15($16)
+                exit = return $17
+            },
+            FunctionId(1): function():
+            @0: {
+                $6 = arguments[0]
+                $7 = $6
+                $8 = read_non_local $$1
+                $9 = $8
+                $10 = call $9()
+                $11 = $7 + $10
+                exit = return $11
+            },
+            FunctionId(2): function():
+            @0: {
+                $13 = 100
+                exit = return $13
+            },
+        }
+        "###);
+    }
+
+    #[test]
     fn imports() {
         let module = module_to_basic_blocks(
             "index.js",
