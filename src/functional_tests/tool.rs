@@ -1,24 +1,16 @@
 use std::sync::Mutex;
 
-use v8;
+use v8::{self, OwnedIsolate};
 
 use crate::{compress::compress, from_ast::module_to_basic_blocks, swc_parse::swc_parse};
 
 static INITIALIZED: Mutex<bool> = Mutex::new(false);
 
 pub fn run_checks(s: &str) -> String {
-    {
-        let mut initialized = INITIALIZED.lock().unwrap();
-        if !*initialized {
-            // initialize
-            let platform = v8::new_default_platform(0, false).make_shared();
-            v8::V8::initialize_platform(platform);
-            v8::V8::initialize();
-            *initialized = true;
-        }
-    }
+    run_in_v8_with_timeout(|isolate| run_checks_inner(isolate, s))
+}
 
-    let isolate = &mut v8::Isolate::new(Default::default());
+pub fn run_checks_inner(isolate: &mut v8::Isolate, s: &str) -> String {
     let scope = &mut v8::HandleScope::new(isolate);
     let context = v8::Context::new(scope);
     let scope = &mut v8::ContextScope::new(scope, context);
@@ -33,7 +25,7 @@ pub fn run_checks(s: &str) -> String {
 
         let module = module_to_basic_blocks("input.js", &module).unwrap();
 
-        println!("instructions: {:?}", module);
+        println!("instructions:\n{:?}", module);
     }
 
     let comp_s = compress(s);
@@ -79,4 +71,53 @@ fn run_code_for_logs(
     let result = script.run(scope)?;
 
     Some(result.to_string(scope)?.to_rust_string_lossy(scope))
+}
+
+fn create_v8_isolate() -> v8::OwnedIsolate {
+    {
+        let mut initialized = INITIALIZED.lock().unwrap();
+        if !*initialized {
+            // initialize
+            let platform = v8::new_default_platform(0, false).make_shared();
+            v8::V8::initialize_platform(platform);
+            v8::V8::initialize();
+            *initialized = true;
+        }
+    }
+
+    v8::Isolate::new(Default::default())
+}
+
+pub fn run_in_v8_with_timeout<Func>(func: Func) -> String
+where
+    Func: FnOnce(&mut OwnedIsolate) -> String + Send,
+{
+    use std::time::Duration;
+
+    std::thread::scope(|scope| {
+        let timeout = Duration::from_secs(5);
+
+        let (handle_sender, handle_receiver) = std::sync::mpsc::channel();
+        let (ret_sender, ret_receiver) = std::sync::mpsc::channel();
+
+        scope.spawn(move || {
+            let mut isolate = create_v8_isolate();
+
+            handle_sender.send(isolate.thread_safe_handle()).unwrap();
+
+            let result = func(&mut isolate);
+
+            ret_sender.send(result).unwrap();
+        });
+
+        let handle = handle_receiver.recv_timeout(timeout).unwrap();
+
+        match ret_receiver.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(_) => {
+                handle.terminate_execution();
+                panic!("timeout");
+            }
+        }
+    })
 }
