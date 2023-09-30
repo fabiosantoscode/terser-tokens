@@ -138,14 +138,14 @@ fn get_reachable_blocks(exits: &BTreeMap<usize, BasicBlock>) -> HashSet<usize> {
         _ => Vec::with_capacity(0),
     }));
 
-    while let Some(block) = stack.pop() {
-        if reachable_blocks.contains(&block) {
+    while let Some(block_id) = stack.pop() {
+        if reachable_blocks.contains(&block_id) {
             continue;
         }
 
-        reachable_blocks.insert(block);
+        reachable_blocks.insert(block_id);
 
-        stack.extend(exits[&block].exit.jump_targets());
+        stack.extend(exits[&block_id].exit.jump_targets());
     }
 
     reachable_blocks

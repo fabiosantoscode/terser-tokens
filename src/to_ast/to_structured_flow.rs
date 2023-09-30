@@ -8,7 +8,7 @@ use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup};
 pub struct BreakAndRange(pub BreakableId, pub usize, pub usize);
 
 struct Ctx {
-    containing_syntax: RefCell<Vec<BreakAndRange>>,
+    containing_syntax: Vec<BreakAndRange>,
     last_breakable_id: usize,
 }
 
@@ -24,17 +24,16 @@ impl Ctx {
     where
         Fnc: FnOnce(&mut Ctx) -> T,
     {
-        self.containing_syntax.borrow_mut().push(syn);
+        self.containing_syntax.push(syn);
         let ret = func(self);
-        self.containing_syntax.borrow_mut().pop();
+        self.containing_syntax.pop();
         ret
     }
 
     /// Given a break target, find the enclosing loop or labelled block
     pub fn break_index(&self, target: usize) -> BreakableId {
-        let containing_syntax = self.containing_syntax.borrow();
-
-        let brk_id = containing_syntax
+        *self
+            .containing_syntax
             .iter()
             .find_map(
                 |BreakAndRange(item, _start, end)| {
@@ -45,16 +44,13 @@ impl Ctx {
                     }
                 },
             )
-            .expect(&format!("break @{target} without matching to a container"));
-
-        *brk_id
+            .expect(&format!("break @{target} without matching to a container"))
     }
 
     /// Given a continue target, find the enclosing loop
     pub fn continue_index(&self, target: usize) -> BreakableId {
-        let containing_syntax = self.containing_syntax.borrow();
-
-        let brk_id = containing_syntax
+        *self
+            .containing_syntax
             .iter()
             .find_map(
                 |BreakAndRange(item, start, _end)| {
@@ -65,9 +61,9 @@ impl Ctx {
                     }
                 },
             )
-            .expect(&format!("break @{target} without matching to a container"));
-
-        *brk_id
+            .expect(&format!(
+                "continue @{target} without matching to a container"
+            ))
     }
 
     pub fn get_breakable_id(&mut self) -> BreakableId {
