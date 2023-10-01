@@ -1,154 +1,251 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+use std::usize::MAX;
 
-use crate::basic_blocks::{BasicBlock, BasicBlockExit};
+use crate::{
+    basic_blocks::{BasicBlock, BasicBlockExit},
+    to_ast::{do_tree, BreakableId, StructuredFlow},
+};
+
+use super::BasicBlockGroup;
 
 pub fn normalize_basic_blocks(blocks: BTreeMap<usize, BasicBlock>) -> BTreeMap<usize, BasicBlock> {
-    // return (exits, basic_blocks);
+    let mut blocks = BasicBlockGroup {
+        blocks,
+        environment: Default::default(),
+        id: Default::default(),
+    };
+    let recursive = do_tree(&blocks);
 
-    let jumped_to = get_blocks_jumped_to(&blocks);
+    let mut out_blocks = vec![];
+    let mut jump_targets = BTreeMap::new();
+    fold_blocks(
+        &mut out_blocks,
+        &mut blocks.blocks,
+        vec![recursive],
+        &mut jump_targets,
+    );
 
-    // keep track of eliminated blocks and how labels change around
-    let mut eliminated_count = 0;
-    let mut swapped_labels: HashMap<usize, usize> = Default::default();
+    out_blocks.into_iter().enumerate().collect()
+}
 
-    let reachable_blocks = get_reachable_blocks(&blocks);
-
-    let mut out_blocks: BTreeMap<usize, BasicBlock> = BTreeMap::new();
-
-    for (i, block) in blocks.into_iter() {
-        let prev_block = out_blocks.last_key_value().map(|(_, block)| block);
-
-        if !reachable_blocks.contains(&i) {
-            eliminated_count += 1;
-        } else if unmergeable(&block.exit) {
-            out_blocks.insert(i, block);
-        } else if should_merge_blocks(&jumped_to, prev_block, &block, i) {
-            let mut prev_block = out_blocks.last_entry().unwrap();
-            let prev_block = prev_block.get_mut();
-
-            prev_block.exit = block.exit;
-            prev_block.instructions.extend(block.instructions);
-
-            eliminated_count += 1;
-        } else {
-            out_blocks.insert(i, block);
+fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
+    if let Some(block) = block {
+        match &mut block.exit {
+            BasicBlockExit::Jump(mrk)
+            | BasicBlockExit::Break(mrk)
+            | BasicBlockExit::EndFinally(mrk)
+                if *mrk == MAX =>
+            {
+                Some(mrk)
+            }
+            _ => None,
         }
-
-        swapped_labels.insert(i, i - eliminated_count);
-    }
-
-    if eliminated_count == 0 {
-        out_blocks
     } else {
-        out_blocks
-            .into_values()
-            .enumerate()
-            .map(|(i, mut block)| {
-                for block_label in block.exit.block_labels_mut() {
-                    *block_label = swapped_labels[block_label];
-                }
-
-                (i, block)
-            })
-            .collect()
+        None
     }
 }
 
-fn should_merge_blocks(
-    jumped_to: &HashSet<usize>,
-    prev: Option<&BasicBlock>,
-    block: &BasicBlock,
-    block_idx: usize,
-) -> bool {
-    match prev {
-        Some(BasicBlock {
-            exit: prev_exit @ BasicBlockExit::Jump(jump_target),
-            instructions: prev_instructions,
-        }) =>
-        // the blocks are the same -- can merge
-        {
-            (&block.instructions, &block.exit) == (prev_instructions, prev_exit)
-                // the previous block ends with a jump to this block -- can merge unless it's a jump target
-                    || (*jump_target == block_idx
-                        && !jumped_to.contains(&jump_target)
-                        && !jumped_to.contains(&block_idx))
+fn ensure_forward_jump_marker(out_blocks: &mut Vec<BasicBlock>) -> usize {
+    if forward_jump_marker(out_blocks.last_mut()).is_none() {
+        out_blocks.push(BasicBlock {
+            instructions: vec![],
+            exit: BasicBlockExit::Jump(MAX),
+        });
+    }
+
+    out_blocks.len() - 1
+}
+
+fn resolve_forward_jumps(out_blocks: &mut Vec<BasicBlock>, to_label: &mut Vec<usize>) {
+    let jump_target = out_blocks.len();
+    for label in to_label.drain(..) {
+        let m = out_blocks.get_mut(label);
+        if let Some(marker) = forward_jump_marker(m) {
+            *marker = jump_target;
         }
-        _ => false,
     }
 }
 
-fn unmergeable(exit: &BasicBlockExit) -> bool {
-    match exit {
-        BasicBlockExit::SetTryAndCatch(_, _, _, _) => true,
-        BasicBlockExit::PopCatch(_, _) => true,
-        BasicBlockExit::PopFinally(_, _) => true,
-        BasicBlockExit::EndFinally(_) => true,
-        _ => false,
-    }
-}
-
-fn get_blocks_jumped_to(blocks: &BTreeMap<usize, BasicBlock>) -> HashSet<usize> {
-    blocks
-        .iter()
-        .map(|(i, block)| (*i, &block.exit))
-        .zip(
-            blocks
-                .iter()
-                .map(|(next_i, _)| Some(*next_i))
-                .skip(1)
-                .chain(vec![None].into_iter()),
-        )
-        .flat_map(|((_i, e), next_i)| match e {
-            BasicBlockExit::Jump(j) => {
-                if next_i == Some(*j) {
-                    vec![]
+fn fold_basics(inp: Vec<StructuredFlow>) -> Vec<(Vec<usize>, Option<StructuredFlow>)> {
+    let mut out = vec![];
+    let mut basics = vec![];
+    for item in inp {
+        match item {
+            StructuredFlow::BasicBlock(idx) => basics.push(idx),
+            _ => {
+                if basics.len() > 0 {
+                    out.push((basics, Some(item)));
+                    basics = vec![];
                 } else {
-                    vec![*j]
+                    out.push((vec![], Some(item)));
                 }
             }
-            BasicBlockExit::Break(j) => vec![*j],
-            BasicBlockExit::Continue(j) => vec![*j],
-            BasicBlockExit::Cond(_, cons, _, alt, _) => vec![*cons, *alt],
-            BasicBlockExit::Loop(start, _end) => vec![*start],
-            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after) => {
-                vec![*try_block, *catch_block, *finally_block, *after]
-            }
-            BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
-                vec![*catch_block, *finally_or_after]
-            }
-            BasicBlockExit::PopFinally(finally_block, _after_finally) => vec![*finally_block],
-            BasicBlockExit::EndFinally(after) => vec![*after],
-            BasicBlockExit::ExitFn(_, _) => vec![],
-        })
-        .collect::<HashSet<_>>()
+        }
+    }
+    if basics.len() > 0 {
+        out.push((basics, None));
+    }
+    out
 }
 
-fn get_reachable_blocks(exits: &BTreeMap<usize, BasicBlock>) -> HashSet<usize> {
-    let mut reachable_blocks = HashSet::new();
-    let mut stack = vec![0];
+fn fold_blocks(
+    out_blocks: &mut Vec<BasicBlock>,
+    blocks: &mut BTreeMap<usize, BasicBlock>,
+    as_tree: Vec<StructuredFlow>,
+    jump_targets: &mut BTreeMap<BreakableId, (usize, usize, Vec<usize>)>,
+) -> (Vec<usize>, usize) {
+    let mut to_label = vec![];
 
-    use BasicBlockExit::*;
+    for (preceding_bbs, item) in fold_basics(as_tree) {
+        resolve_forward_jumps(out_blocks, &mut to_label);
 
-    // Unconditionally reachable blocks, because try..catch is finnicky
-    stack.extend(exits.iter().flat_map(|(_, block)| match &block.exit {
-        SetTryAndCatch(try_, catch, finally, after) => vec![*try_, *catch, *finally, *after],
-        PopCatch(catch, finally) => vec![*catch, *finally],
-        PopFinally(finally, _) => vec![*finally],
-        EndFinally(after) => vec![*after],
-        _ => Vec::with_capacity(0),
-    }));
+        let mut instructions = vec![];
 
-    while let Some(block_id) = stack.pop() {
-        if reachable_blocks.contains(&block_id) {
-            continue;
+        for blk in preceding_bbs {
+            let blk = blocks.get_mut(&blk).unwrap();
+            instructions.extend(blk.instructions.drain(..));
         }
 
-        reachable_blocks.insert(block_id);
+        let item = match item {
+            Some(item) => item,
+            None => {
+                // Will not stand on its own
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::Jump(MAX),
+                });
+                to_label.push(out_blocks.len() - 1);
+                continue;
+            }
+        };
 
-        stack.extend(exits[&block_id].exit.jump_targets());
+        match item.clone() {
+            // THE HUMBLE BASIC BLOCK
+            StructuredFlow::BasicBlock(_idx) => {
+                unreachable!("handled above")
+            }
+            // EXITS
+            StructuredFlow::Break(brk) => {
+                let (_, _, jump_target) = jump_targets.get_mut(&brk).unwrap();
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::Break(MAX),
+                });
+                jump_target.push(out_blocks.len() - 1);
+                break;
+            }
+            StructuredFlow::Continue(brk) => {
+                let jump_target = jump_targets.get(&brk).unwrap();
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::Continue(jump_target.0),
+                });
+                break;
+            }
+            StructuredFlow::Return(exit_type, var_idx) => {
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::ExitFn(exit_type, var_idx.expect("TODO")),
+                });
+                break;
+            }
+            // SETS OF BLOCKS (will recurse 1+ times)
+            StructuredFlow::Block(blocks_within) => {
+                if instructions.len() > 0 {
+                    out_blocks.push(BasicBlock {
+                        instructions,
+                        exit: BasicBlockExit::Jump(MAX),
+                    });
+                    to_label.push(out_blocks.len() - 1);
+                }
+                let (block_labels, _) =
+                    fold_blocks(out_blocks, blocks, blocks_within, jump_targets);
+
+                to_label.extend(block_labels);
+            }
+            StructuredFlow::Branch(brk, cond_var, cons, alt) => {
+                if brk.0.is_some() {
+                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                }
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::Cond(cond_var, MAX, MAX, MAX, MAX),
+                });
+                let cond = out_blocks.len() - 1;
+
+                let (cons_labels, cons) = fold_blocks(out_blocks, blocks, cons, jump_targets);
+                let (alt_labels, alt) = fold_blocks(out_blocks, blocks, alt, jump_targets);
+
+                out_blocks[cond].exit =
+                    BasicBlockExit::Cond(cond_var, cond + 1, cons, cons + 1, alt);
+
+                to_label.extend(cons_labels);
+                to_label.extend(alt_labels);
+                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
+                    to_label.extend(broken_from);
+                }
+            }
+            StructuredFlow::Loop(brk, body) => {
+                if brk.0.is_some() {
+                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                }
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::Loop(MAX, MAX),
+                });
+                let head = out_blocks.len() - 1;
+
+                let (body_labels, body) = fold_blocks(out_blocks, blocks, body, jump_targets);
+
+                out_blocks[head].exit = BasicBlockExit::Loop(head + 1, body);
+
+                to_label.extend(body_labels);
+                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
+                    to_label.extend(broken_from);
+                }
+            }
+            StructuredFlow::TryCatch(brk, body, catch, finally) => {
+                if brk.0.is_some() {
+                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                }
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::SetTryAndCatch(MAX, MAX, MAX, MAX),
+                });
+                let head = out_blocks.len() - 1;
+
+                let (body_labels, _) = fold_blocks(out_blocks, blocks, body, jump_targets);
+                let body = ensure_forward_jump_marker(out_blocks);
+
+                let (catch_labels, _) = fold_blocks(out_blocks, blocks, catch, jump_targets);
+                let catch = ensure_forward_jump_marker(out_blocks);
+
+                let (finally_labels, _) = fold_blocks(out_blocks, blocks, finally, jump_targets);
+                let finally = ensure_forward_jump_marker(out_blocks);
+
+                out_blocks[head].exit =
+                    BasicBlockExit::SetTryAndCatch(head + 1, body + 1, catch + 1, finally);
+                out_blocks[body].exit = BasicBlockExit::PopCatch(body + 1, catch + 1);
+                out_blocks[catch].exit = BasicBlockExit::PopFinally(catch + 1, finally);
+                out_blocks[finally].exit = BasicBlockExit::EndFinally(MAX);
+
+                to_label.push(finally);
+                to_label.extend(body_labels);
+                to_label.extend(catch_labels);
+                to_label.extend(finally_labels);
+                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
+                    to_label.extend(broken_from);
+                }
+            }
+        }
     }
 
-    reachable_blocks
+    (to_label, out_blocks.len() - 1)
 }
 
 #[cfg(test)]
@@ -160,6 +257,12 @@ mod tests {
     fn test_normalize(instructions: &str) -> BasicBlockGroup {
         let group = parse_instructions(instructions);
         let blocks = normalize_basic_blocks(group.blocks);
+
+        let blocks_again = normalize_basic_blocks(blocks.clone());
+        assert_eq!(
+            blocks, blocks_again,
+            "normalizing twice should be idempotent"
+        );
 
         BasicBlockGroup {
             blocks,
@@ -203,6 +306,66 @@ mod tests {
         @3: {
             $3 = 4
             exit = return $3
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_normalize_trycatch() {
+        let group = test_normalize(
+            "@0: {
+                exit = jump @1
+            }
+            @1: {
+                exit = try @2 catch @4 finally @6 after @7
+            }
+            @2: {
+                $0 = 777
+                exit = jump @3
+            }
+            @3: {
+                exit = error ? jump @4 : jump @6
+            }
+            @4: {
+                $1 = either($0, $2, $3)
+                $2 = 888
+                exit = jump @5
+            }
+            @5: {
+                $3 = either($0, $1, $2)
+                exit = finally @6 after @7
+            }
+            @6: {
+                exit = jump @7
+            }
+            @7: {
+                exit = end finally after @8
+            }
+            @8: {
+                $4 = $3
+                exit = return $4
+            }",
+        );
+        insta::assert_debug_snapshot!(group, @r###"
+        @0: {
+            exit = try @1 catch @2 finally @3 after @3
+        }
+        @1: {
+            $0 = 777
+            exit = error ? jump @2 : jump @3
+        }
+        @2: {
+            $1 = either($0, $2, $3)
+            $2 = 888
+            $3 = either($0, $1, $2)
+            exit = finally @3 after @3
+        }
+        @3: {
+            exit = end finally after @4
+        }
+        @4: {
+            $4 = $3
+            exit = return $4
         }
         "###);
     }

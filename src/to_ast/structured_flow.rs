@@ -3,7 +3,7 @@ use std::fmt::{Debug, Formatter};
 
 use crate::basic_blocks::ExitType;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct BreakableId(pub Option<usize>);
 
 impl std::fmt::Display for BreakableId {

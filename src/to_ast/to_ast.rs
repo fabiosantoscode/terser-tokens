@@ -659,6 +659,7 @@ mod tests {
                         } else {
                             break;
                         }
+                        continue;
                     } else {
                         break;
                     }

@@ -1051,32 +1051,20 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = jump @1
+            exit = try @1 catch @2 finally @3 after @3
         }
         @1: {
-            exit = try @2 catch @4 finally @6 after @7
+            $0 = 777
+            exit = error ? jump @2 : jump @3
         }
         @2: {
-            $0 = 777
-            exit = jump @3
+            $1 = 888
+            exit = finally @3 after @3
         }
         @3: {
-            exit = error ? jump @4 : jump @5
+            exit = end finally after @4
         }
         @4: {
-            $1 = 888
-            exit = jump @5
-        }
-        @5: {
-            exit = finally @6 after @7
-        }
-        @6: {
-            exit = jump @7
-        }
-        @7: {
-            exit = end finally after @8
-        }
-        @8: {
             $2 = undefined
             exit = return $2
         }
@@ -1095,34 +1083,22 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = jump @1
+            exit = try @1 catch @2 finally @3 after @3
         }
         @1: {
-            exit = try @2 catch @4 finally @6 after @7
+            $0 = 777
+            exit = error ? jump @2 : jump @3
         }
         @2: {
-            $0 = 777
-            exit = jump @3
+            $1 = 888
+            exit = finally @3 after @3
         }
         @3: {
-            exit = error ? jump @4 : jump @5
+            $2 = either($0, $1)
+            $3 = either($0, $1)
+            exit = end finally after @4
         }
         @4: {
-            $1 = 888
-            exit = jump @5
-        }
-        @5: {
-            exit = finally @6 after @7
-        }
-        @6: {
-            $2 = either($0, $1)
-            exit = jump @7
-        }
-        @7: {
-            $3 = either($0, $1)
-            exit = end finally after @8
-        }
-        @8: {
             $4 = $3
             exit = return $4
         }
@@ -1142,33 +1118,21 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = jump @1
+            exit = try @1 catch @2 finally @3 after @3
         }
         @1: {
-            exit = try @2 catch @4 finally @6 after @7
+            $0 = 777
+            exit = error ? jump @2 : jump @3
         }
         @2: {
-            $0 = 777
-            exit = jump @3
+            $1 = 888
+            exit = finally @3 after @3
         }
         @3: {
-            exit = error ? jump @4 : jump @5
+            $2 = 999
+            exit = end finally after @4
         }
         @4: {
-            $1 = 888
-            exit = jump @5
-        }
-        @5: {
-            exit = finally @6 after @7
-        }
-        @6: {
-            $2 = 999
-            exit = jump @7
-        }
-        @7: {
-            exit = end finally after @8
-        }
-        @8: {
             $3 = undefined
             exit = return $3
         }
@@ -1195,68 +1159,53 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 10
-            exit = jump @1
+            exit = try @1 catch @5 finally @12 after @12
         }
         @1: {
-            exit = try @2 catch @7 finally @16 after @17
-        }
-        @2: {
             $1 = $0
             $2 = 10
             $3 = $1 > $2
-            exit = cond $3 ? @3..@3 : @4..@4
+            exit = cond $3 ? @2..@2 : @3..@3
         }
-        @3: {
+        @2: {
             $4 = 123
             exit = throw $4
         }
+        @3: {
+            exit = jump @4
+        }
         @4: {
-            exit = jump @5
+            exit = error ? jump @5 : jump @12
         }
         @5: {
-            exit = jump @6
+            $5 = caught_error()
+            exit = try @6 catch @8 finally @10 after @10
         }
         @6: {
-            exit = error ? jump @7 : jump @15
-        }
-        @7: {
-            $5 = caught_error()
-            exit = jump @8
-        }
-        @8: {
-            exit = try @9 catch @10 finally @12 after @13
-        }
-        @9: {
             $6 = 456
             exit = return $6
         }
-        @10: {
+        @7: {
+            exit = error ? jump @8 : jump @10
+        }
+        @8: {
             $7 = caught_error()
             $8 = 789
             exit = return $8
         }
+        @9: {
+            exit = finally @10 after @10
+        }
+        @10: {
+            exit = end finally after @11
+        }
         @11: {
-            exit = finally @12 after @13
+            exit = finally @12 after @12
         }
         @12: {
-            exit = jump @13
+            exit = end finally after @13
         }
         @13: {
-            exit = end finally after @14
-        }
-        @14: {
-            exit = jump @15
-        }
-        @15: {
-            exit = finally @16 after @17
-        }
-        @16: {
-            exit = jump @17
-        }
-        @17: {
-            exit = end finally after @18
-        }
-        @18: {
             $9 = $0
             exit = return $9
         }
