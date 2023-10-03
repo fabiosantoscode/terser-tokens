@@ -98,7 +98,7 @@ impl StructuredFlow {
         }
     }
 
-    fn children(&self) -> Vec<&Vec<StructuredFlow>> {
+    pub fn children(&self) -> Vec<&Vec<StructuredFlow>> {
         match self {
             StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y, z],
             StructuredFlow::Break(_) => vec![],

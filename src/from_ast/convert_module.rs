@@ -143,21 +143,21 @@ mod tests {
             },
             top_level_stats: @0: {
                 $0 = FunctionId(1)
-                $7 = undefined
-                exit = return $7
+                $1 = undefined
+                exit = return $1
             },
             functions: [
                 function():
                 @0: {
-                    $1 = FunctionId(2)
-                    $4 = $1
-                    $5 = call $4()
-                    exit = return $5
+                    $2 = FunctionId(2)
+                    $3 = $2
+                    $4 = call $3()
+                    exit = return $4
                 },
                 function():
                 @0: {
-                    $2 = 2
-                    exit = return $2
+                    $5 = 2
+                    exit = return $5
                 },
             ],
         }
@@ -181,20 +181,20 @@ mod tests {
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $1 = undefined
-            $3 = write_non_local $$2 $1
-            $4 = 1
-            $5 = write_non_local $$2 $4
-            $6 = FunctionId(2)
-            exit = return $6
+            $2 = undefined
+            $4 = write_non_local $$3 $2
+            $5 = 1
+            $6 = write_non_local $$3 $5
+            $7 = FunctionId(2)
+            exit = return $7
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(2)).unwrap(), @r###"
         function():
         @0: {
-            $7 = read_non_local $$2
-            $8 = $7
-            exit = return $8
+            $8 = read_non_local $$3
+            $9 = $8
+            exit = return $9
         }
         "###);
     }
@@ -219,20 +219,20 @@ mod tests {
             $7 = write_non_local $$6 $5
             $8 = FunctionId(1)
             $9 = write_non_local $$6 $8
-            $16 = undefined
-            exit = return $16
+            $10 = undefined
+            exit = return $10
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $10 = read_non_local $$6
-            $11 = read_non_local $$1
-            $12 = 9
-            $13 = write_non_local $$1 $12
-            $14 = $12
-            $15 = undefined
-            exit = return $15
+            $11 = read_non_local $$6
+            $12 = read_non_local $$1
+            $13 = 9
+            $14 = write_non_local $$1 $13
+            $15 = $13
+            $16 = undefined
+            exit = return $16
         }
         "###);
     }
@@ -260,42 +260,42 @@ mod tests {
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
                 $4 = write_non_local $$1 $3
-                $19 = undefined
-                $21 = write_non_local $$20 $19
-                $22 = FunctionId(3)
-                $23 = write_non_local $$20 $22
-                $27 = $3
-                $28 = call $27()
-                $29 = $22
-                $30 = call $29()
-                $31 = $28 + $30
-                $32 = undefined
-                exit = return $32
+                $5 = undefined
+                $7 = write_non_local $$6 $5
+                $8 = FunctionId(3)
+                $9 = write_non_local $$6 $8
+                $10 = $3
+                $11 = call $10()
+                $12 = $8
+                $13 = call $12()
+                $14 = $11 + $13
+                $15 = undefined
+                exit = return $15
             },
             FunctionId(1): function():
             @0: {
-                $5 = read_non_local $$1
-                $6 = undefined
-                $8 = write_non_local $$7 $6
-                $9 = FunctionId(2)
-                $10 = write_non_local $$7 $9
-                $15 = $9
-                $16 = 123
-                $17 = call $15($16)
-                exit = return $17
+                $16 = read_non_local $$1
+                $17 = undefined
+                $19 = write_non_local $$18 $17
+                $20 = FunctionId(2)
+                $21 = write_non_local $$18 $20
+                $22 = $20
+                $23 = 123
+                $24 = call $22($23)
+                exit = return $24
             },
             FunctionId(2): function():
             @0: {
-                $11 = arguments[0]
-                $12 = read_non_local $$7
-                $13 = $11
-                exit = return $13
+                $25 = arguments[0]
+                $26 = read_non_local $$18
+                $27 = $25
+                exit = return $27
             },
             FunctionId(3): function():
             @0: {
-                $24 = read_non_local $$20
-                $25 = 456
-                exit = return $25
+                $28 = read_non_local $$6
+                $29 = 456
+                exit = return $29
             },
         }
         "###);
@@ -320,25 +320,25 @@ mod tests {
                 $3 = FunctionId(1)
                 $4 = FunctionId(2)
                 $5 = write_non_local $$1 $4
-                $15 = $3
-                $16 = 1
-                $17 = call $15($16)
-                exit = return $17
+                $6 = $3
+                $7 = 1
+                $8 = call $6($7)
+                exit = return $8
             },
             FunctionId(1): function():
             @0: {
-                $6 = arguments[0]
-                $7 = $6
-                $8 = read_non_local $$1
-                $9 = $8
-                $10 = call $9()
-                $11 = $7 + $10
-                exit = return $11
+                $9 = arguments[0]
+                $10 = $9
+                $11 = read_non_local $$1
+                $12 = $11
+                $13 = call $12()
+                $14 = $10 + $13
+                exit = return $14
             },
             FunctionId(2): function():
             @0: {
-                $13 = 100
-                exit = return $13
+                $15 = 100
+                exit = return $15
             },
         }
         "###);

@@ -125,6 +125,14 @@ impl BasicBlockInstruction {
         }
     }
 
+    pub fn get_nonlocal_id(&self) -> Option<usize> {
+        match self {
+            BasicBlockInstruction::ReadNonLocal(id) => Some(id.0),
+            BasicBlockInstruction::WriteNonLocal(id, _) => Some(id.0),
+            _ => None,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn unwrap_ref(&self) -> usize {
         match self {

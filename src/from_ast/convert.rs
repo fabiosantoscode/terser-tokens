@@ -688,8 +688,8 @@ mod tests {
             exit = jump @4
         }
         @4: {
-            $7 = either($0, $2, $4)
-            $8 = either($5, $6)
+            $7 = either($5, $6)
+            $8 = either($0, $2, $4)
             $9 = 1
             exit = jump @6
         }
@@ -699,7 +699,7 @@ mod tests {
             exit = jump @6
         }
         @6: {
-            $12 = either($0, $2, $4, $10)
+            $12 = either($0, $2, $8, $10)
             $13 = either($9, $11)
             $14 = $12
             $15 = 2
@@ -776,44 +776,54 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
-            exit = loop @1..@7
+            exit = loop @1..@9
         }
         @1: {
-            $1 = 111
-            exit = cond $1 ? @2..@6 : @7..@7
+            $1 = either($0, $15)
+            $2 = 111
+            exit = cond $2 ? @2..@7 : @8..@8
         }
         @2: {
-            $2 = $0
-            $3 = 1000
-            $4 = $2 + $3
-            $5 = $4
-            exit = loop @3..@5
+            $3 = $1
+            $4 = 1000
+            $5 = $3 + $4
+            $6 = $5
+            exit = loop @3..@6
         }
         @3: {
-            $6 = 222
-            exit = cond $6 ? @4..@4 : @5..@5
+            $7 = either($5, $13)
+            $8 = 222
+            exit = cond $8 ? @4..@4 : @5..@5
         }
         @4: {
-            $7 = $4
-            $8 = 2000
-            $9 = $7 + $8
-            $10 = $9
-            exit = break @8
+            $9 = $7
+            $10 = 2000
+            $11 = $9 + $10
+            $12 = $11
+            exit = break @10
         }
         @5: {
-            exit = break @6
+            exit = break @7
         }
         @6: {
-            $11 = either($0, $4, $9)
-            exit = continue @1
+            $13 = either($0, $1, $5, $7, $11)
+            exit = jump @7
         }
         @7: {
-            exit = break @8
+            $14 = either($0, $1, $5, $7, $13)
+            exit = continue @1
         }
         @8: {
-            $12 = either($0, $4, $9)
-            $13 = $12
-            exit = return $13
+            exit = break @10
+        }
+        @9: {
+            $15 = either($0, $1, $5, $14)
+            exit = jump @10
+        }
+        @10: {
+            $16 = either($0, $1, $15)
+            $17 = $16
+            exit = return $17
         }
         "###);
     }
@@ -862,7 +872,7 @@ mod tests {
             exit = jump @6
         }
         @6: {
-            $12 = either($0, $4, $9)
+            $12 = either($0, $4, $11)
             $13 = $12
             exit = return $13
         }
@@ -925,7 +935,7 @@ mod tests {
             exit = jump @6
         }
         @6: {
-            $20 = either($13, $16, $18)
+            $20 = either($0, $13, $16, $18)
             $21 = $20
             exit = return $21
         }
@@ -1095,12 +1105,11 @@ mod tests {
         }
         @3: {
             $2 = either($0, $1)
-            $3 = either($0, $1)
             exit = end finally after @4
         }
         @4: {
-            $4 = $3
-            exit = return $4
+            $3 = $2
+            exit = return $3
         }
         "###);
     }

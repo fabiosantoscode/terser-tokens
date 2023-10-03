@@ -16,12 +16,16 @@ pub fn normalize_basic_blocks(blocks: BTreeMap<usize, BasicBlock>) -> BTreeMap<u
     };
     let recursive = do_tree(&blocks);
 
+    normalize_basic_blocks_tree(vec![recursive], &mut blocks.blocks)
+}
+
+pub fn normalize_basic_blocks_tree(recursive: Vec<StructuredFlow>, blocks: &mut BTreeMap<usize, BasicBlock>) -> BTreeMap<usize, BasicBlock> {
     let mut out_blocks = vec![];
     let mut jump_targets = BTreeMap::new();
     fold_blocks(
         &mut out_blocks,
-        &mut blocks.blocks,
-        vec![recursive],
+        blocks,
+        recursive,
         &mut jump_targets,
     );
 
@@ -66,7 +70,7 @@ fn resolve_forward_jumps(out_blocks: &mut Vec<BasicBlock>, to_label: &mut Vec<us
     }
 }
 
-fn fold_basics(inp: Vec<StructuredFlow>) -> Vec<(Vec<usize>, Option<StructuredFlow>)> {
+fn fold_basic_blocks(inp: Vec<StructuredFlow>) -> Vec<(Vec<usize>, Option<StructuredFlow>)> {
     let mut out = vec![];
     let mut basics = vec![];
     for item in inp {
@@ -96,7 +100,7 @@ fn fold_blocks(
 ) -> (Vec<usize>, usize) {
     let mut to_label = vec![];
 
-    for (preceding_bbs, item) in fold_basics(as_tree) {
+    for (preceding_bbs, item) in fold_basic_blocks(as_tree) {
         resolve_forward_jumps(out_blocks, &mut to_label);
 
         let mut instructions = vec![];
@@ -119,7 +123,7 @@ fn fold_blocks(
             }
         };
 
-        match item.clone() {
+        match item {
             // THE HUMBLE BASIC BLOCK
             StructuredFlow::BasicBlock(_idx) => {
                 unreachable!("handled above")

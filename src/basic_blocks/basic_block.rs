@@ -73,16 +73,12 @@ impl BasicBlockExit {
             ) => vec![*true_target, *false_target],
             BasicBlockExit::Loop(start, _end) => vec![*start],
             BasicBlockExit::ExitFn(_, _) => vec![],
-            BasicBlockExit::SetTryAndCatch(try_target, catch_target, _, _) => {
-                vec![*try_target, *catch_target]
-            }
+            BasicBlockExit::SetTryAndCatch(jump_forward, _, _, _)
+            | BasicBlockExit::PopFinally(jump_forward, _)
+            | BasicBlockExit::EndFinally(jump_forward) => vec![*jump_forward],
             BasicBlockExit::PopCatch(catch_target, finally_target) => {
                 vec![*catch_target, *finally_target]
             }
-            BasicBlockExit::PopFinally(finally_target, _after_finally_target) => {
-                vec![*finally_target]
-            }
-            BasicBlockExit::EndFinally(after_finally_target) => vec![*after_finally_target],
         }
     }
 

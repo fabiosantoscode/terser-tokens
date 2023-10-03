@@ -1,9 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::basic_blocks::BasicBlock;
+use crate::{
+    basic_blocks::BasicBlock,
+    to_ast::{do_tree, StructuredFlow},
+};
 
 use super::{
-    normalize_varnames, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,
+    normalize_basic_blocks_tree, normalize_varnames, BasicBlockGroup, BasicBlockInstruction,
+    BasicBlockModule,
 };
 
 pub fn generate_phi_nodes(module: &mut BasicBlockModule) {
@@ -14,97 +18,274 @@ pub fn generate_phi_nodes(module: &mut BasicBlockModule) {
         .unwrap_or(0)
         + 1;
 
-    let rename_all = |to_rename: Vec<&mut usize>, rename_key: &BTreeMap<usize, usize>| {
-        for varname in to_rename {
-            if let Some(new_name) = rename_key.get(varname) {
-                *varname = *new_name;
-            }
-        }
-    };
+    for (_func_id, block_group) in module.iter_mut() {
+        let as_recursive = do_tree(&*block_group);
 
-    for (_blk_id, block_group) in module.iter_mut() {
-        let mut renamed_vars = BTreeMap::new();
-        let mut vars_as_phi: Vec<BTreeMap<usize, BTreeSet<usize>>> = vec![BTreeMap::new()];
-        let mut condition_ends = vec![];
-        let mut phi_instructions_for_next_block = vec![];
+        let mut ctx = PhiGenerationCtx::new(std::mem::take(block_group), unique_name);
 
-        for (block_id, block) in block_group.iter_mut() {
-            for (varname, instruction) in block.instructions.iter_mut() {
-                let phied_vars = vars_as_phi.last_mut().unwrap();
-                let phied_var = phied_vars.entry(*varname).or_default();
+        let as_recursive = generate_phi_nodes_inner(&mut ctx, vec![as_recursive]);
 
-                let is_new_var = phied_var.insert(*varname);
-                if !is_new_var {
-                    let new_varname = unique_name;
-                    unique_name += 1;
+        assert_eq!(ctx.conditionals.len(), 1);
 
-                    phied_var.insert(new_varname);
+        *block_group = ctx.block_group;
+        unique_name = ctx.unique_name;
 
-                    renamed_vars.insert(*varname, new_varname);
-                    *varname = new_varname;
-                }
-
-                rename_all(instruction.used_vars_mut(), &renamed_vars);
-            }
-
-            rename_all(block.exit.used_vars_mut(), &renamed_vars);
-
-            if phi_instructions_for_next_block.len() > 0 {
-                block
-                    .instructions
-                    .splice(0..0, phi_instructions_for_next_block.drain(..))
-                    .for_each(drop);
-            }
-
-            // Enter conditional branches
-            if let Some(end_cond) = jumps_to_conditional_branch(&block.exit) {
-                condition_ends.push(end_cond);
-                vars_as_phi.push(vars_as_phi.last().cloned().unwrap_or_default());
-            }
-
-            // Leave conditional branches
-            while condition_ends.last() == Some(&block_id) {
-                condition_ends.pop();
-
-                let renamed = vars_as_phi
-                    .pop()
-                    .expect("unbalanced conditional branch")
-                    .into_iter()
-                    .filter(|(_, phis)| phis.len() > 1)
-                    .collect::<Vec<_>>();
-
-                for (unphied_name, alternatives) in renamed.into_iter() {
-                    let new_varname = unique_name;
-                    unique_name += 1;
-
-                    if let Some(existing_phies) =
-                        vars_as_phi.last_mut().unwrap().get_mut(&unphied_name)
-                    {
-                        for phi in alternatives.iter() {
-                            existing_phies.insert(*phi);
-                            renamed_vars.insert(*phi, new_varname);
-                        }
-                    }
-                    renamed_vars.insert(unphied_name, new_varname);
-
-                    phi_instructions_for_next_block.push((
-                        new_varname,
-                        BasicBlockInstruction::Phi(alternatives.into_iter().collect()),
-                    ));
-                }
-            }
-        }
+        block_group.blocks = normalize_basic_blocks_tree(as_recursive, &mut block_group.blocks);
     }
 
     normalize_varnames(module);
 }
 
-fn jumps_to_conditional_branch(exit: &BasicBlockExit) -> Option<usize> {
-    match exit {
-        BasicBlockExit::Cond(_, _, _, _, alt_end) => Some(*alt_end),
-        BasicBlockExit::Loop(_, loop_end) => Some(*loop_end),
-        BasicBlockExit::PopCatch(_, end_catch) => Some(*end_catch),
-        _ => None,
+struct PhiGenerationCtx {
+    block_group: BasicBlockGroup,
+    unique_name: usize,
+    conditionals: Vec<BTreeMap<usize, Vec<usize>>>,
+}
+impl PhiGenerationCtx {
+    fn new(block_group: BasicBlockGroup, unique_name: usize) -> Self {
+        Self {
+            block_group,
+            unique_name,
+            conditionals: vec![BTreeMap::new()],
+        }
+    }
+    fn make_name(&mut self) -> usize {
+        let name = self.unique_name;
+        self.unique_name += 1;
+        name
+    }
+    fn read_name_cond(&mut self, varname: usize) -> Option<usize> {
+        self.conditionals
+            .iter()
+            .rev()
+            .find_map(|cond| cond.get(&varname))
+            .map(|phis| phis.last().unwrap().clone())
+    }
+    fn read_name(&mut self, varname: usize) -> usize {
+        self.read_name_cond(varname)
+            .expect("variable is yet to defined")
+    }
+    fn write_name(&mut self, varname: usize, value: usize) {
+        self.conditionals
+            .last_mut()
+            .unwrap()
+            .entry(varname)
+            .or_insert_with(|| vec![])
+            .push(value);
+    }
+    fn enter_conditional(&mut self) {
+        self.conditionals.push(match self.conditionals.last() {
+            Some(cond) => cond.clone(),
+            _ => BTreeMap::new(),
+        });
+    }
+
+    fn insert_phi_nodes(
+        &mut self,
+        phi_instructions: Vec<(usize, BasicBlockInstruction)>,
+    ) -> Option<StructuredFlow> {
+        if phi_instructions.len() > 0 {
+            let next_block = self.block_group.blocks.last_key_value().unwrap().0 + 1;
+
+            self.block_group.blocks.insert(
+                next_block,
+                BasicBlock {
+                    instructions: phi_instructions,
+                    exit: super::BasicBlockExit::Jump(usize::MAX), // Will be dropped when normalizing
+                },
+            );
+
+            Some(StructuredFlow::BasicBlock(next_block))
+        } else {
+            None
+        }
+    }
+
+    fn leave_conditional(&mut self) -> Option<StructuredFlow> {
+        let to_phi = self
+            .conditionals
+            .pop()
+            .expect("unbalanced conditional")
+            .into_iter()
+            .filter(|(_, v)| v.len() > 1);
+
+        let mut phi_instructions = vec![];
+
+        for (varname, phies) in to_phi {
+            let phi = BasicBlockInstruction::Phi(phies);
+
+            let name = self.make_name();
+            phi_instructions.push((name, phi));
+            self.write_name(varname, name);
+        }
+
+        self.insert_phi_nodes(phi_instructions)
+    }
+}
+
+fn generate_phi_nodes_inner(
+    ctx: &mut PhiGenerationCtx,
+    as_recursive: Vec<StructuredFlow>,
+) -> Vec<StructuredFlow> {
+    let mut out_recursive = vec![];
+
+    for item in as_recursive {
+        match item {
+            StructuredFlow::BasicBlock(bb) => {
+                let mut block_group = std::mem::take(&mut ctx.block_group);
+                let block = block_group.blocks.get_mut(&bb).unwrap();
+                for (varname, ins) in block.instructions.iter_mut() {
+                    for used_var in ins.used_vars_mut() {
+                        *used_var = ctx.read_name(*used_var);
+                    }
+
+                    let new_varname = ctx.make_name();
+                    ctx.write_name(*varname, new_varname);
+                    *varname = new_varname;
+                }
+
+                for exit_var in block.exit.used_vars_mut() {
+                    *exit_var = ctx.read_name(*exit_var);
+                }
+
+                ctx.block_group = block_group;
+
+                out_recursive.push(StructuredFlow::BasicBlock(bb));
+            }
+            StructuredFlow::Block(contents) => {
+                out_recursive.extend(generate_phi_nodes_inner(ctx, contents));
+            }
+            StructuredFlow::Return(exit, exit_val) => {
+                out_recursive.push(StructuredFlow::Return(
+                    exit,
+                    Some(ctx.read_name(exit_val.unwrap())),
+                ));
+            }
+            // Conditional branches
+            StructuredFlow::Branch(cond, cond_var, cons, alt) => {
+                ctx.enter_conditional();
+
+                let cons = generate_phi_nodes_inner(ctx, cons);
+                let alt = generate_phi_nodes_inner(ctx, alt);
+
+                let phi_block = ctx.leave_conditional();
+
+                out_recursive.push(StructuredFlow::Branch(
+                    cond,
+                    ctx.read_name(cond_var),
+                    cons,
+                    alt,
+                ));
+                out_recursive.extend(phi_block.into_iter());
+            }
+            StructuredFlow::Loop(brk, contents) => {
+                // We may re-use variables coming back to the top of the loop
+                ctx.enter_conditional();
+                let vars_used_and_defined_in_loop =
+                    get_loop_reentry_vars(&mut ctx.block_group, &contents);
+                let mut loop_top_phis = vec![];
+                for canonical_name in vars_used_and_defined_in_loop {
+                    if let Some(current_name) = ctx.read_name_cond(canonical_name) {
+                        let new_name = ctx.make_name();
+                        loop_top_phis.push((canonical_name, current_name, new_name));
+                        ctx.write_name(canonical_name, new_name);
+                        // TODO maybe do something with this after
+                    }
+                }
+
+                let contents = generate_phi_nodes_inner(ctx, contents);
+
+                // Top-phi
+                let mut phi_instructions = vec![];
+                for (canonical_name, name_before_loop, name_in_loop) in loop_top_phis {
+                    let phi = BasicBlockInstruction::Phi(vec![
+                        name_before_loop,
+                        ctx.read_name(canonical_name),
+                    ]);
+                    phi_instructions.push((name_in_loop, phi));
+                }
+
+                let loop_top_phi = ctx.insert_phi_nodes(phi_instructions);
+                let contents = loop_top_phi.into_iter().chain(contents).collect();
+
+                let phi_block = ctx.leave_conditional();
+
+                out_recursive.push(StructuredFlow::Loop(brk, contents));
+                out_recursive.extend(phi_block.into_iter());
+            }
+            StructuredFlow::TryCatch(brk, body, catch, fin) => {
+                let body = generate_phi_nodes_inner(ctx, body);
+
+                ctx.enter_conditional();
+                let catch = generate_phi_nodes_inner(ctx, catch);
+                let phi_block = ctx.leave_conditional();
+
+                let fin = generate_phi_nodes_inner(ctx, fin);
+                let fin = phi_block.into_iter().chain(fin).collect();
+
+                out_recursive.push(StructuredFlow::TryCatch(brk, body, catch, fin));
+            }
+            // Identity - don't need to do anything with these, because they don't read or write vars
+            StructuredFlow::Break(_) | StructuredFlow::Continue(_) => out_recursive.push(item),
+        }
+    }
+
+    out_recursive
+}
+
+fn get_loop_reentry_vars(
+    block_group: &mut BasicBlockGroup,
+    contents: &Vec<StructuredFlow>,
+) -> BTreeSet<usize> {
+    let mut vars_defined_in_loop = BTreeSet::new();
+    for_each_structuredflow(block_group, contents, &mut |block: &mut BasicBlock| {
+        for (varname, _ins) in block.instructions.iter_mut() {
+            // Push this into phi unconditionally
+            vars_defined_in_loop.insert(*varname);
+        }
+    });
+
+    let mut loop_vars_used_in_loop = BTreeSet::new();
+    for_each_structuredflow(block_group, contents, &mut |block: &mut BasicBlock| {
+        let mut seen_defs = BTreeSet::new();
+        for (varname, ins) in block.instructions.iter_mut() {
+            // Push this into phi unconditionally
+            for used_var in ins.used_vars() {
+                if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
+                    loop_vars_used_in_loop.insert(used_var);
+                }
+            }
+
+            seen_defs.insert(varname);
+        }
+        for used_var in block.exit.used_vars() {
+            if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
+                loop_vars_used_in_loop.insert(used_var);
+            }
+        }
+    });
+
+    loop_vars_used_in_loop
+}
+
+pub fn for_each_structuredflow<Fn>(
+    blocks: &mut BasicBlockGroup,
+    struc: &Vec<StructuredFlow>,
+    func: &mut Fn,
+) where
+    Fn: FnMut(&mut BasicBlock),
+{
+    for struc in struc {
+        match struc {
+            StructuredFlow::BasicBlock(bb) => {
+                func(blocks.blocks.get_mut(bb).unwrap());
+            }
+            _ => {
+                for children_group in struc.children() {
+                    for_each_structuredflow(blocks, children_group, func);
+                }
+            }
+        }
     }
 }
 
@@ -493,6 +674,168 @@ mod tests {
         @12: {
             $21 = $13
             exit = return $21
+        }
+        "###
+        );
+    }
+
+    #[test]
+    fn test_redo_phi() {
+        let mut blocks = parse_instructions_module(vec![
+            r###"
+            @0: {
+                exit = jump @1
+            }
+            @1: {
+                exit = try @2 catch @4 finally @6 after @7
+            }
+            @2: {
+                $0 = 777
+                exit = jump @3
+            }
+            @3: {
+                exit = error ? jump @4 : jump @5
+            }
+            @4: {
+                $1 = either($0, $2, $3)
+                $2 = 888
+                exit = jump @5
+            }
+            @5: {
+                exit = finally @6 after @7
+            }
+            @6: {
+                $3 = either($0, $1, $2)
+                exit = jump @7
+            }
+            @7: {
+                exit = end finally after @8
+            }
+            @8: {
+                $4 = $3
+                exit = return $4
+            }
+            "###,
+        ]);
+
+        remove_phi_module(&mut blocks);
+        generate_phi_nodes(&mut blocks);
+
+        insta::assert_debug_snapshot!(blocks.top_level_stats(),
+        @r###"
+        @0: {
+            exit = try @1 catch @2 finally @3 after @3
+        }
+        @1: {
+            $0 = 777
+            exit = error ? jump @2 : jump @3
+        }
+        @2: {
+            $1 = 888
+            exit = finally @3 after @3
+        }
+        @3: {
+            $2 = either($0, $1)
+            exit = end finally after @4
+        }
+        @4: {
+            $3 = $2
+            exit = return $3
+        }
+        "###
+        );
+    }
+
+    #[test]
+    fn test_redo_phi_loop() {
+        let mut blocks = parse_instructions_module(vec![
+            r###"
+            @0: {
+                $0 = 0
+                exit = loop @1..@1
+            }
+            @1: {
+                $1 = 1
+                $2 = $0
+                $0 = $2 + $1
+                exit = continue @1
+            }
+            @2: {
+                $3 = undefined
+                exit = return $3
+            }
+            "###,
+        ]);
+
+        remove_phi_module(&mut blocks);
+        generate_phi_nodes(&mut blocks);
+
+        insta::assert_debug_snapshot!(blocks.top_level_stats(),
+        @r###"
+        @0: {
+            $0 = 0
+            exit = loop @1..@1
+        }
+        @1: {
+            $1 = either($0, $4)
+            $2 = 1
+            $3 = $1
+            $4 = $3 + $2
+            exit = continue @1
+        }
+        @2: {
+            $5 = either($0, $1, $4)
+            $6 = undefined
+            exit = return $6
+        }
+        "###
+        );
+    }
+
+    #[test]
+    fn test_redo_phi_loop_multiblock() {
+        let mut blocks = parse_instructions_module(vec![
+            r###"
+            @0: {
+                $0 = 0
+                exit = loop @1..@2
+            }
+            @1: {
+                $1 = 1
+                $2 = $0
+                exit = jump @2
+            }
+            @2: {
+                $0 = $2 + $1
+                exit = continue @1
+            }
+            @3: {
+                $3 = undefined
+                exit = return $3
+            }
+            "###,
+        ]);
+
+        remove_phi_module(&mut blocks);
+        generate_phi_nodes(&mut blocks);
+
+        insta::assert_debug_snapshot!(blocks.top_level_stats(),
+        @r###"
+        @0: {
+            $0 = 0
+            exit = loop @1..@1
+        }
+        @1: {
+            $1 = either($0, $4)
+            $2 = 1
+            $3 = $1
+            $4 = $3 + $2
+            exit = continue @1
+        }
+        @2: {
+            $5 = either($0, $1, $4)
+            $6 = undefined
+            exit = return $6
         }
         "###
         );

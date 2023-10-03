@@ -5,7 +5,7 @@ use swc_ecma_ast::Ident;
 use crate::basic_blocks::{
     normalize_basic_blocks, BasicBlock, BasicBlockEnvironment, BasicBlockEnvironmentType,
     BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, Export,
-    FunctionId, Import, ModuleSummary, NonLocalId,
+    FunctionId, Import, ModuleSummary, NonLocalId, normalize_module,
 };
 use crate::scope::ScopeTree;
 
@@ -215,12 +215,16 @@ impl FromAstCtx {
 
         self.functions.insert(id, module_bg);
 
-        BasicBlockModule {
+        let mut module = BasicBlockModule {
             summary,
             functions: replace(&mut self.functions, Default::default()),
             imports: replace(&mut self.imports, Default::default()),
             exports: replace(&mut self.exports, Default::default()),
-        }
+        };
+
+        normalize_module(&mut module);
+
+        module
     }
 
     pub fn go_into_function<C>(
