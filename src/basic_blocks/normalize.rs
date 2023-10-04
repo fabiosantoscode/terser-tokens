@@ -3,31 +3,21 @@ use std::usize::MAX;
 
 use crate::{
     basic_blocks::{BasicBlock, BasicBlockExit},
-    to_ast::{do_tree, BreakableId, StructuredFlow},
+    to_ast::{block_group_to_structured_flow, BreakableId, StructuredFlow},
 };
 
-use super::BasicBlockGroup;
+use super::BasicBlockInstruction;
 
 pub fn normalize_basic_blocks(blocks: BTreeMap<usize, BasicBlock>) -> BTreeMap<usize, BasicBlock> {
-    let mut blocks = BasicBlockGroup {
-        blocks,
-        environment: Default::default(),
-        id: Default::default(),
-    };
-    let recursive = do_tree(&blocks);
+    let recursive = block_group_to_structured_flow(blocks);
 
-    normalize_basic_blocks_tree(vec![recursive], &mut blocks.blocks)
+    normalize_basic_blocks_tree(vec![recursive])
 }
 
-pub fn normalize_basic_blocks_tree(recursive: Vec<StructuredFlow>, blocks: &mut BTreeMap<usize, BasicBlock>) -> BTreeMap<usize, BasicBlock> {
+pub fn normalize_basic_blocks_tree(recursive: Vec<StructuredFlow>) -> BTreeMap<usize, BasicBlock> {
     let mut out_blocks = vec![];
     let mut jump_targets = BTreeMap::new();
-    fold_blocks(
-        &mut out_blocks,
-        blocks,
-        recursive,
-        &mut jump_targets,
-    );
+    fold_blocks(&mut out_blocks, recursive, &mut jump_targets);
 
     out_blocks.into_iter().enumerate().collect()
 }
@@ -70,31 +60,35 @@ fn resolve_forward_jumps(out_blocks: &mut Vec<BasicBlock>, to_label: &mut Vec<us
     }
 }
 
-fn fold_basic_blocks(inp: Vec<StructuredFlow>) -> Vec<(Vec<usize>, Option<StructuredFlow>)> {
+fn fold_basic_blocks(
+    inp: Vec<StructuredFlow>,
+) -> Vec<(
+    Vec<Vec<(usize, BasicBlockInstruction)>>,
+    Option<StructuredFlow>,
+)> {
     let mut out = vec![];
-    let mut basics = vec![];
+    let mut leftover_instructions = vec![];
     for item in inp {
         match item {
-            StructuredFlow::BasicBlock(idx) => basics.push(idx),
+            StructuredFlow::BasicBlock(instructions) => leftover_instructions.push(instructions),
             _ => {
-                if basics.len() > 0 {
-                    out.push((basics, Some(item)));
-                    basics = vec![];
+                if leftover_instructions.len() > 0 {
+                    out.push((leftover_instructions, Some(item)));
+                    leftover_instructions = vec![];
                 } else {
                     out.push((vec![], Some(item)));
                 }
             }
         }
     }
-    if basics.len() > 0 {
-        out.push((basics, None));
+    if leftover_instructions.len() > 0 {
+        out.push((leftover_instructions, None));
     }
     out
 }
 
 fn fold_blocks(
     out_blocks: &mut Vec<BasicBlock>,
-    blocks: &mut BTreeMap<usize, BasicBlock>,
     as_tree: Vec<StructuredFlow>,
     jump_targets: &mut BTreeMap<BreakableId, (usize, usize, Vec<usize>)>,
 ) -> (Vec<usize>, usize) {
@@ -106,8 +100,7 @@ fn fold_blocks(
         let mut instructions = vec![];
 
         for blk in preceding_bbs {
-            let blk = blocks.get_mut(&blk).unwrap();
-            instructions.extend(blk.instructions.drain(..));
+            instructions.extend(blk);
         }
 
         let item = match item {
@@ -125,7 +118,7 @@ fn fold_blocks(
 
         match item {
             // THE HUMBLE BASIC BLOCK
-            StructuredFlow::BasicBlock(_idx) => {
+            StructuredFlow::BasicBlock(_) => {
                 unreachable!("handled above")
             }
             // EXITS
@@ -164,8 +157,7 @@ fn fold_blocks(
                     });
                     to_label.push(out_blocks.len() - 1);
                 }
-                let (block_labels, _) =
-                    fold_blocks(out_blocks, blocks, blocks_within, jump_targets);
+                let (block_labels, _) = fold_blocks(out_blocks, blocks_within, jump_targets);
 
                 to_label.extend(block_labels);
             }
@@ -180,8 +172,8 @@ fn fold_blocks(
                 });
                 let cond = out_blocks.len() - 1;
 
-                let (cons_labels, cons) = fold_blocks(out_blocks, blocks, cons, jump_targets);
-                let (alt_labels, alt) = fold_blocks(out_blocks, blocks, alt, jump_targets);
+                let (cons_labels, cons) = fold_blocks(out_blocks, cons, jump_targets);
+                let (alt_labels, alt) = fold_blocks(out_blocks, alt, jump_targets);
 
                 out_blocks[cond].exit =
                     BasicBlockExit::Cond(cond_var, cond + 1, cons, cons + 1, alt);
@@ -203,7 +195,7 @@ fn fold_blocks(
                 });
                 let head = out_blocks.len() - 1;
 
-                let (body_labels, body) = fold_blocks(out_blocks, blocks, body, jump_targets);
+                let (body_labels, body) = fold_blocks(out_blocks, body, jump_targets);
 
                 out_blocks[head].exit = BasicBlockExit::Loop(head + 1, body);
 
@@ -223,13 +215,13 @@ fn fold_blocks(
                 });
                 let head = out_blocks.len() - 1;
 
-                let (body_labels, _) = fold_blocks(out_blocks, blocks, body, jump_targets);
+                let (body_labels, _) = fold_blocks(out_blocks, body, jump_targets);
                 let body = ensure_forward_jump_marker(out_blocks);
 
-                let (catch_labels, _) = fold_blocks(out_blocks, blocks, catch, jump_targets);
+                let (catch_labels, _) = fold_blocks(out_blocks, catch, jump_targets);
                 let catch = ensure_forward_jump_marker(out_blocks);
 
-                let (finally_labels, _) = fold_blocks(out_blocks, blocks, finally, jump_targets);
+                let (finally_labels, _) = fold_blocks(out_blocks, finally, jump_targets);
                 let finally = ensure_forward_jump_marker(out_blocks);
 
                 out_blocks[head].exit =

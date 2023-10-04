@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
-use crate::basic_blocks::ExitType;
+use crate::basic_blocks::{BasicBlockInstruction, ExitType};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct BreakableId(pub Option<usize>);
@@ -30,7 +30,7 @@ pub enum StructuredFlow {
     Break(BreakableId),
     Continue(BreakableId),
     Return(ExitType, Option<usize>),
-    BasicBlock(usize),
+    BasicBlock(Vec<(usize, BasicBlockInstruction)>),
 }
 
 // For printing out these trees
@@ -113,7 +113,7 @@ impl StructuredFlow {
         }
     }
 
-    fn children_mut(&mut self) -> Vec<&mut Vec<StructuredFlow>> {
+    pub fn children_mut(&mut self) -> Vec<&mut Vec<StructuredFlow>> {
         match self {
             StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y, z],
             StructuredFlow::Break(_) => vec![],
@@ -178,7 +178,21 @@ impl StructuredFlow {
             StructuredFlow::Loop(_, _) => None,
             StructuredFlow::Block(_) => None,
             StructuredFlow::Return(_, _) => None,
-            StructuredFlow::BasicBlock(x) => Some(*x),
+            StructuredFlow::BasicBlock(_) => None,
+            StructuredFlow::TryCatch(_, _, _, _) => None,
+        }
+    }
+
+    pub(crate) fn control_flow_var_mut(&mut self) -> Option<&mut usize> {
+        match self {
+            StructuredFlow::Branch(_, x, _, _) => Some(x),
+            StructuredFlow::Break(_) => None,
+            StructuredFlow::Continue(_) => None,
+            StructuredFlow::Loop(_, _) => None,
+            StructuredFlow::Block(_) => None,
+            StructuredFlow::Return(_, Some(ret_val)) => Some(ret_val),
+            StructuredFlow::Return(_, None) => unreachable!("we shouldn't see this anymore"),
+            StructuredFlow::BasicBlock(_) => None,
             StructuredFlow::TryCatch(_, _, _, _) => None,
         }
     }

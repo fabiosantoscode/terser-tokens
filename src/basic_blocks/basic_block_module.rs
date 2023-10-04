@@ -40,6 +40,17 @@ impl BasicBlockModule {
         &self.functions[&FunctionId(0)]
     }
 
+    /// Get a function. FunctionId(0) is the top level stats.
+    pub fn take_function(&mut self, id: FunctionId) -> Option<BasicBlockGroup> {
+        self.functions.remove(&id)
+    }
+
+    /// Get the top level statements of the module.
+    pub fn take_top_level_stats(&mut self) -> BasicBlockGroup {
+        self.take_function(FunctionId(0))
+            .expect("no top level stats")
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (FunctionId, &BasicBlockGroup)> {
         self.functions.iter().map(|(id, function)| (*id, function))
     }

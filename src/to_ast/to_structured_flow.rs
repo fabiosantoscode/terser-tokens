@@ -1,7 +1,7 @@
-use std::fmt::Debug;
+use std::{collections::BTreeMap, fmt::Debug};
 
 use super::{BreakableId, StructuredFlow};
-use crate::basic_blocks::{BasicBlockExit, BasicBlockGroup};
+use crate::basic_blocks::{BasicBlock, BasicBlockExit};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct BreakAndRange(pub BreakableId, pub usize, pub usize);
@@ -71,10 +71,10 @@ impl Ctx {
     }
 }
 
-pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
+pub fn block_group_to_structured_flow(mut func: BTreeMap<usize, BasicBlock>) -> StructuredFlow {
     fn do_tree_chunk(
         ctx: &mut Ctx,
-        func: &BasicBlockGroup,
+        func: &mut BTreeMap<usize, BasicBlock>,
         start_blk: usize,
         end_blk: usize,
     ) -> Vec<StructuredFlow> {
@@ -82,13 +82,15 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
             return vec![];
         }
 
-        let first_block = func.blocks.range(start_blk..=end_blk).into_iter().next();
+        let first_block = func.range_mut(start_blk..=end_blk).into_iter().next();
 
         match first_block {
             Some((blk_id, block)) => {
                 let mut rest = blk_id + 1;
 
-                let mut blocks = vec![StructuredFlow::BasicBlock(*blk_id)];
+                let mut blocks = vec![StructuredFlow::BasicBlock(std::mem::take(
+                    &mut block.instructions,
+                ))];
 
                 match block.exit {
                     BasicBlockExit::Jump(to) => rest = to,
@@ -160,8 +162,11 @@ pub fn do_tree(func: &BasicBlockGroup) -> StructuredFlow {
     }
 
     let mut ctx = Ctx::new();
-    let (first, last) = func.get_block_range();
-    let tree = StructuredFlow::Block(do_tree_chunk(&mut ctx, &func, first, last));
+    let (first, last) = (
+        *(func.first_key_value().expect("no blocks").0),
+        *(func.last_key_value().expect("no blocks").0),
+    );
+    let tree = StructuredFlow::Block(do_tree_chunk(&mut ctx, &mut func, first, last));
 
     tree.simplify()
 }
@@ -186,9 +191,9 @@ mod tests {
             "###,
         );
 
-        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), Return]
+            [BasicBlockRef, BasicBlockRef, Return]
         )
         "###);
     }
@@ -217,12 +222,12 @@ mod tests {
             "###,
         );
 
-        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
         Block(
-            [BasicBlockRef(0), Branch  ($0) {
-                [BasicBlockRef(1)]
-                [BasicBlockRef(2)]
-            }, BasicBlockRef(3), Return]
+            [BasicBlockRef, Branch  ($0) {
+                [BasicBlockRef]
+                [BasicBlockRef]
+            }, BasicBlockRef, Return]
         )
         "###);
     }
@@ -254,12 +259,12 @@ mod tests {
         "###,
         );
 
-        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), Branch  ($0) {
-                [BasicBlockRef(2)]
-                [BasicBlockRef(3)]
-            }, BasicBlockRef(4), Return]
+            [BasicBlockRef, BasicBlockRef, Branch  ($0) {
+                [BasicBlockRef]
+                [BasicBlockRef]
+            }, BasicBlockRef, Return]
         )
         "###);
     }
@@ -317,14 +322,14 @@ mod tests {
             "###,
         );
 
-        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), BasicBlockRef(2), Loop #2(
-                [BasicBlockRef(3), Branch  ($1) {
-                    [BasicBlockRef(4), BasicBlockRef(5), BasicBlockRef(6), BasicBlockRef(7), BasicBlockRef(8), Continue #2]
-                    [BasicBlockRef(9), Break #2]
+            [BasicBlockRef, BasicBlockRef, BasicBlockRef, Loop #2(
+                [BasicBlockRef, Branch  ($1) {
+                    [BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, Continue #2]
+                    [BasicBlockRef, Break #2]
                 }]
-            ), BasicBlockRef(10), BasicBlockRef(11), BasicBlockRef(12), BasicBlockRef(13), Return]
+            ), BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, Return]
         )
         "###);
     }
@@ -393,19 +398,19 @@ mod tests {
             "###,
         );
 
-        insta::assert_debug_snapshot!(do_tree(&func), @r###"
+        insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), Loop #2(
-                [BasicBlockRef(2), Branch  ($0) {
-                    [BasicBlockRef(3), BasicBlockRef(4), Loop #4(
-                        [BasicBlockRef(5), Branch  ($1) {
-                            [BasicBlockRef(6), BasicBlockRef(7), Break #2, BasicBlockRef(8), BasicBlockRef(9), BasicBlockRef(10), Continue #4]
-                            [BasicBlockRef(11), Break #4]
+            [BasicBlockRef, BasicBlockRef, Loop #2(
+                [BasicBlockRef, Branch  ($0) {
+                    [BasicBlockRef, BasicBlockRef, Loop #4(
+                        [BasicBlockRef, Branch  ($1) {
+                            [BasicBlockRef, BasicBlockRef, Break #2, BasicBlockRef, BasicBlockRef, BasicBlockRef, Continue #4]
+                            [BasicBlockRef, Break #4]
                         }]
-                    ), BasicBlockRef(12), BasicBlockRef(13), BasicBlockRef(14), Continue #2]
-                    [BasicBlockRef(15), Break #2]
+                    ), BasicBlockRef, BasicBlockRef, BasicBlockRef, Continue #2]
+                    [BasicBlockRef, Break #2]
                 }]
-            ), BasicBlockRef(16), BasicBlockRef(17), Return]
+            ), BasicBlockRef, BasicBlockRef, Return]
         )
         "###);
     }
@@ -441,13 +446,13 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), Branch  ($4) {
-                [BasicBlockRef(2)]
-                [BasicBlockRef(3)]
-            }, BasicBlockRef(4), Return]
+            [BasicBlockRef, BasicBlockRef, Branch  ($4) {
+                [BasicBlockRef]
+                [BasicBlockRef]
+            }, BasicBlockRef, Return]
         )
         "###);
     }
@@ -479,13 +484,13 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), Branch  ($1) {
-                [BasicBlockRef(1)]
-                [BasicBlockRef(2)]
-            }, BasicBlockRef(3), Return]
+            [BasicBlockRef, Branch  ($1) {
+                [BasicBlockRef]
+                [BasicBlockRef]
+            }, BasicBlockRef, Return]
         )
         "###);
     }
@@ -529,16 +534,16 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), Branch  ($0) {
-                [BasicBlockRef(1), Branch  ($1) {
-                    [BasicBlockRef(2)]
-                    [BasicBlockRef(3), BasicBlockRef(4)]
-                }, BasicBlockRef(5)]
-                [BasicBlockRef(6)]
-            }, BasicBlockRef(7), Return]
+            [BasicBlockRef, Branch  ($0) {
+                [BasicBlockRef, Branch  ($1) {
+                    [BasicBlockRef]
+                    [BasicBlockRef, BasicBlockRef]
+                }, BasicBlockRef]
+                [BasicBlockRef]
+            }, BasicBlockRef, Return]
         )
         "###);
     }
@@ -583,16 +588,16 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), Branch  ($0) {
-                [BasicBlockRef(2)]
-                [BasicBlockRef(3)]
-            }, BasicBlockRef(4), BasicBlockRef(5), Branch  ($3) {
-                [BasicBlockRef(6)]
-                [BasicBlockRef(7)]
-            }, BasicBlockRef(8), Return]
+            [BasicBlockRef, BasicBlockRef, Branch  ($0) {
+                [BasicBlockRef]
+                [BasicBlockRef]
+            }, BasicBlockRef, BasicBlockRef, Branch  ($3) {
+                [BasicBlockRef]
+                [BasicBlockRef]
+            }, BasicBlockRef, Return]
         )
         "###);
     }
@@ -636,14 +641,14 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), TryCatch #2(
-                [BasicBlockRef(2), BasicBlockRef(3)]
-                [BasicBlockRef(4), BasicBlockRef(5)]
-                [BasicBlockRef(6), BasicBlockRef(7)]
-            ), BasicBlockRef(8), Return]
+            [BasicBlockRef, BasicBlockRef, TryCatch #2(
+                [BasicBlockRef, BasicBlockRef]
+                [BasicBlockRef, BasicBlockRef]
+                [BasicBlockRef, BasicBlockRef]
+            ), BasicBlockRef, Return]
         )
         "###);
     }
@@ -688,14 +693,14 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), TryCatch #2(
-                [BasicBlockRef(2), BasicBlockRef(3)]
-                [BasicBlockRef(4), BasicBlockRef(5)]
-                [BasicBlockRef(6), BasicBlockRef(7)]
-            ), BasicBlockRef(8), Return]
+            [BasicBlockRef, BasicBlockRef, TryCatch #2(
+                [BasicBlockRef, BasicBlockRef]
+                [BasicBlockRef, BasicBlockRef]
+                [BasicBlockRef, BasicBlockRef]
+            ), BasicBlockRef, Return]
         )
         "###);
     }
@@ -750,17 +755,17 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), TryCatch #2(
-                [BasicBlockRef(2), BasicBlockRef(3), Branch  ($0) {
-                    [BasicBlockRef(4), BasicBlockRef(5)]
-                    [BasicBlockRef(6)]
-                }, BasicBlockRef(7)]
-                [BasicBlockRef(8), BasicBlockRef(9)]
-                [BasicBlockRef(10), BasicBlockRef(11)]
-            ), BasicBlockRef(12), Return]
+            [BasicBlockRef, BasicBlockRef, TryCatch #2(
+                [BasicBlockRef, BasicBlockRef, Branch  ($0) {
+                    [BasicBlockRef, BasicBlockRef]
+                    [BasicBlockRef]
+                }, BasicBlockRef]
+                [BasicBlockRef, BasicBlockRef]
+                [BasicBlockRef, BasicBlockRef]
+            ), BasicBlockRef, Return]
         )
         "###);
     }
@@ -805,10 +810,10 @@ mod tests {
             "###,
         );
 
-        let stats = do_tree(&func);
+        let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         Block(
-            [BasicBlockRef(0), BasicBlockRef(1), BasicBlockRef(2), BasicBlockRef(4), BasicBlockRef(6), Return]
+            [BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, Return]
         )
         "###);
     }

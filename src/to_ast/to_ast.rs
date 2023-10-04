@@ -10,12 +10,13 @@ use swc_ecma_ast::{
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        remove_phi, ArrayElement, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,
-        ExitType, TempExitType,
+        remove_phi, ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, TempExitType,
     },
 };
 
-use super::{do_tree, get_inlined_variables, Base54, StructuredFlow, ToAstContext};
+use super::{
+    block_group_to_structured_flow, get_inlined_variables, Base54, StructuredFlow, ToAstContext,
+};
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {
@@ -48,9 +49,11 @@ fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
     let variable_use_count = count_variable_uses(&block_module);
     let inlined_variables = get_inlined_variables(&block_module, &variable_use_count, phied);
 
+    let tree = block_group_to_structured_flow(block_module.take_top_level_stats().blocks);
+
     let mut ctx = ToAstContext {
         caught_error: None,
-        module: &block_module,
+        module: &mut block_module,
         inlined_variables,
         variable_use_count,
         emitted_vars: BTreeMap::new(),
@@ -59,29 +62,23 @@ fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
         gen_label_index: Base54::new(0),
     };
 
-    let tree = do_tree(&block_module.top_level_stats());
-
-    to_statements(&mut ctx, &tree, &block_module.top_level_stats())
+    to_statements(&mut ctx, &tree)
 }
 
-fn to_statements(
-    ctx: &mut ToAstContext,
-    node: &StructuredFlow,
-    block_group: &BasicBlockGroup,
-) -> Vec<Stmt> {
+fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
     let to_stat_vec = |ctx: &mut ToAstContext, stats: &Vec<StructuredFlow>| -> Vec<Stmt> {
         stats
             .iter()
-            .flat_map(|stat| to_statements(ctx, stat, block_group))
+            .flat_map(|stat| to_statements(ctx, stat))
             .collect()
     };
 
     match node {
         StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
-        StructuredFlow::BasicBlock(block_idx) => block_group.blocks[block_idx]
+        StructuredFlow::BasicBlock(ins) => ins
             .iter()
-            .flat_map(|(varname, ins)| instruction_to_statement(ctx, varname, ins))
-            .collect::<Vec<_>>(),
+            .flat_map(|(varname, ins)| instruction_to_statement(ctx, *varname, ins))
+            .collect(),
         StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {
             let return_stmt = Stmt::Return(ReturnStmt {
                 span: Default::default(),
@@ -286,9 +283,9 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             })
         }
         BasicBlockInstruction::Function(id) => {
-            let func = ctx.module.get_function(*id).unwrap();
+            let func = ctx.module.take_function(*id).unwrap().blocks;
 
-            let stmts = to_statements(ctx, &do_tree(&func), func);
+            let stmts = to_statements(ctx, &block_group_to_structured_flow(func));
 
             Expr::Fn(FnExpr {
                 ident: None,

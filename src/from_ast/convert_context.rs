@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
-    normalize_basic_blocks, BasicBlock, BasicBlockEnvironment, BasicBlockEnvironmentType,
-    BasicBlockExit, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, Export,
-    FunctionId, Import, ModuleSummary, NonLocalId, normalize_module,
+    normalize_basic_blocks, normalize_module, BasicBlock, BasicBlockEnvironment,
+    BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
+    BasicBlockModule, ExitType, Export, FunctionId, Import, ModuleSummary, NonLocalId,
 };
 use crate::scope::ScopeTree;
 

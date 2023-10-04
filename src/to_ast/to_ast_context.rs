@@ -10,7 +10,7 @@ use super::BreakableId;
 #[derive(Debug)]
 pub struct ToAstContext<'a> {
     pub caught_error: Option<Base54>,
-    pub module: &'a BasicBlockModule,
+    pub module: &'a mut BasicBlockModule,
     pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
     pub variable_use_count: BTreeMap<usize, u32>,
     pub emitted_vars: BTreeMap<usize, Base54>,
