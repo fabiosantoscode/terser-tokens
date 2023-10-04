@@ -55,14 +55,31 @@ impl StructuredFlow {
         flat
     }
     fn flatten(self) -> StructuredFlow {
+        use StructuredFlow::*;
+
         let map = fix_fn::fix_fn!(|map, items: Vec<StructuredFlow>| -> Vec<StructuredFlow> {
             items
                 .into_iter()
                 .flat_map(|item| match item {
-                    StructuredFlow::Block(items) => map(items),
+                    Block(items) => map(items),
                     _ => vec![item.flatten()],
                 })
-                .collect::<Vec<_>>()
+                .fold(vec![], |mut acc, item| {
+                    let prev = acc.last_mut();
+                    match (prev, item) {
+                        (Some(Block(prev)), Block(items)) => {
+                            prev.extend(items.into_iter());
+                        }
+                        (Some(BasicBlock(prev)), BasicBlock(instructions)) => {
+                            prev.extend(instructions.into_iter());
+                        }
+                        (_, item) => {
+                            acc.push(item);
+                        }
+                    }
+
+                    acc
+                })
         });
 
         match self {
@@ -171,18 +188,6 @@ impl StructuredFlow {
         }
     }
 
-    fn index_for_formatting(&self) -> Option<usize> {
-        match self {
-            StructuredFlow::Branch(_, _, _, _) => None,
-            StructuredFlow::Break(x) | StructuredFlow::Continue(x) => x.0,
-            StructuredFlow::Loop(_, _) => None,
-            StructuredFlow::Block(_) => None,
-            StructuredFlow::Return(_, _) => None,
-            StructuredFlow::BasicBlock(_) => None,
-            StructuredFlow::TryCatch(_, _, _, _) => None,
-        }
-    }
-
     pub(crate) fn control_flow_var(&self) -> Option<usize> {
         match self {
             StructuredFlow::Branch(_, x, _, _) => Some(*x),
@@ -206,42 +211,63 @@ impl Debug for StructuredFlow {
             indented_lines.collect::<Vec<String>>().join("\n")
         };
 
-        write!(f, "{}", self.str_head())?;
-        if let Some(breakable_idx) = self.breakable_id() {
-            write!(f, " {}", breakable_idx)?;
-        }
-
-        match self {
-            StructuredFlow::Continue(_) | StructuredFlow::Break(_) => return Ok(()),
-            _ => {}
+        let print_brk = |brk: &BreakableId| match brk.0 {
+            Some(x) => format!(" (@{})", x),
+            None => String::new(),
         };
 
-        if let StructuredFlow::Branch(_, var, cons, alt) = self {
-            let cons = format!("{:?}", cons);
-            let alt = format!("{:?}", alt);
-
-            return write!(
-                f,
-                " (${}) {{\n{}\n{}\n}}",
-                var,
-                indent_str_lines(&cons),
-                indent_str_lines(&alt)
-            );
-        } else if let Some(index) = self.index_for_formatting() {
-            write!(f, "({})", index)
-        } else {
-            let children = self.children();
-            if children.len() > 0 {
-                let lines = children
-                    .iter()
-                    .map(|child| indent_str_lines(&format!("{:?}", child)))
-                    .collect::<Vec<String>>()
-                    .join("\n");
-
-                write!(f, "(\n{}\n)", lines)?;
+        let print_vec_no_eol = |f: &mut Formatter<'_>, items: &Vec<StructuredFlow>| {
+            write!(f, "{{\n")?;
+            for item in items {
+                writeln!(f, "{}", indent_str_lines(&format!("{:?}", item)))?;
             }
+            write!(f, "}}")?;
+            return Ok(());
+        };
+        let print_vec = |f: &mut Formatter<'_>, items: &Vec<StructuredFlow>| {
+            print_vec_no_eol(f, items)?;
+            write!(f, "\n");
+            return Ok(());
+        };
 
-            Ok(())
+        match self {
+            StructuredFlow::Block(items) => {
+                return print_vec(f, items);
+            }
+            StructuredFlow::Loop(brk, body) => {
+                write!(f, "loop{} ", print_brk(brk))?;
+                print_vec(f, body)?;
+                return Ok(());
+            }
+            StructuredFlow::Branch(brk, cond, cons, alt) => {
+                write!(f, "if{} (${}) ", print_brk(brk), cond)?;
+                print_vec_no_eol(f, cons)?;
+                write!(f, " else ")?;
+                print_vec(f, alt)?;
+                return Ok(());
+            }
+            StructuredFlow::TryCatch(brk, body, catch, fin) => {
+                write!(f, "try{} ", print_brk(brk))?;
+                print_vec_no_eol(f, body)?;
+                write!(f, " catch ")?;
+                print_vec_no_eol(f, catch)?;
+                write!(f, " finally ")?;
+                print_vec(f, fin)?;
+                return Ok(());
+            }
+            StructuredFlow::Break(brk) => return writeln!(f, "Break{}", print_brk(brk)),
+            StructuredFlow::Continue(brk) => return writeln!(f, "Continue{}", print_brk(brk)),
+            StructuredFlow::Return(exit, ret) => {
+                return writeln!(f, "{:?} ${}", exit, ret.unwrap());
+            }
+            StructuredFlow::BasicBlock(instructions) => {
+                let mut buf = String::new();
+                for (var, ins) in instructions {
+                    buf.push_str(&format!("${} = {:?}\n", var, ins));
+                }
+                write!(f, "{}", &buf)?;
+                return Ok(());
+            }
         }
     }
 }

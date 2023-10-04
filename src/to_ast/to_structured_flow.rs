@@ -192,9 +192,11 @@ mod tests {
         );
 
         insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, Return]
-        )
+        {
+            $0 = 123
+            $1 = 456
+            Return $1
+        }
         "###);
     }
 
@@ -223,12 +225,17 @@ mod tests {
         );
 
         insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
-        Block(
-            [BasicBlockRef, Branch  ($0) {
-                [BasicBlockRef]
-                [BasicBlockRef]
-            }, BasicBlockRef, Return]
-        )
+        {
+            $0 = 123
+            if ($0) {
+                $1 = 456
+            } else {
+                $2 = 789
+            }
+            $3 = either($1, $2)
+            $4 = undefined
+            Return $4
+        }
         "###);
     }
 
@@ -260,12 +267,17 @@ mod tests {
         );
 
         insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, Branch  ($0) {
-                [BasicBlockRef]
-                [BasicBlockRef]
-            }, BasicBlockRef, Return]
-        )
+        {
+            $0 = 123
+            if ($0) {
+                $1 = 456
+            } else {
+                $2 = 789
+            }
+            $3 = either($1, $2)
+            $4 = undefined
+            Return $4
+        }
         "###);
     }
 
@@ -323,14 +335,21 @@ mod tests {
         );
 
         insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, BasicBlockRef, Loop #2(
-                [BasicBlockRef, Branch  ($1) {
-                    [BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, Continue #2]
-                    [BasicBlockRef, Break #2]
-                }]
-            ), BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, Return]
-        )
+        {
+            $0 = 123
+            loop (@2) {
+                $1 = 123
+                if ($1) {
+                    $2 = 456
+                    Continue (@2)
+                } else {
+                
+                    Break (@2)
+                }
+            }
+            $3 = undefined
+            Return $3
+        }
         "###);
     }
 
@@ -399,19 +418,34 @@ mod tests {
         );
 
         insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, Loop #2(
-                [BasicBlockRef, Branch  ($0) {
-                    [BasicBlockRef, BasicBlockRef, Loop #4(
-                        [BasicBlockRef, Branch  ($1) {
-                            [BasicBlockRef, BasicBlockRef, Break #2, BasicBlockRef, BasicBlockRef, BasicBlockRef, Continue #4]
-                            [BasicBlockRef, Break #4]
-                        }]
-                    ), BasicBlockRef, BasicBlockRef, BasicBlockRef, Continue #2]
-                    [BasicBlockRef, Break #2]
-                }]
-            ), BasicBlockRef, BasicBlockRef, Return]
-        )
+        {
+
+            loop (@2) {
+                $0 = 123
+                if ($0) {
+                
+                    loop (@4) {
+                        $1 = 456
+                        if ($1) {
+                        
+                            Break (@2)
+                        
+                            Continue (@4)
+                        } else {
+                        
+                            Break (@4)
+                        }
+                    }
+                
+                    Continue (@2)
+                } else {
+                
+                    Break (@2)
+                }
+            }
+            $2 = undefined
+            Return $2
+        }
         "###);
     }
 
@@ -448,12 +482,21 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, Branch  ($4) {
-                [BasicBlockRef]
-                [BasicBlockRef]
-            }, BasicBlockRef, Return]
-        )
+        {
+            $0 = 123
+            $1 = 123
+            $2 = 123
+            $3 = 123
+            $4 = 123
+            if ($4) {
+                $5 = 456
+            } else {
+                $6 = 789
+            }
+            $7 = either($5, $6)
+            $8 = undefined
+            Return $8
+        }
         "###);
     }
 
@@ -486,12 +529,20 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, Branch  ($1) {
-                [BasicBlockRef]
-                [BasicBlockRef]
-            }, BasicBlockRef, Return]
-        )
+        {
+            $0 = 1
+            $1 = 2
+            if ($1) {
+                $2 = 3
+            } else {
+                $3 = 4
+            }
+            $4 = either($2, $3)
+            $5 = 3
+            $6 = [$0, $4, , ...$5,]
+            $7 = undefined
+            Return $7
+        }
         "###);
     }
 
@@ -536,15 +587,23 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, Branch  ($0) {
-                [BasicBlockRef, Branch  ($1) {
-                    [BasicBlockRef]
-                    [BasicBlockRef, BasicBlockRef]
-                }, BasicBlockRef]
-                [BasicBlockRef]
-            }, BasicBlockRef, Return]
-        )
+        {
+            $0 = 123
+            if ($0) {
+                $1 = 456
+                if ($1) {
+                    $2 = 7
+                } else {
+                    $3 = 8
+                }
+                $4 = either($2, $3)
+            } else {
+                $5 = 9
+            }
+            $6 = either($4, $5)
+            $7 = undefined
+            Return $7
+        }
         "###);
     }
 
@@ -590,15 +649,23 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, Branch  ($0) {
-                [BasicBlockRef]
-                [BasicBlockRef]
-            }, BasicBlockRef, BasicBlockRef, Branch  ($3) {
-                [BasicBlockRef]
-                [BasicBlockRef]
-            }, BasicBlockRef, Return]
-        )
+        {
+            $0 = 123
+            if ($0) {
+                $1 = 345
+            } else {
+            
+            }
+            $2 = 10
+            $3 = 1
+            if ($3) {
+                $4 = 2
+            } else {
+            
+            }
+            $5 = undefined
+            Return $5
+        }
         "###);
     }
 
@@ -643,13 +710,20 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, TryCatch #2(
-                [BasicBlockRef, BasicBlockRef]
-                [BasicBlockRef, BasicBlockRef]
-                [BasicBlockRef, BasicBlockRef]
-            ), BasicBlockRef, Return]
-        )
+        {
+
+            try (@2) {
+                $0 = 777
+            } catch {
+                $1 = caught_error()
+                $2 = 888
+            } finally {
+            
+            }
+            $3 = 999
+            $4 = undefined
+            Return $4
+        }
         "###);
     }
 
@@ -695,13 +769,20 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, TryCatch #2(
-                [BasicBlockRef, BasicBlockRef]
-                [BasicBlockRef, BasicBlockRef]
-                [BasicBlockRef, BasicBlockRef]
-            ), BasicBlockRef, Return]
-        )
+        {
+
+            try (@2) {
+                $0 = 777
+            } catch {
+                $1 = caught_error()
+                $2 = 888
+            } finally {
+                $3 = 999
+            }
+            $4 = 111
+            $5 = undefined
+            Return $5
+        }
         "###);
     }
 
@@ -757,16 +838,25 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, TryCatch #2(
-                [BasicBlockRef, BasicBlockRef, Branch  ($0) {
-                    [BasicBlockRef, BasicBlockRef]
-                    [BasicBlockRef]
-                }, BasicBlockRef]
-                [BasicBlockRef, BasicBlockRef]
-                [BasicBlockRef, BasicBlockRef]
-            ), BasicBlockRef, Return]
-        )
+        {
+
+            try (@2) {
+                $0 = 111
+                if ($0) {
+                    $1 = 222
+                } else {
+                
+                }
+            
+            } catch {
+            
+            } finally {
+            
+            }
+            $2 = 111
+            $3 = undefined
+            Return $3
+        }
         "###);
     }
 
@@ -812,9 +902,27 @@ mod tests {
 
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
-        Block(
-            [BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, BasicBlockRef, Return]
-        )
+        {
+            $0 = 1
+            $1 = $0
+            $2 = 1
+            $3 = $1 == $2
+            $4 = $0
+            $5 = 1
+            $6 = $4 == $5
+            $7 = $0
+            $8 = 2000
+            $9 = $7 + $8
+            $10 = $9
+            $13 = either($0, $9)
+            $14 = $13
+            $15 = 1000
+            $16 = $14 + $15
+            $17 = $16
+            $20 = either($13, $16)
+            $21 = $20
+            Return $21
+        }
         "###);
     }
 }
