@@ -183,14 +183,14 @@ impl StructuredFlow {
         }
     }
 
-    pub(crate) fn control_flow_var_mut(&mut self) -> Option<&mut usize> {
+    pub(crate) fn control_flow_var(&self) -> Option<usize> {
         match self {
-            StructuredFlow::Branch(_, x, _, _) => Some(x),
+            StructuredFlow::Branch(_, x, _, _) => Some(*x),
             StructuredFlow::Break(_) => None,
             StructuredFlow::Continue(_) => None,
             StructuredFlow::Loop(_, _) => None,
             StructuredFlow::Block(_) => None,
-            StructuredFlow::Return(_, Some(ret_val)) => Some(ret_val),
+            StructuredFlow::Return(_, Some(ret_val)) => Some(*ret_val),
             StructuredFlow::Return(_, None) => unreachable!("we shouldn't see this anymore"),
             StructuredFlow::BasicBlock(_) => None,
             StructuredFlow::TryCatch(_, _, _, _) => None,

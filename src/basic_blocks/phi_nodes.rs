@@ -214,9 +214,9 @@ fn generate_phi_nodes_inner(
 
 fn get_loop_reentry_vars(contents: &mut Vec<StructuredFlow>) -> BTreeSet<usize> {
     let mut vars_defined_in_loop = BTreeSet::new();
-    for_each_structuredflow(contents, &mut |block: &mut StructuredFlow| {
+    for_each_structuredflow(contents, &mut |block: &StructuredFlow| {
         if let StructuredFlow::BasicBlock(ins) = block {
-            for (varname, _ins) in ins.iter_mut() {
+            for (varname, _ins) in ins.iter() {
                 // This will be a re-entry var if we also see it defined in the loop
                 vars_defined_in_loop.insert(*varname);
             }
@@ -224,10 +224,10 @@ fn get_loop_reentry_vars(contents: &mut Vec<StructuredFlow>) -> BTreeSet<usize> 
     });
 
     let mut loop_vars_used_in_loop = BTreeSet::new();
-    for_each_structuredflow(contents, &mut |block: &mut StructuredFlow| {
+    for_each_structuredflow(contents, &mut |block: &StructuredFlow| {
         let mut seen_defs = BTreeSet::new();
         if let StructuredFlow::BasicBlock(ins) = block {
-            for (varname, ins) in ins.iter_mut() {
+            for (varname, ins) in ins.iter() {
                 // Push this into phi unconditionally
                 for used_var in ins.used_vars() {
                     if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
@@ -237,9 +237,9 @@ fn get_loop_reentry_vars(contents: &mut Vec<StructuredFlow>) -> BTreeSet<usize> 
 
                 seen_defs.insert(*varname);
             }
-        } else if let Some(used_var) = block.control_flow_var_mut() {
-            if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&*used_var) {
-                loop_vars_used_in_loop.insert(*used_var);
+        } else if let Some(used_var) = block.control_flow_var() {
+            if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
+                loop_vars_used_in_loop.insert(used_var);
             }
         }
     });
@@ -249,7 +249,7 @@ fn get_loop_reentry_vars(contents: &mut Vec<StructuredFlow>) -> BTreeSet<usize> 
 
 pub fn for_each_structuredflow<Fn>(struc: &mut Vec<StructuredFlow>, func: &mut Fn)
 where
-    Fn: FnMut(&mut StructuredFlow),
+    Fn: FnMut(&StructuredFlow),
 {
     for struc in struc {
         func(struc);

@@ -72,95 +72,6 @@ impl Ctx {
 }
 
 pub fn block_group_to_structured_flow(mut func: BTreeMap<usize, BasicBlock>) -> StructuredFlow {
-    fn do_tree_chunk(
-        ctx: &mut Ctx,
-        func: &mut BTreeMap<usize, BasicBlock>,
-        start_blk: usize,
-        end_blk: usize,
-    ) -> Vec<StructuredFlow> {
-        if end_blk < start_blk {
-            return vec![];
-        }
-
-        let first_block = func.range_mut(start_blk..=end_blk).into_iter().next();
-
-        match first_block {
-            Some((blk_id, block)) => {
-                let mut rest = blk_id + 1;
-
-                let mut blocks = vec![StructuredFlow::BasicBlock(std::mem::take(
-                    &mut block.instructions,
-                ))];
-
-                match block.exit {
-                    BasicBlockExit::Jump(to) => rest = to,
-                    BasicBlockExit::Break(tgt) => {
-                        blocks.extend(vec![StructuredFlow::Break(ctx.break_index(tgt))])
-                    }
-                    BasicBlockExit::Continue(tgt) => {
-                        blocks.extend(vec![StructuredFlow::Continue(ctx.continue_index(tgt))])
-                    }
-                    BasicBlockExit::Cond(cond, cons_start, cons_end, alt_start, alt_end) => {
-                        rest = alt_end + 1;
-
-                        let brk_id = ctx.get_breakable_id();
-                        ctx.push_within(BreakAndRange(brk_id, cons_start, alt_end), |ctx| {
-                            blocks.extend(vec![StructuredFlow::Branch(
-                                brk_id,
-                                cond,
-                                do_tree_chunk(ctx, func, cons_start, cons_end),
-                                do_tree_chunk(ctx, func, alt_start, alt_end),
-                            )])
-                        })
-                    }
-                    BasicBlockExit::Loop(start, end) => {
-                        rest = end + 1;
-
-                        let loop_brk_id = ctx.get_breakable_id();
-                        ctx.push_within(BreakAndRange(loop_brk_id, start, end), |ctx| {
-                            blocks.extend(vec![StructuredFlow::Loop(
-                                loop_brk_id,
-                                do_tree_chunk(ctx, func, start, end),
-                            )])
-                        })
-                    }
-                    BasicBlockExit::ExitFn(ref exit_type, yielded_val) => {
-                        blocks.extend(vec![StructuredFlow::Return(
-                            exit_type.clone(),
-                            Some(yielded_val),
-                        )])
-                    }
-                    BasicBlockExit::SetTryAndCatch(
-                        try_block,
-                        catch_block,
-                        finally_block,
-                        end_finally,
-                    ) => {
-                        rest = end_finally + 1;
-
-                        let brk_id = ctx.get_breakable_id();
-                        ctx.push_within(BreakAndRange(brk_id, try_block, end_finally), |ctx| {
-                            blocks.extend(vec![StructuredFlow::TryCatch(
-                                brk_id,
-                                do_tree_chunk(ctx, func, try_block, catch_block - 1),
-                                do_tree_chunk(ctx, func, catch_block, finally_block - 1),
-                                do_tree_chunk(ctx, func, finally_block, end_finally),
-                            )])
-                        })
-                    }
-                    BasicBlockExit::PopCatch(catch, _) => rest = catch,
-                    BasicBlockExit::PopFinally(finally, _) => rest = finally,
-                    BasicBlockExit::EndFinally(after) => rest = after,
-                };
-
-                blocks.extend(do_tree_chunk(ctx, func, rest, end_blk));
-
-                blocks
-            }
-            None => vec![],
-        }
-    }
-
     let mut ctx = Ctx::new();
     let (first, last) = (
         *(func.first_key_value().expect("no blocks").0),
@@ -169,6 +80,95 @@ pub fn block_group_to_structured_flow(mut func: BTreeMap<usize, BasicBlock>) -> 
     let tree = StructuredFlow::Block(do_tree_chunk(&mut ctx, &mut func, first, last));
 
     tree.simplify()
+}
+
+fn do_tree_chunk(
+    ctx: &mut Ctx,
+    func: &mut BTreeMap<usize, BasicBlock>,
+    start_blk: usize,
+    end_blk: usize,
+) -> Vec<StructuredFlow> {
+    if end_blk < start_blk {
+        return vec![];
+    }
+
+    let first_block = func.range_mut(start_blk..=end_blk).into_iter().next();
+
+    match first_block {
+        Some((blk_id, block)) => {
+            let mut rest = blk_id + 1;
+
+            let mut blocks = vec![StructuredFlow::BasicBlock(std::mem::take(
+                &mut block.instructions,
+            ))];
+
+            match block.exit {
+                BasicBlockExit::Jump(to) => rest = to,
+                BasicBlockExit::Break(tgt) => {
+                    blocks.extend(vec![StructuredFlow::Break(ctx.break_index(tgt))])
+                }
+                BasicBlockExit::Continue(tgt) => {
+                    blocks.extend(vec![StructuredFlow::Continue(ctx.continue_index(tgt))])
+                }
+                BasicBlockExit::Cond(cond, cons_start, cons_end, alt_start, alt_end) => {
+                    rest = alt_end + 1;
+
+                    let brk_id = ctx.get_breakable_id();
+                    ctx.push_within(BreakAndRange(brk_id, cons_start, alt_end), |ctx| {
+                        blocks.extend(vec![StructuredFlow::Branch(
+                            brk_id,
+                            cond,
+                            do_tree_chunk(ctx, func, cons_start, cons_end),
+                            do_tree_chunk(ctx, func, alt_start, alt_end),
+                        )])
+                    })
+                }
+                BasicBlockExit::Loop(start, end) => {
+                    rest = end + 1;
+
+                    let loop_brk_id = ctx.get_breakable_id();
+                    ctx.push_within(BreakAndRange(loop_brk_id, start, end), |ctx| {
+                        blocks.extend(vec![StructuredFlow::Loop(
+                            loop_brk_id,
+                            do_tree_chunk(ctx, func, start, end),
+                        )])
+                    })
+                }
+                BasicBlockExit::ExitFn(ref exit_type, yielded_val) => {
+                    blocks.extend(vec![StructuredFlow::Return(
+                        exit_type.clone(),
+                        Some(yielded_val),
+                    )])
+                }
+                BasicBlockExit::SetTryAndCatch(
+                    try_block,
+                    catch_block,
+                    finally_block,
+                    end_finally,
+                ) => {
+                    rest = end_finally + 1;
+
+                    let brk_id = ctx.get_breakable_id();
+                    ctx.push_within(BreakAndRange(brk_id, try_block, end_finally), |ctx| {
+                        blocks.extend(vec![StructuredFlow::TryCatch(
+                            brk_id,
+                            do_tree_chunk(ctx, func, try_block, catch_block - 1),
+                            do_tree_chunk(ctx, func, catch_block, finally_block - 1),
+                            do_tree_chunk(ctx, func, finally_block, end_finally),
+                        )])
+                    })
+                }
+                BasicBlockExit::PopCatch(catch, _) => rest = catch,
+                BasicBlockExit::PopFinally(finally, _) => rest = finally,
+                BasicBlockExit::EndFinally(after) => rest = after,
+            };
+
+            blocks.extend(do_tree_chunk(ctx, func, rest, end_blk));
+
+            blocks
+        }
+        None => vec![],
+    }
 }
 
 #[cfg(test)]
