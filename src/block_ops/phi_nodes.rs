@@ -1,13 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    basic_blocks::BasicBlock,
-    to_ast::{block_group_to_structured_flow, StructuredFlow},
-};
-
-use super::{
-    normalize_basic_blocks_tree, normalize_varnames, BasicBlockGroup, BasicBlockInstruction,
-    BasicBlockModule,
+    basic_blocks::{BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,StructuredFlow},
+    block_ops::{block_group_to_structured_flow, normalize_basic_blocks_tree, normalize_varnames},
 };
 
 pub fn generate_phi_nodes(module: &mut BasicBlockModule) {

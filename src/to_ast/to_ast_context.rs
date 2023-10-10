@@ -1,11 +1,9 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    basic_blocks::{BasicBlockInstruction, BasicBlockModule},
+    basic_blocks::{BasicBlockInstruction, BasicBlockModule, BreakableId},
     to_ast::Base54,
 };
-
-use super::BreakableId;
 
 #[derive(Debug)]
 pub struct ToAstContext<'a> {

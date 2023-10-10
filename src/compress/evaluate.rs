@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    basic_blocks::{
-        normalize_basic_blocks, normalize_module, BasicBlockExit, BasicBlockGroup, BasicBlockModule,
-    },
+    basic_blocks::{BasicBlockExit, BasicBlockGroup, BasicBlockModule},
+    block_ops::{normalize_basic_blocks, normalize_module},
     interpret::{interpret_module, InterpretCtx, JsType},
 };
 

@@ -4,15 +4,11 @@ mod basic_block_instruction;
 mod basic_block_module;
 mod fmt_debug;
 mod iteration;
-mod normalize;
-mod normalize_module;
-mod phi_nodes;
+mod structured_flow;
 
 pub use basic_block::*;
 pub use basic_block_group::*;
 pub use basic_block_instruction::*;
 pub use basic_block_module::*;
 pub use iteration::*;
-pub use normalize::*;
-pub use normalize_module::*;
-pub use phi_nodes::*;
+pub use structured_flow::*;

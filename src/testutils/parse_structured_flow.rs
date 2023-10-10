@@ -1,9 +1,6 @@
 use nom::IResult;
 
-use crate::{
-    basic_blocks::ExitType,
-    to_ast::{BreakableId, StructuredFlow},
-};
+use crate::basic_blocks::{BreakableId, ExitType, StructuredFlow};
 
 use super::parse_single_instruction;
 

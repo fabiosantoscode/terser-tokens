@@ -10,13 +10,13 @@ use swc_ecma_ast::{
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        remove_phi, ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, TempExitType,
+        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, StructuredFlow,
+        TempExitType,
     },
+    block_ops::{block_group_to_structured_flow, remove_phi},
 };
 
-use super::{
-    block_group_to_structured_flow, get_inlined_variables, Base54, StructuredFlow, ToAstContext,
-};
+use super::{get_inlined_variables, Base54, ToAstContext};
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {

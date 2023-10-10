@@ -3,10 +3,11 @@ use std::collections::BTreeMap;
 use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
-    normalize_basic_blocks, normalize_module, BasicBlock, BasicBlockEnvironment,
-    BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
-    BasicBlockModule, ExitType, Export, FunctionId, Import, ModuleSummary, NonLocalId,
+    BasicBlock, BasicBlockEnvironment, BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup,
+    BasicBlockInstruction, BasicBlockModule, ExitType, Export, FunctionId, Import, ModuleSummary,
+    NonLocalId,
 };
+use crate::block_ops::{normalize_basic_blocks, normalize_module};
 use crate::scope::ScopeTree;
 
 use super::NonLocalInfo;

@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 use std::usize::MAX;
 
 use crate::{
-    basic_blocks::{BasicBlock, BasicBlockExit},
-    to_ast::{block_group_to_structured_flow, BreakableId, StructuredFlow},
+    basic_blocks::{
+        BasicBlock, BasicBlockExit, BasicBlockInstruction, BreakableId, StructuredFlow,
+    },
+    block_ops::block_group_to_structured_flow,
 };
-
-use super::BasicBlockInstruction;
 
 pub fn normalize_basic_blocks(blocks: BTreeMap<usize, BasicBlock>) -> BTreeMap<usize, BasicBlock> {
     let recursive = block_group_to_structured_flow(blocks);

@@ -3,6 +3,7 @@ use std::io::Read;
 
 mod analyze;
 mod basic_blocks;
+mod block_ops;
 mod compress;
 mod from_ast;
 mod functional_tests;

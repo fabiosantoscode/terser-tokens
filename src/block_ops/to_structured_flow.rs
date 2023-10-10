@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug};
 
-use super::{BreakableId, StructuredFlow};
-use crate::basic_blocks::{BasicBlock, BasicBlockExit};
+use crate::basic_blocks::{BasicBlock, BasicBlockExit, BreakableId, StructuredFlow};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct BreakAndRange(pub BreakableId, pub usize, pub usize);
