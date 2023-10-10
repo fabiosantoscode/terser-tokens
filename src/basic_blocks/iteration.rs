@@ -1,4 +1,7 @@
-use super::{BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, FunctionId};
+use super::{
+    BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, FunctionId,
+    StructuredFlow,
+};
 
 impl BasicBlockModule {
     pub fn iter_all_instructions<'a>(
@@ -55,6 +58,38 @@ impl BasicBlockGroup {
                 .iter_mut()
                 .map(move |(varname, ins)| (block_id, varname, ins))
         })
+    }
+}
+
+impl StructuredFlow {
+    pub fn nested_iter<'a>(&'a self) -> impl Iterator<Item = &'a StructuredFlow> {
+        StructuredFlowIter { stack: vec![self] }
+    }
+
+    pub fn iter_all_blocks<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = &'a Vec<(usize, BasicBlockInstruction)>> {
+        self.nested_iter().flat_map(|flow| match flow {
+            StructuredFlow::BasicBlock(block) => Some(block),
+            _ => None,
+        })
+    }
+
+    pub fn iter_all_instructions<'a>(&'a self) -> impl Iterator<Item = &'a BasicBlockInstruction> {
+        self.iter_all_blocks()
+            .flat_map(|block| block.iter().map(|(_, ins)| ins))
+    }
+}
+
+struct StructuredFlowIter<'a> {
+    stack: Vec<&'a StructuredFlow>,
+}
+impl<'a> Iterator for StructuredFlowIter<'a> {
+    type Item = &'a StructuredFlow;
+    fn next(&mut self) -> Option<&'a StructuredFlow> {
+        let next = self.stack.pop()?;
+        self.stack.extend(next.children().iter().flatten().rev());
+        Some(next)
     }
 }
 
