@@ -212,19 +212,19 @@ fn generate_phi_nodes_inner(
     out_recursive
 }
 
-fn get_loop_reentry_vars(contents: &mut Vec<StructuredFlow>) -> BTreeSet<usize> {
+fn get_loop_reentry_vars(contents: &Vec<StructuredFlow>) -> BTreeSet<usize> {
     let mut vars_defined_in_loop = BTreeSet::new();
-    for_each_structuredflow(contents, &mut |block: &StructuredFlow| {
+    for block in contents.iter().flat_map(|child| child.nested_iter()) {
         if let StructuredFlow::BasicBlock(ins) = block {
             for (varname, _ins) in ins.iter() {
                 // This will be a re-entry var if we also see it defined in the loop
                 vars_defined_in_loop.insert(*varname);
             }
         }
-    });
+    }
 
     let mut loop_vars_used_in_loop = BTreeSet::new();
-    for_each_structuredflow(contents, &mut |block: &StructuredFlow| {
+    for block in contents.iter().flat_map(|child| child.nested_iter()) {
         let mut seen_defs = BTreeSet::new();
         if let StructuredFlow::BasicBlock(ins) = block {
             for (varname, ins) in ins.iter() {
@@ -242,21 +242,9 @@ fn get_loop_reentry_vars(contents: &mut Vec<StructuredFlow>) -> BTreeSet<usize> 
                 loop_vars_used_in_loop.insert(used_var);
             }
         }
-    });
+    }
 
     loop_vars_used_in_loop
-}
-
-pub fn for_each_structuredflow<Fn>(struc: &mut Vec<StructuredFlow>, func: &mut Fn)
-where
-    Fn: FnMut(&StructuredFlow),
-{
-    for struc in struc {
-        func(struc);
-        for children_group in struc.children_mut() {
-            for_each_structuredflow(children_group, func);
-        }
-    }
 }
 
 pub fn remove_phi(group: &mut BasicBlockGroup) {

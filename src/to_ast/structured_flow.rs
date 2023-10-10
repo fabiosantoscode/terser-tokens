@@ -115,32 +115,40 @@ impl StructuredFlow {
         }
     }
 
-    pub fn children(&self) -> Vec<&Vec<StructuredFlow>> {
+    pub fn children(&self) -> Vec<Vec<&StructuredFlow>> {
         match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y, z],
+            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
+                vec![y.iter().collect(), z.iter().collect()]
+            }
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => vec![x],
-            StructuredFlow::Block(x) => vec![x],
+            StructuredFlow::Loop(_, x) => vec![x.iter().collect()],
+            StructuredFlow::Block(x) => vec![x.iter().collect()],
             StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
-                vec![t, v, fin]
+                vec![t.iter().collect(), v.iter().collect(), fin.iter().collect()]
             }
         }
     }
 
-    pub fn children_mut(&mut self) -> Vec<&mut Vec<StructuredFlow>> {
+    pub fn children_mut(&mut self) -> Vec<Vec<&mut StructuredFlow>> {
         match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => vec![y, z],
+            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
+                vec![y.iter_mut().collect(), z.iter_mut().collect()]
+            }
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => vec![x],
-            StructuredFlow::Block(x) => vec![x],
+            StructuredFlow::Loop(_, x) => vec![x.iter_mut().collect()],
+            StructuredFlow::Block(x) => vec![x.iter_mut().collect()],
             StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
-                vec![t, v, fin]
+                vec![
+                    t.iter_mut().collect(),
+                    v.iter_mut().collect(),
+                    fin.iter_mut().collect(),
+                ]
             }
         }
     }
@@ -201,6 +209,22 @@ impl StructuredFlow {
             StructuredFlow::TryCatch(_, _, _, _) => None,
         }
     }
+
+    pub fn nested_iter<'a>(&'a self) -> impl Iterator<Item = &'a StructuredFlow> {
+        StructuredFlowIterator { stack: vec![self] }
+    }
+}
+
+struct StructuredFlowIterator<'a> {
+    stack: Vec<&'a StructuredFlow>,
+}
+impl<'a> Iterator for StructuredFlowIterator<'a> {
+    type Item = &'a StructuredFlow;
+    fn next(&mut self) -> Option<&'a StructuredFlow> {
+        let next = self.stack.pop()?;
+        self.stack.extend(next.children().iter().flatten().rev());
+        Some(next)
+    }
 }
 
 impl Debug for StructuredFlow {
@@ -221,30 +245,24 @@ impl Debug for StructuredFlow {
             for item in items {
                 writeln!(f, "{}", indent_str_lines(&format!("{:?}", item)))?;
             }
-            write!(f, "}}")?;
-            return Ok(());
+            write!(f, "}}")
         };
         let print_vec = |f: &mut Formatter<'_>, items: &Vec<StructuredFlow>| {
             print_vec_no_eol(f, items)?;
-            write!(f, "\n");
-            return Ok(());
+            write!(f, "\n")
         };
 
         match self {
-            StructuredFlow::Block(items) => {
-                return print_vec(f, items);
-            }
+            StructuredFlow::Block(items) => print_vec(f, items),
             StructuredFlow::Loop(brk, body) => {
                 write!(f, "loop{} ", print_brk(brk))?;
-                print_vec(f, body)?;
-                return Ok(());
+                print_vec(f, body)
             }
             StructuredFlow::Branch(brk, cond, cons, alt) => {
                 write!(f, "if{} (${}) ", print_brk(brk), cond)?;
                 print_vec_no_eol(f, cons)?;
                 write!(f, " else ")?;
-                print_vec(f, alt)?;
-                return Ok(());
+                print_vec(f, alt)
             }
             StructuredFlow::TryCatch(brk, body, catch, fin) => {
                 write!(f, "try{} ", print_brk(brk))?;
@@ -252,22 +270,80 @@ impl Debug for StructuredFlow {
                 write!(f, " catch ")?;
                 print_vec_no_eol(f, catch)?;
                 write!(f, " finally ")?;
-                print_vec(f, fin)?;
-                return Ok(());
+                print_vec(f, fin)
             }
-            StructuredFlow::Break(brk) => return writeln!(f, "Break{}", print_brk(brk)),
-            StructuredFlow::Continue(brk) => return writeln!(f, "Continue{}", print_brk(brk)),
+            StructuredFlow::Break(brk) => writeln!(f, "Break{}", print_brk(brk)),
+            StructuredFlow::Continue(brk) => writeln!(f, "Continue{}", print_brk(brk)),
             StructuredFlow::Return(exit, ret) => {
-                return writeln!(f, "{:?} ${}", exit, ret.unwrap());
+                writeln!(f, "{:?} ${}", exit, ret.unwrap())
             }
             StructuredFlow::BasicBlock(instructions) => {
                 let mut buf = String::new();
                 for (var, ins) in instructions {
                     buf.push_str(&format!("${} = {:?}\n", var, ins));
                 }
-                write!(f, "{}", &buf)?;
-                return Ok(());
+                write!(f, "{}", &buf)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::testutils::*;
+
+    #[test]
+    fn test_structured_flow_iter() {
+        let structured = parse_structured_flow(
+            "{
+            $0 = 123
+            if ($0) {
+                $1 = 456
+                if ($1) {
+                    $2 = 7
+                } else {
+                    $3 = 8
+                }
+                $4 = either($2, $3)
+            } else {
+                $5 = 9
+            }
+            $6 = either($4, $5)
+            $7 = undefined
+            Return $7
+        }",
+        );
+
+        let flat = structured
+            .nested_iter()
+            .enumerate()
+            .map(|(i, s)| match s.children().len() {
+                0 => format!("{}: {:?}", i, s),
+                _ => format!("{}: {}", i, s.str_head()),
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        insta::assert_snapshot!(flat, @r###"
+        0: Block
+        1: $0 = 123
+
+        2: Branch
+        3: $1 = 456
+
+        4: Branch
+        5: $2 = 7
+
+        6: $3 = 8
+
+        7: $4 = either($2, $3)
+
+        8: $5 = 9
+
+        9: $6 = either($4, $5)
+        $7 = undefined
+
+        10: Return $7
+        "###);
     }
 }
