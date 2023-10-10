@@ -10,8 +10,7 @@ pub fn interpret_block_group(
 
     let (first_block, last_block) = block_group.get_block_range();
 
-    let completion =
-        interpret_block_group_inner(ctx, block_group, first_block..=last_block)?.into_known()?;
+    let completion = interpret_block_group_inner(ctx, block_group, first_block..=last_block)?;
     ctx.mark_function_evaluated(block_group.id);
     Some(completion)
 }
@@ -94,7 +93,7 @@ fn interpret_block_group_inner(
 
                 // propagate the branch completion. If we returned or broke out of our range, return that.
                 match &branch_completion {
-                    JsCompletion::Return(_) | JsCompletion::Unknown => {
+                    JsCompletion::Return(_) => {
                         return Some(branch_completion);
                     }
                     JsCompletion::Break(b) | JsCompletion::Continue(b) => {

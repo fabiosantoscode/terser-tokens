@@ -6,7 +6,6 @@ pub enum JsCompletion {
     Break(usize),
     Continue(usize),
     Return(JsType),
-    Unknown,
 }
 
 impl JsCompletion {
@@ -28,13 +27,6 @@ impl JsCompletion {
         match self {
             JsCompletion::Return(t) => Some(t),
             _ => None,
-        }
-    }
-
-    pub fn into_known(self) -> Option<JsCompletion> {
-        match self {
-            JsCompletion::Unknown => None,
-            _ => Some(self),
         }
     }
 

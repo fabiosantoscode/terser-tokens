@@ -159,41 +159,6 @@ impl StructuredFlow {
         }
     }
 
-    pub fn children_flat(&self) -> Vec<&StructuredFlow> {
-        match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
-                y.iter().chain(z.iter()).collect()
-            }
-            StructuredFlow::Break(_) => vec![],
-            StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => x.iter().collect(),
-            StructuredFlow::Block(x) => x.iter().collect(),
-            StructuredFlow::Return(_, _) => vec![],
-            StructuredFlow::BasicBlock(_) => vec![],
-            StructuredFlow::TryCatch(_, t, v, fin) => {
-                t.iter().chain(v.iter().chain(fin.iter())).collect()
-            }
-        }
-    }
-
-    pub fn children_flat_mut(&mut self) -> Vec<&mut StructuredFlow> {
-        match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
-                y.iter_mut().chain(z.iter_mut()).collect()
-            }
-            StructuredFlow::Break(_) => vec![],
-            StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => x.iter_mut().collect(),
-            StructuredFlow::Block(x) => x.iter_mut().collect(),
-            StructuredFlow::Return(_, _) => vec![],
-            StructuredFlow::BasicBlock(_) => vec![],
-            StructuredFlow::TryCatch(_, t, v, fin) => t
-                .iter_mut()
-                .chain(v.iter_mut().chain(fin.iter_mut()))
-                .collect(),
-        }
-    }
-
     fn get_all_break_targets(&self) -> HashSet<BreakableId> {
         let mut ret = HashSet::new();
         if let Some(breakable_id) = self.breaks_to_id() {

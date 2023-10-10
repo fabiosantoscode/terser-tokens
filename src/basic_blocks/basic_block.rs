@@ -59,29 +59,6 @@ pub enum BasicBlockExit {
 }
 
 impl BasicBlockExit {
-    pub fn jump_targets(&self) -> Vec<usize> {
-        match self {
-            BasicBlockExit::Jump(target)
-            | BasicBlockExit::Break(target)
-            | BasicBlockExit::Continue(target) => vec![*target],
-            BasicBlockExit::Cond(
-                _,
-                true_target,
-                _true_target_end,
-                false_target,
-                _false_target_end,
-            ) => vec![*true_target, *false_target],
-            BasicBlockExit::Loop(start, _end) => vec![*start],
-            BasicBlockExit::ExitFn(_, _) => vec![],
-            BasicBlockExit::SetTryAndCatch(jump_forward, _, _, _)
-            | BasicBlockExit::PopFinally(jump_forward, _)
-            | BasicBlockExit::EndFinally(jump_forward) => vec![*jump_forward],
-            BasicBlockExit::PopCatch(catch_target, finally_target) => {
-                vec![*catch_target, *finally_target]
-            }
-        }
-    }
-
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![*cond_var],
