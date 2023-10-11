@@ -7,6 +7,8 @@ pub enum JsType {
     Undefined,
     Boolean,
     TheBoolean(bool),
+    String,
+    TheString(String),
     Number,
     TheNumber(NotNan<f64>),
     Function,
@@ -48,6 +50,8 @@ impl JsType {
             JsType::Undefined => Some(false),
             JsType::Boolean => None,
             JsType::TheBoolean(b) => Some(*b),
+            JsType::String => None,
+            JsType::TheString(s) => Some(s.len() > 0),
             JsType::Number => None,
             JsType::TheNumber(n) => Some(n != &NotNan::new(0.0).unwrap()),
             JsType::Function => Some(true),
@@ -87,8 +91,9 @@ impl JsType {
             use JsType::*;
 
             match (self, other) {
-                (TheBoolean(_) | Boolean, TheBoolean(_) | Boolean) => Boolean,
                 (TheNumber(_) | Number, TheNumber(_) | Number) => Number,
+                (TheBoolean(_) | Boolean, TheBoolean(_) | Boolean) => Boolean,
+                (TheString(_) | String, TheString(_) | String) => String,
                 (TheFunction(_) | Function, TheFunction(_) | Function) => Function,
                 _ => Any,
             }
@@ -104,8 +109,9 @@ impl JsType {
             use JsType::*;
 
             match (self, other) {
-                (Boolean, TheBoolean(b)) | (TheBoolean(b), Boolean) => Some(TheBoolean(*b)),
                 (Number, TheNumber(n)) | (TheNumber(n), Number) => Some(TheNumber(*n)),
+                (Boolean, TheBoolean(b)) | (TheBoolean(b), Boolean) => Some(TheBoolean(*b)),
+                (String, TheString(s)) | (TheString(s), String) => Some(TheString(s.clone())),
                 (Function, TheFunction(id)) | (TheFunction(id), Function) => Some(TheFunction(*id)),
                 _ => None,
             }
@@ -123,6 +129,7 @@ impl JsType {
         match self {
             JsType::TheBoolean(b) => Some(BasicBlockInstruction::LitBool(*b)),
             JsType::TheNumber(n) => Some(BasicBlockInstruction::LitNumber((*n).into())),
+            JsType::TheString(s) => Some(BasicBlockInstruction::LitString(s.clone())),
             _ => None,
         }
     }
@@ -134,6 +141,8 @@ impl std::fmt::Debug for JsType {
             JsType::Undefined => write!(f, "Undefined"),
             JsType::Boolean => write!(f, "Boolean"),
             JsType::TheBoolean(b) => write!(f, "TheBoolean({})", b),
+            JsType::String => write!(f, "String"),
+            JsType::TheString(s) => write!(f, "TheString({:?})", s),
             JsType::Number => write!(f, "Number"),
             JsType::TheNumber(n) => write!(f, "TheNumber({})", n),
             JsType::Function => write!(f, "Function"),

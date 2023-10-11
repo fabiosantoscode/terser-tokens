@@ -3,15 +3,16 @@ use std::collections::BTreeMap;
 use swc_ecma_ast::{
     ArrayLit, AssignExpr, AssignOp, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee,
     ComputedPropName, ContinueStmt, Decl, Expr, ExprOrSpread, ExprStmt, FnExpr, Function, Ident,
-    Lit, MemberExpr, MemberProp, Module, ModuleItem, Pat, PatOrExpr, ReturnStmt, Stmt, ThrowStmt,
-    TryStmt, WhileStmt, YieldExpr,
+    KeyValueProp, Lit, MemberExpr, MemberProp, Module, ModuleItem, ObjectLit, Pat, PatOrExpr, Prop,
+    PropName, PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, ThrowStmt, TryStmt, WhileStmt,
+    YieldExpr,
 };
 
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, StructuredFlow,
-        TempExitType,
+        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectProp,
+        StructuredFlow, TempExitType,
     },
     block_ops::{block_group_to_structured_flow, remove_phi},
 };
@@ -245,6 +246,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
     match expr {
         BasicBlockInstruction::LitNumber(num) => (*num).into(),
         BasicBlockInstruction::LitBool(s) => (*s).into(),
+        BasicBlockInstruction::LitString(s) => Expr::Lit(Lit::Str(Str::from(&s[..]))),
         BasicBlockInstruction::Undefined => {
             Expr::Ident(Ident::new("undefined".into(), Default::default()))
         }
@@ -282,6 +284,46 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 elems: items,
             })
         }
+        BasicBlockInstruction::Object(proto, props) => Expr::Object(ObjectLit {
+            span: Default::default(),
+            props: proto
+                .map(|proto| {
+                    PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
+                        key: PropName::Ident(Ident::new("__proto__".into(), Default::default())),
+                        value: Box::new(ref_or_inlined_expr(ctx, proto)),
+                    })))
+                })
+                .into_iter()
+                .chain(props.iter().map(|prop| match prop {
+                    ObjectProp::Spread(spread_obj) => PropOrSpread::Spread(SpreadElement {
+                        dot3_token: Default::default(),
+                        expr: Box::new(ref_or_inlined_expr(ctx, *spread_obj)),
+                    }),
+                    ObjectProp::KeyValue(key, value) => {
+                        if key.chars().all(|c| c.is_ascii_alphabetic()) {
+                            PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
+                                key: PropName::Ident(Ident::new(
+                                    (&key[..]).into(),
+                                    Default::default(),
+                                )),
+                                value: Box::new(ref_or_inlined_expr(ctx, *value)),
+                            })))
+                        } else {
+                            todo!("object keys that aren't just identifiers, also shorthands")
+                        }
+                    }
+                    ObjectProp::Computed(key, value) => {
+                        PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
+                            key: PropName::Computed(ComputedPropName {
+                                span: Default::default(),
+                                expr: Box::new(ref_or_inlined_expr(ctx, *key)),
+                            }),
+                            value: Box::new(ref_or_inlined_expr(ctx, *value)),
+                        })))
+                    }
+                }))
+                .collect::<Vec<PropOrSpread>>(),
+        }),
         BasicBlockInstruction::Function(id) => {
             let func = ctx.module.take_function(*id).unwrap().blocks;
 

@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    basic_blocks::{BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,StructuredFlow},
+    basic_blocks::{
+        BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, StructuredFlow,
+    },
     block_ops::{block_group_to_structured_flow, normalize_basic_blocks_tree, normalize_varnames},
 };
 

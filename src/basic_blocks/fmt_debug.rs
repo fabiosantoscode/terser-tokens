@@ -1,5 +1,7 @@
 use std::fmt::{Debug, Error, Formatter};
 
+use crate::basic_blocks::ObjectProp;
+
 use super::{
     ArrayElement, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup,
     BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, NonLocalId,
@@ -24,6 +26,9 @@ impl Debug for BasicBlockInstruction {
             }
             BasicBlockInstruction::LitBool(b) => {
                 write!(f, "{:?}", b)
+            }
+            BasicBlockInstruction::LitString(s) => {
+                write!(f, "{:?}", s)
             }
             BasicBlockInstruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
@@ -50,6 +55,22 @@ impl Debug for BasicBlockInstruction {
                         })
                         .collect::<Vec<_>>()
                         .join(" ")
+                )
+            }
+            BasicBlockInstruction::Object(proto, props) => {
+                write!(
+                    f,
+                    "{{{}}}",
+                    proto
+                        .iter()
+                        .map(|proto| { format!("__proto__: ${}", proto) })
+                        .chain(props.iter().map(|e| match e {
+                            ObjectProp::KeyValue(key, value) => format!("{}: ${}", key, value),
+                            ObjectProp::Computed(key, value) => format!("[${}]: ${}", key, value),
+                            ObjectProp::Spread(spread_obj) => format!("...{}", spread_obj),
+                        }))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
             }
             BasicBlockInstruction::Function(id) => {

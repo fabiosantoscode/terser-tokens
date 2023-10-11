@@ -1,12 +1,13 @@
-use std::borrow::Borrow;
+use std::collections::HashSet;
 
 use swc_ecma_ast::{
-    AwaitExpr, Decl, Expr, ExprOrSpread, IfStmt, LabeledStmt, Lit, Pat, PatOrExpr, Stmt, ThrowStmt,
+    AwaitExpr, Decl, Expr, ExprOrSpread, GetterProp, IfStmt, LabeledStmt, Lit, MethodProp,
+    ObjectLit, Pat, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp, Stmt, ThrowStmt,
     YieldExpr,
 };
 
 use crate::basic_blocks::{
-    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, TempExitType,
+    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ObjectProp, TempExitType,
 };
 
 use super::{
@@ -59,7 +60,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         Stmt::Decl(Decl::Var(var)) => {
             for decl in &var.decls {
                 let Pat::Ident(ident) = &decl.name else {todo!()};
-                let expr = expr_to_basic_blocks(ctx, decl.init.as_ref().unwrap().borrow());
+                let expr = expr_to_basic_blocks(ctx, decl.init.as_ref().unwrap().as_ref());
                 ctx.assign_name(&ident.sym.to_string(), expr);
             }
         }
@@ -259,6 +260,9 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Lit(Lit::Bool(b)) => {
             return ctx.push_instruction(BasicBlockInstruction::LitBool(b.value))
         }
+        Expr::Lit(Lit::Str(s)) => {
+            return ctx.push_instruction(BasicBlockInstruction::LitString(s.value.to_string()))
+        }
         Expr::Bin(bin) => {
             let l = expr_to_basic_blocks(ctx, &bin.left);
             let r = expr_to_basic_blocks(ctx, &bin.right);
@@ -266,7 +270,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             return ctx.push_instruction(BasicBlockInstruction::BinOp(bin.op.clone(), l, r));
         }
         Expr::Assign(assign) => match &assign.left {
-            PatOrExpr::Pat(e) => match e.borrow() {
+            PatOrExpr::Pat(e) => match e.as_ref() {
                 Pat::Ident(ident) => {
                     let sym = ident.sym.to_string();
                     let Some(_old_idx) = ctx.read_name(&sym) else {todo!()};
@@ -358,7 +362,57 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
 
             return ctx.push_instruction(BasicBlockInstruction::Array(elements));
         }
-        Expr::Object(_) => todo!(),
+        Expr::Object(ObjectLit { props, .. }) => {
+            let mut kvs = vec![];
+            let mut proto = None;
+            for prop in props {
+                match prop {
+                    PropOrSpread::Spread(spread) => {
+                        kvs.push(ObjectProp::Spread(expr_to_basic_blocks(ctx, &spread.expr)))
+                    }
+                    PropOrSpread::Prop(prop) => {
+                        let read_prop_name = |prop_name: &PropName| match &prop_name {
+                            PropName::Computed(expr) => {
+                                unreachable!()
+                            }
+                            PropName::Ident(id) => id.sym.to_string(),
+                            PropName::Str(s) => s.value.to_string(),
+                            PropName::Num(_) => todo!(),
+                            PropName::BigInt(big_int) => big_int.value.to_string(),
+                        };
+
+                        match prop.as_ref() {
+                            Prop::Shorthand(ident) => {
+                                ctx.read_name(&ident.sym.to_string());
+                            }
+                            Prop::KeyValue(kv) => match &kv.key {
+                                PropName::Computed(expr) => kvs.push(ObjectProp::Computed(
+                                    expr_to_basic_blocks(ctx, &expr.expr),
+                                    expr_to_basic_blocks(ctx, &kv.value),
+                                )),
+                                _ => {
+                                    let prop_name = read_prop_name(&kv.key);
+                                    if &prop_name == "__proto__" {
+                                        proto = Some(expr_to_basic_blocks(ctx, &kv.value));
+                                    } else {
+                                        kvs.push(ObjectProp::KeyValue(
+                                            prop_name,
+                                            expr_to_basic_blocks(ctx, &kv.value),
+                                        ));
+                                    }
+                                }
+                            },
+                            Prop::Getter(GetterProp { key, .. }) => todo!(),
+                            Prop::Setter(SetterProp { key, .. }) => todo!(),
+                            Prop::Method(MethodProp { key, .. }) => todo!(),
+                            Prop::Assign(_) => unreachable!(),
+                        }
+                    }
+                }
+            }
+
+            return ctx.push_instruction(BasicBlockInstruction::Object(proto, kvs));
+        }
         Expr::Unary(_) => todo!(),
         Expr::Update(_) => todo!(),
         Expr::Member(_) => todo!(),
@@ -1216,6 +1270,36 @@ mod tests {
         }
         @13: {
             $9 = $0
+            exit = return $9
+        }
+        "###);
+    }
+
+    #[test]
+    fn an_object() {
+        let s = test_basic_blocks(
+            "var other = {}
+            var obj = {
+                key: 'val',
+                ...other,
+                other,
+                [1000 + 2000]: 'computed',
+                // 1000000000000000000000000000000: 'num',
+                1000000000000000000000000000000n: 'bignum',
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = {}
+            $1 = "val"
+            $2 = $0
+            $3 = 1000
+            $4 = 2000
+            $5 = $3 + $4
+            $6 = "computed"
+            $7 = "bignum"
+            $8 = {key: $1, ...2, [$5]: $6, 1000000000000000000000000000000: $7}
+            $9 = undefined
             exit = return $9
         }
         "###);

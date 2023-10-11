@@ -1,7 +1,8 @@
 use fix_fn::fix_fn;
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, IfStmt, Lit, Module,
-    ModuleItem, Param, Pat, PatOrExpr, Stmt, VarDeclKind, YieldExpr,
+    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, GetterProp, IfStmt,
+    Lit, MethodProp, Module, ModuleItem, ObjectLit, Param, Pat, PatOrExpr, Prop, PropName,
+    PropOrSpread, SetterProp, Stmt, VarDeclKind, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
@@ -284,7 +285,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
         Expr::Fn(fn_expr) => ctx.defer(FunctionLike::FnExpr(fn_expr)),
         Expr::Arrow(arrow) => ctx.defer(FunctionLike::ArrowExpr(arrow)),
         // TERMINALS
-        Expr::Lit(Lit::Num(_)) | Expr::This(_) => {}
+        Expr::Lit(Lit::Num(_) | Lit::Str(_)) | Expr::This(_) => {}
         // VISIT BELOW
         Expr::Bin(bin) => {
             expr_nonlocals(ctx, &bin.left);
@@ -312,7 +313,32 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
                 }
             }
         }
-        Expr::Object(_) => todo!(),
+        Expr::Object(ObjectLit { props, .. }) => {
+            for prop in props {
+                match prop {
+                    PropOrSpread::Spread(spread) => {
+                        expr_nonlocals(ctx, &spread.expr);
+                    }
+                    PropOrSpread::Prop(prop) => match prop.as_ref() {
+                        Prop::Shorthand(ident) => ctx.read_name(ident.sym.to_string()),
+                        Prop::KeyValue(kv) => {
+                            if let PropName::Computed(expr) = &kv.key {
+                                expr_nonlocals(ctx, &expr.expr)
+                            }
+                            expr_nonlocals(ctx, &kv.value)
+                        }
+                        Prop::Getter(GetterProp { key, .. })
+                        | Prop::Setter(SetterProp { key, .. })
+                        | Prop::Method(MethodProp { key, .. }) => {
+                            if let PropName::Computed(expr) = &key {
+                                expr_nonlocals(ctx, &expr.expr)
+                            }
+                        }
+                        Prop::Assign(_) => unreachable!(),
+                    },
+                }
+            }
+        }
         Expr::Unary(_) => todo!(),
         Expr::Update(_) => todo!(),
         Expr::Member(member) => {

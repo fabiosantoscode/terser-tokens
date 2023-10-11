@@ -7,12 +7,15 @@ use super::FunctionId;
 pub enum BasicBlockInstruction {
     LitNumber(f64),
     LitBool(bool),
+    LitString(String),
     Ref(usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
     Undefined,
     This,
     CaughtError,
     Array(Vec<ArrayElement>),
+    /// __proto__, object props
+    Object(Option<usize>, Vec<ObjectProp>),
     TempExit(TempExitType, usize),
     Phi(Vec<usize>),
     Function(FunctionId),
@@ -43,6 +46,13 @@ impl ArrayElement {
     }
 }
 
+#[derive(Clone, PartialEq)]
+pub enum ObjectProp {
+    KeyValue(String, usize),
+    Computed(usize, usize),
+    Spread(usize),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum TempExitType {
     Yield,
@@ -55,6 +65,7 @@ impl BasicBlockInstruction {
         match self {
             BasicBlockInstruction::LitNumber(_) => vec![],
             BasicBlockInstruction::LitBool(_) => vec![],
+            BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![id],
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
             BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
@@ -67,6 +78,15 @@ impl BasicBlockInstruction {
                     ArrayElement::Item(id) => Some(id),
                     ArrayElement::Spread(id) => Some(id),
                 })
+                .collect(),
+            BasicBlockInstruction::Object(proto, props) => proto
+                .iter_mut()
+                .map(|proto| proto)
+                .chain(props.iter_mut().flat_map(|e| match e {
+                    ObjectProp::KeyValue(_, val) => vec![val],
+                    ObjectProp::Computed(key, val) => vec![key, val],
+                    ObjectProp::Spread(spread_obj) => vec![spread_obj],
+                }))
                 .collect(),
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
             BasicBlockInstruction::CaughtError => vec![],
@@ -88,6 +108,7 @@ impl BasicBlockInstruction {
         match self {
             BasicBlockInstruction::LitNumber(_) => vec![],
             BasicBlockInstruction::LitBool(_) => vec![],
+            BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![*id],
             BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
             BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),
@@ -100,6 +121,15 @@ impl BasicBlockInstruction {
                     ArrayElement::Item(id) => Some(*id),
                     ArrayElement::Spread(id) => Some(*id),
                 })
+                .collect(),
+            BasicBlockInstruction::Object(proto, props) => proto
+                .iter()
+                .cloned()
+                .chain(props.iter().flat_map(|prop| match prop {
+                    ObjectProp::KeyValue(_, val) => vec![*val],
+                    ObjectProp::Computed(key, val) => vec![*key, *val],
+                    ObjectProp::Spread(spread_obj) => vec![*spread_obj],
+                }))
                 .collect(),
             BasicBlockInstruction::TempExit(_, arg) => vec![*arg],
             BasicBlockInstruction::CaughtError => vec![],

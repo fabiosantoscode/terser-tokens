@@ -13,23 +13,30 @@ pub fn interpret(
     let normal_completion = match instruction {
         BasicBlockInstruction::LitNumber(n) => JsType::new_number(*n),
         BasicBlockInstruction::LitBool(b) => JsType::TheBoolean(*b),
+        BasicBlockInstruction::LitString(s) => JsType::TheString(s.clone()),
         BasicBlockInstruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
         BasicBlockInstruction::BinOp(op, l, r) => {
-            if let (Some(JsType::TheNumber(l)), Some(JsType::TheNumber(r))) =
-                (ctx.get_variable(*l), ctx.get_variable(*r))
-            {
-                interp_float_binops((*l).into(), (*r).into(), op)?
-            } else if ctx.get_variable(*l) == Some(&JsType::Number)
-                && ctx.get_variable(*r) == Some(&JsType::Number)
-            {
-                use swc_ecma_ast::BinaryOp::*;
-                match op {
+            use swc_ecma_ast::BinaryOp::*;
+            let l = ctx.get_variable(*l)?;
+            let r = ctx.get_variable(*r)?;
+            match (l, r) {
+                (JsType::TheNumber(l), JsType::TheNumber(r)) => {
+                    interp_float_binops((*l).into(), (*r).into(), op)?
+                }
+                (JsType::Number, JsType::Number) => match op {
                     BitAnd | BitOr | BitXor | RShift | LShift | ZeroFillRShift | Add | Sub
                     | Mul | Div | Mod => JsType::Number,
                     _ => return None,
-                }
-            } else {
-                return None;
+                },
+                (JsType::TheString(l), JsType::TheString(r)) => match op {
+                    Add => JsType::TheString(format!("{}{}", l, r)),
+                    _ => return None,
+                },
+                (JsType::String, JsType::String) => match op {
+                    Add => JsType::String,
+                    _ => return None,
+                },
+                _ => return None,
             }
         }
         BasicBlockInstruction::Undefined => JsType::Undefined,
@@ -59,6 +66,7 @@ pub fn interpret(
                 JsType::Array
             }
         }
+        BasicBlockInstruction::Object(proto, props) => JsType::Any,
         BasicBlockInstruction::TempExit(_, _) => None?, // TODO: yield, await
         BasicBlockInstruction::Phi(alternatives) => {
             let mut ts: Vec<&JsType> = Vec::new();
