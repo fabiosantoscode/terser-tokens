@@ -17,6 +17,9 @@ pub struct ToAstContext<'a> {
     /// break/continue - tracking
     pub breakable_stack: Vec<BreakableStackItem>,
     pub gen_label_index: Base54,
+
+    /// Object/Array patterns
+    pub destructuring_patterns: BTreeMap<usize, Vec<Base54>>,
 }
 
 #[derive(Debug)]
@@ -42,6 +45,32 @@ impl ToAstContext<'_> {
         self.gen_var_index = error_index.next();
         self.caught_error = Some(error_index);
         error_index.to_string()
+    }
+
+    /// Create variables found in a destructuring pattern
+    pub(crate) fn create_pattern(&mut self, variable: usize, len: usize) -> Vec<Base54> {
+        let new_pattern = (0..len)
+            .map(|_| {
+                let gen = self.gen_var_index;
+                self.gen_var_index = gen.next();
+                gen
+            })
+            .collect::<Vec<_>>();
+
+        self.destructuring_patterns
+            .insert(variable, new_pattern.clone());
+
+        new_pattern
+    }
+
+    pub(crate) fn get_varname_for_pattern(&self, variable: usize, idx: usize) -> String {
+        self.destructuring_patterns
+            .get(&variable)
+            .expect("pattern not found")
+            .get(idx)
+            .expect("pattern index out of bounds")
+            .clone()
+            .to_string()
     }
 
     pub fn will_be_inlined(&self, variable: usize) -> bool {

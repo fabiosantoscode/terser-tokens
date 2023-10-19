@@ -227,10 +227,10 @@ mod tests {
         function():
         @0: {
             $11 = read_non_local $$6
-            $12 = read_non_local $$1
-            $13 = 9
-            $14 = write_non_local $$1 $13
-            $15 = $13
+            $12 = 9
+            $13 = read_non_local $$1
+            $14 = write_non_local $$1 $12
+            $15 = $12
             $16 = undefined
             exit = return $16
         }

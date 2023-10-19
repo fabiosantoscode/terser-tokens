@@ -1,6 +1,11 @@
-use ordered_float::NotNan;
+use std::collections::{BTreeMap, HashSet};
 
-use crate::basic_blocks::{ArrayElement, BasicBlockInstruction};
+use ordered_float::NotNan;
+use swc_ecma_ast::ObjectPatProp;
+
+use crate::basic_blocks::{
+    ArrayElement, ArrayPatternPiece, BasicBlockInstruction, ObjectPatternPiece, ObjectProp,
+};
 
 use super::{interpret_function, InterpretCtx, JsCompletion, JsType};
 
@@ -19,6 +24,10 @@ pub fn interpret(
             use swc_ecma_ast::BinaryOp::*;
             let l = ctx.get_variable(*l)?;
             let r = ctx.get_variable(*r)?;
+
+            if let Some(comparison_res) = interp_comparisons(op, l, r) {
+                return Some(comparison_res);
+            }
             match (l, r) {
                 (JsType::TheNumber(l), JsType::TheNumber(r)) => {
                     interp_float_binops((*l).into(), (*r).into(), op)?
@@ -66,16 +75,131 @@ pub fn interpret(
                 JsType::Array
             }
         }
-        BasicBlockInstruction::Object(proto, props) => JsType::Any,
-        BasicBlockInstruction::TempExit(_, _) => None?, // TODO: yield, await
-        BasicBlockInstruction::Phi(alternatives) => {
-            let mut ts: Vec<&JsType> = Vec::new();
+        BasicBlockInstruction::Object(proto, props) => {
+            if proto.is_some() || props.len() > ARRAY_MAX_ELEMENTS {
+                JsType::Object
+            } else {
+                let mut out_props = BTreeMap::new();
+                for prop in props.iter() {
+                    match prop {
+                        ObjectProp::KeyValue(key, value) => {
+                            let value = ctx.get_variable(*value)?.clone();
+                            out_props.insert(key.clone(), value);
+                        }
+                        ObjectProp::Computed(key_varname, value) => {
+                            if let Some(key) = ctx.get_variable(*key_varname)?.to_string() {
+                                let value = ctx.get_variable(*value)?.clone();
+                                out_props.insert(key, value);
+                            } else {
+                                return Some(JsCompletion::Normal(JsType::Object));
+                            }
+                        }
+                        ObjectProp::Spread(_) => todo!(),
+                    }
+                }
 
-            for alt in alternatives {
-                ts.push(ctx.get_variable(*alt)?);
+                if out_props.len() > ARRAY_MAX_ELEMENTS {
+                    JsType::Object
+                } else {
+                    JsType::TheObject(out_props)
+                }
+            }
+        }
+        BasicBlockInstruction::Member(_base, _member) => return None,
+        BasicBlockInstruction::MemberSet(_base, _member, _value) => return None,
+        BasicBlockInstruction::ArrayPattern(from_arr, pieces) => {
+            let Some(JsType::TheArray(from_arr)) = ctx.get_variable(*from_arr) else {
+                return None;
+            };
+
+            let mut pattern_contents: Vec<JsType> = Vec::new();
+
+            for (i, item) in pieces.iter().enumerate() {
+                match item {
+                    ArrayPatternPiece::Item => {
+                        let item_or_undef = from_arr.get(i).cloned().unwrap_or(JsType::Undefined);
+                        pattern_contents.push(item_or_undef);
+                    }
+                    ArrayPatternPiece::Spread => todo!(),
+                }
             }
 
-            JsType::union_all(ts.into_iter())
+            JsType::Pattern(pattern_contents)
+        }
+        BasicBlockInstruction::ObjectPattern(inp_obj, pattern_props) => {
+            let Some(JsType::TheObject(obj)) = ctx.get_variable(*inp_obj) else {
+                return None;
+            };
+
+            let mut pattern_contents: Vec<JsType> = Vec::new();
+
+            let mut seen_keys = if pattern_props
+                .iter()
+                .any(|prop| prop == &ObjectPatternPiece::Spread)
+            {
+                Some(HashSet::new())
+            } else {
+                None
+            };
+
+            for (i, item) in pattern_props.iter().enumerate() {
+                match item {
+                    ObjectPatternPiece::TakeKey(key) => {
+                        if let Some(ref mut keys_set) = seen_keys {
+                            keys_set.insert(key.clone());
+                        }
+
+                        let item_or_undef = obj.get(key).cloned().unwrap_or(JsType::Undefined);
+                        pattern_contents.push(item_or_undef);
+                    }
+                    ObjectPatternPiece::TakeComputedKey(key) => {
+                        if let Some(key) = ctx.get_variable(*key)?.to_string() {
+                            if let Some(ref mut keys_set) = seen_keys {
+                                keys_set.insert(key.clone());
+                            }
+
+                            let item_or_undef = obj.get(&key).cloned().unwrap_or(JsType::Undefined);
+                            pattern_contents.push(item_or_undef);
+                        } else {
+                            return Some(JsCompletion::Normal(JsType::String));
+                        };
+                    }
+                    ObjectPatternPiece::Spread => {
+                        // Spread must be last
+                        if i != pattern_props.len() - 1 {
+                            return None;
+                        }
+
+                        let except_keys = seen_keys.as_ref().unwrap();
+
+                        let spread_obj = JsType::TheObject(
+                            obj.iter()
+                                .filter(|(key, _)| !except_keys.contains(*key))
+                                .map(|(key, value)| (key.clone(), value.clone()))
+                                .collect(),
+                        );
+
+                        pattern_contents.push(spread_obj);
+                    }
+                }
+            }
+
+            JsType::Pattern(pattern_contents)
+        }
+        BasicBlockInstruction::PatternUnpack(pat, index) => {
+            let Some(JsType::Pattern(contents)) = ctx.get_variable(*pat) else {
+                return None;
+            };
+
+            contents.get(*index).cloned()?
+        }
+        BasicBlockInstruction::TempExit(_, _) => None?, // TODO: yield, await
+        BasicBlockInstruction::Phi(alternatives) => {
+            let types = alternatives
+                .iter()
+                // Some variables will be missing if we eliminate a branch, so we use flat_map
+                .flat_map(|alt| ctx.get_variable(*alt));
+            JsType::union_all(types)?
         }
         BasicBlockInstruction::Function(id) => JsType::TheFunction(*id),
         BasicBlockInstruction::Call(callee, args) => {
@@ -130,11 +254,42 @@ fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<Js
     }))
 }
 
+fn interp_comparisons(op: &swc_ecma_ast::BinaryOp, l: &JsType, r: &JsType) -> Option<JsCompletion> {
+    use swc_ecma_ast::BinaryOp::*;
+
+    let can_compare_type = |t: &JsType| match t {
+        JsType::TheBoolean(_) | JsType::TheNumber(_) | JsType::TheString(_) | JsType::Undefined => {
+            true
+        }
+        _ => false,
+    };
+
+    let is_equal = if can_compare_type(l) && can_compare_type(r) {
+        l == r
+    } else {
+        match (l, r) {
+            (JsType::Undefined, _) | (_, JsType::Undefined) => false,
+
+            _ => return None,
+        }
+    };
+
+    match op {
+        EqEq | EqEqEq => Some(JsCompletion::Normal(JsType::TheBoolean(is_equal == true))),
+        NotEq | NotEqEq => Some(JsCompletion::Normal(JsType::TheBoolean(is_equal == true))),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::{basic_blocks::FunctionId, interpret::JsType, testutils::*};
+    use crate::{
+        basic_blocks::FunctionId,
+        interpret::{interpret_block_group, JsType},
+        testutils::*,
+    };
 
     fn test_interp(source: &str) -> Option<JsCompletion> {
         let mut ctx = InterpretCtx::new();
@@ -161,58 +316,102 @@ mod tests {
         }
     }
 
+    fn test_interp_js(source: &str) -> JsType {
+        let b_group = test_basic_blocks(source);
+        let mut ctx = InterpretCtx::new();
+        ctx.start_function(
+            FunctionId(0),
+            Some(vec![0.0.into(), 1.0.into(), 2.0.into()]).into(),
+        );
+        ctx.assign_variable(1, JsType::new_number(1.0));
+        ctx.assign_variable(2, JsType::new_number(2.0));
+        interpret_block_group(&mut ctx, &b_group)
+            .unwrap()
+            .as_return()
+            .unwrap()
+            .clone()
+    }
+
     fn test_interp_unknown(source: &str) -> bool {
         test_interp(source).is_none()
     }
 
     #[test]
-    fn test_number() {
+    fn interp_number() {
         insta::assert_debug_snapshot!(test_interp_normal("1"), @"TheNumber(1)");
     }
 
     #[test]
-    fn test_ref() {
+    fn interp_ref() {
         insta::assert_debug_snapshot!(test_interp_normal("$1"), @"TheNumber(1)");
     }
 
     #[test]
-    fn test_binop() {
+    fn interp_binop() {
         insta::assert_debug_snapshot!(test_interp_normal("$1 + $2"), @"TheNumber(3)");
     }
 
     #[test]
-    fn test_undefined() {
+    fn interp_undefined() {
         insta::assert_debug_snapshot!(test_interp_normal("undefined"), @r###"
             Undefined
         "###);
     }
 
     #[test]
-    fn test_this() {
+    fn interp_this() {
         assert!(test_interp_unknown("this"));
     }
 
     #[test]
-    fn test_array() {
+    fn interp_array() {
         insta::assert_debug_snapshot!(test_interp_normal("[]"), @"TheArray([])");
         insta::assert_debug_snapshot!(test_interp_normal("[$1]"), @"TheArray([TheNumber(1)])");
         insta::assert_debug_snapshot!(test_interp_unknown("[$1, ...$2]"), @"true");
     }
 
     #[test]
-    fn test_arguments() {
+    fn interp_arguments() {
         insta::assert_debug_snapshot!(test_interp_normal("arguments[0]"), @"TheNumber(0)");
         insta::assert_debug_snapshot!(test_interp_normal("arguments[1...]"), @"TheArray([TheNumber(1), TheNumber(2)])");
     }
 
     #[test]
-    fn test_phi() {
+    fn interp_phi() {
         insta::assert_debug_snapshot!(test_interp_normal("either($1)"), @"TheNumber(1)");
         insta::assert_debug_snapshot!(test_interp_normal("either($1, $2)"), @"Number");
     }
 
     #[test]
-    fn test_function() {
+    fn interp_function() {
         insta::assert_debug_snapshot!(test_interp_normal("FunctionId(1)"), @"TheFunction(1)");
+    }
+
+    #[test]
+    fn interp_pattern() {
+        insta::assert_debug_snapshot!(test_interp_js("
+            let [a, [,,b]] = [1, [0,0,2]];
+            return [b, a];
+        "), @"TheArray([TheNumber(2), TheNumber(1)])");
+        insta::assert_debug_snapshot!(test_interp_js("
+            let [a = 123] = [];
+            return a;
+        "), @"TheNumber(123)");
+        insta::assert_debug_snapshot!(test_interp_js("
+            let [a = 999, b = 456] = [123];
+            return [a, b];
+        "), @"TheArray([TheNumber(123), TheNumber(456)])");
+    }
+
+    #[test]
+    fn interp_obj_pattern() {
+        insta::assert_debug_snapshot!(test_interp_js("
+            let { a = 123 } = {};
+            return a;
+        "), @"TheNumber(123)");
+        insta::assert_debug_snapshot!(test_interp_js("
+            let { a = 1, [1]: b, ...c } = { 1: 2, xrest: 3 };
+            return [a, b, c];
+        "), @"TheArray([TheNumber(1), TheNumber(2), TheObject({\"xrest\": TheNumber(3)})])");
     }
 }

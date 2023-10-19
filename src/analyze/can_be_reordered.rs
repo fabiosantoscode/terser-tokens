@@ -12,7 +12,8 @@ impl BasicBlockInstruction {
             | BasicBlockInstruction::Ref(_)
             | BasicBlockInstruction::Undefined
             | BasicBlockInstruction::LitNumber(_)
-            | BasicBlockInstruction::LitBool(_) => true,
+            | BasicBlockInstruction::LitBool(_)
+            | BasicBlockInstruction::PatternUnpack(_, _) => true,
             _ => false,
         }
     }

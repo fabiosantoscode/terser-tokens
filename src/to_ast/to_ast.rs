@@ -1,23 +1,26 @@
 use std::collections::BTreeMap;
 
 use swc_ecma_ast::{
-    ArrayLit, AssignExpr, AssignOp, AwaitExpr, BindingIdent, BlockStmt, CallExpr, Callee,
-    ComputedPropName, ContinueStmt, Decl, Expr, ExprOrSpread, ExprStmt, FnExpr, Function, Ident,
-    KeyValueProp, Lit, MemberExpr, MemberProp, Module, ModuleItem, ObjectLit, Pat, PatOrExpr, Prop,
-    PropName, PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, ThrowStmt, TryStmt, WhileStmt,
-    YieldExpr,
+    ArrayLit, AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName,
+    ContinueStmt, Expr, ExprOrSpread, ExprStmt, FnExpr, Function, Ident, KeyValueProp, Lit,
+    MemberExpr, MemberProp, Module, ModuleItem, ObjectLit, PatOrExpr, PrivateName, Prop, PropName,
+    PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, ThrowStmt, TryStmt, WhileStmt, YieldExpr,
 };
 
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectProp,
+        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectMember, ObjectProp,
         StructuredFlow, TempExitType,
     },
     block_ops::{block_group_to_structured_flow, remove_phi},
+    to_ast::{build_block, build_var_assign, build_var_decl},
 };
 
-use super::{get_inlined_variables, Base54, ToAstContext};
+use super::{
+    build_binding_identifier, build_identifier, get_inlined_variables, pattern_to_statement,
+    Base54, ToAstContext,
+};
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     Module {
@@ -30,7 +33,7 @@ pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     }
 }
 
-fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
+pub fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
     let phied = block_module
         .iter_all_instructions()
         .flat_map(|(_, _, varname, ins)| match ins {
@@ -61,6 +64,7 @@ fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
         gen_var_index: Base54::new(0),
         breakable_stack: vec![],
         gen_label_index: Base54::new(0),
+        destructuring_patterns: BTreeMap::new(),
     };
 
     to_statements(&mut ctx, &tree)
@@ -105,8 +109,8 @@ fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
                 Stmt::If(swc_ecma_ast::IfStmt {
                     span: Default::default(),
                     test: Box::new(branch_expr),
-                    cons: Box::new(get_block(cons)),
-                    alt: Some(Box::new(get_block(alt))),
+                    cons: Box::new(build_block(cons)),
+                    alt: Some(Box::new(build_block(alt))),
                 })
             });
 
@@ -139,7 +143,7 @@ fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
                 Stmt::While(WhileStmt {
                     span: Default::default(),
                     test: Box::new(Expr::Lit(true.into())),
-                    body: Box::new(get_block(body)),
+                    body: Box::new(build_block(body)),
                 })
             });
 
@@ -162,7 +166,7 @@ fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
                     },
                     handler: Some(swc_ecma_ast::CatchClause {
                         span: Default::default(),
-                        param: Some(get_binding_identifier(&catch_handler)),
+                        param: Some(build_binding_identifier(&catch_handler)),
                         body: BlockStmt {
                             span: Default::default(),
                             stmts: catch_block,
@@ -193,7 +197,9 @@ fn instruction_to_statement(
     variable: usize,
     instruction: &BasicBlockInstruction,
 ) -> Vec<Stmt> {
-    if ctx.will_be_inlined(variable) {
+    if let Some(instruction_as_stat) = pattern_to_statement(ctx, instruction, variable) {
+        vec![instruction_as_stat]
+    } else if ctx.will_be_inlined(variable) {
         // This will come up as a parameter to something else later.
         vec![]
     } else if !ctx.variable_has_uses(variable) && !instruction.may_have_side_effects() {
@@ -221,9 +227,16 @@ fn instruction_to_statement(
 
         if ctx.variable_has_uses(variable) {
             if ctx.emitted_vars.contains_key(&variable) {
-                vec![write_name(ctx, variable, expression)]
+                let variable = ctx.get_varname_for(variable);
+
+                vec![build_var_assign(&variable, expression)]
             } else {
-                vec![define_name(ctx, variable, expression)]
+                let varname = ctx.create_varname_for(variable);
+
+                vec![build_var_decl(
+                    build_binding_identifier(&varname),
+                    expression,
+                )]
             }
         } else {
             vec![Stmt::Expr(ExprStmt {
@@ -234,11 +247,11 @@ fn instruction_to_statement(
     }
 }
 
-fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
+pub fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
     if let Some(ins) = ctx.get_inlined_expression(var_idx) {
         to_expression(ctx, &ins)
     } else {
-        get_identifier(ctx.get_varname_for(var_idx))
+        build_identifier(ctx.get_varname_for(var_idx))
     }
 }
 
@@ -303,7 +316,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                         if key.chars().all(|c| c.is_ascii_alphabetic()) {
                             PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
                                 key: PropName::Ident(Ident::new(
-                                    (&key[..]).into(),
+                                    key.as_str().into(),
                                     Default::default(),
                                 )),
                                 value: Box::new(ref_or_inlined_expr(ctx, *value)),
@@ -324,6 +337,45 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 }))
                 .collect::<Vec<PropOrSpread>>(),
         }),
+        BasicBlockInstruction::Member(base, member) => {
+            let base = ref_or_inlined_expr(ctx, *base);
+
+            Expr::Member(MemberExpr {
+                span: Default::default(),
+                obj: Box::new(base),
+                prop: match member {
+                    ObjectMember::KeyValue(member) => {
+                        MemberProp::Ident(Ident::new(member.as_str().into(), Default::default()))
+                    }
+                    ObjectMember::Private(member) => MemberProp::PrivateName(PrivateName {
+                        span: Default::default(),
+                        id: Ident::new(member.as_str().into(), Default::default()),
+                    }),
+                    ObjectMember::Computed(member) => MemberProp::Computed(ComputedPropName {
+                        span: Default::default(),
+                        expr: Box::new(ref_or_inlined_expr(ctx, *member)),
+                    }),
+                },
+            })
+        }
+        BasicBlockInstruction::MemberSet(base, member, value) => {
+            let value = ref_or_inlined_expr(ctx, *value);
+
+            Expr::Assign(AssignExpr {
+                span: Default::default(),
+                left: PatOrExpr::Expr(Box::new(to_expression(
+                    ctx,
+                    &BasicBlockInstruction::Member(*base, member.clone()),
+                ))),
+                op: AssignOp::Assign,
+                right: Box::new(value),
+            })
+        }
+        BasicBlockInstruction::ArrayPattern(_, _) => unreachable!(),
+        BasicBlockInstruction::ObjectPattern(_, _) => unreachable!(),
+        BasicBlockInstruction::PatternUnpack(pat_var, idx) => {
+            build_identifier(ctx.get_varname_for_pattern(*pat_var, *idx))
+        }
         BasicBlockInstruction::Function(id) => {
             let func = ctx.module.take_function(*id).unwrap().blocks;
 
@@ -428,55 +480,6 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         )),
         BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
     }
-}
-
-fn get_identifier(i: String) -> Expr {
-    Expr::Ident(Ident::new(i.into(), Default::default()))
-}
-
-fn get_binding_identifier(i: &str) -> Pat {
-    Pat::Ident(BindingIdent {
-        id: Ident::new(i.into(), Default::default()),
-        type_ann: None,
-    })
-}
-
-fn write_name(ctx: &mut ToAstContext, variable: usize, value: Expr) -> Stmt {
-    let varname = ctx.get_varname_for(variable);
-
-    Stmt::Expr(ExprStmt {
-        span: Default::default(),
-        expr: Box::new(Expr::Assign(AssignExpr {
-            span: Default::default(),
-            op: AssignOp::Assign,
-            left: PatOrExpr::Pat(Box::new(get_binding_identifier(&varname))),
-            right: Box::new(value),
-        })),
-    })
-}
-
-fn define_name(ctx: &mut ToAstContext, variable: usize, value: Expr) -> Stmt {
-    let varname = ctx.create_varname_for(variable);
-
-    let vardecl = swc_ecma_ast::VarDecl {
-        span: Default::default(),
-        kind: swc_ecma_ast::VarDeclKind::Var,
-        declare: false,
-        decls: vec![swc_ecma_ast::VarDeclarator {
-            span: Default::default(),
-            name: get_binding_identifier(&varname),
-            init: Some(Box::new(value)),
-            definite: false,
-        }],
-    };
-    Stmt::Decl(Decl::Var(Box::new(vardecl)))
-}
-
-fn get_block(stats: Vec<Stmt>) -> Stmt {
-    Stmt::Block(swc_ecma_ast::BlockStmt {
-        span: Default::default(),
-        stmts: stats,
-    })
 }
 
 #[cfg(test)]

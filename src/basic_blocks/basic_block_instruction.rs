@@ -16,6 +16,14 @@ pub enum BasicBlockInstruction {
     Array(Vec<ArrayElement>),
     /// __proto__, object props
     Object(Option<usize>, Vec<ObjectProp>),
+    /// base, prop
+    Member(usize, ObjectMember),
+    /// base, prop, value
+    MemberSet(usize, ObjectMember, usize),
+    ArrayPattern(usize, Vec<ArrayPatternPiece>),
+    ObjectPattern(usize, Vec<ObjectPatternPiece>),
+    /// pattern, index
+    PatternUnpack(usize, usize),
     TempExit(TempExitType, usize),
     Phi(Vec<usize>),
     Function(FunctionId),
@@ -24,6 +32,19 @@ pub enum BasicBlockInstruction {
     ArgumentRest(usize),
     ReadNonLocal(NonLocalId),
     WriteNonLocal(NonLocalId, usize),
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum ArrayPatternPiece {
+    Item,
+    Spread,
+}
+
+#[derive(Clone, PartialEq, Debug, Eq)]
+pub enum ObjectPatternPiece {
+    TakeKey(String),
+    TakeComputedKey(usize),
+    Spread,
 }
 
 #[repr(transparent)]
@@ -51,6 +72,13 @@ pub enum ObjectProp {
     KeyValue(String, usize),
     Computed(usize, usize),
     Spread(usize),
+}
+
+#[derive(Clone, PartialEq)]
+pub enum ObjectMember {
+    KeyValue(String),
+    Private(String),
+    Computed(usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,6 +116,19 @@ impl BasicBlockInstruction {
                     ObjectProp::Spread(spread_obj) => vec![spread_obj],
                 }))
                 .collect(),
+            BasicBlockInstruction::Member(base, member) => match member {
+                ObjectMember::KeyValue(_) => vec![base],
+                ObjectMember::Private(_) => vec![base],
+                ObjectMember::Computed(key) => vec![base, key],
+            },
+            BasicBlockInstruction::MemberSet(base, member, value) => match member {
+                ObjectMember::KeyValue(_) => vec![base, value],
+                ObjectMember::Private(_) => vec![base, value],
+                ObjectMember::Computed(key) => vec![base, key, value],
+            },
+            BasicBlockInstruction::ArrayPattern(input, _) => vec![input],
+            BasicBlockInstruction::ObjectPattern(input, _) => vec![input],
+            BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
             BasicBlockInstruction::CaughtError => vec![],
             BasicBlockInstruction::Function(_) => vec![],
@@ -131,6 +172,19 @@ impl BasicBlockInstruction {
                     ObjectProp::Spread(spread_obj) => vec![*spread_obj],
                 }))
                 .collect(),
+            BasicBlockInstruction::Member(base, member) => match member {
+                ObjectMember::KeyValue(_) => vec![*base],
+                ObjectMember::Private(_) => vec![*base],
+                ObjectMember::Computed(key) => vec![*base, *key],
+            },
+            BasicBlockInstruction::MemberSet(base, member, value) => match member {
+                ObjectMember::KeyValue(_) => vec![*base, *value],
+                ObjectMember::Private(_) => vec![*base, *value],
+                ObjectMember::Computed(key) => vec![*base, *key, *value],
+            },
+            BasicBlockInstruction::ArrayPattern(input, _) => vec![*input],
+            BasicBlockInstruction::ObjectPattern(input, _) => vec![*input],
+            BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
             BasicBlockInstruction::TempExit(_, arg) => vec![*arg],
             BasicBlockInstruction::CaughtError => vec![],
             BasicBlockInstruction::Function(_) => vec![],

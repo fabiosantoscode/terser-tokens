@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use ordered_float::NotNan;
 
 use crate::basic_blocks::{BasicBlockInstruction, FunctionId};
@@ -15,6 +17,11 @@ pub enum JsType {
     TheFunction(FunctionId),
     Array,
     TheArray(Vec<JsType>),
+    Object,
+    /// This only expresses POJO's with only string keys, not the full power of JS objects.
+    TheObject(BTreeMap<String, JsType>),
+    /// A virtual object that represents an unpacking of an array or object.
+    Pattern(Vec<JsType>),
     Any,
 }
 
@@ -58,20 +65,33 @@ impl JsType {
             JsType::TheFunction(_) => Some(true),
             JsType::Array => Some(true),
             JsType::TheArray(_) => Some(true),
+            JsType::TheObject(_) => Some(true),
+            JsType::Object => Some(true),
+            JsType::Pattern(_) => None,
             JsType::Any => None,
         }
     }
 
-    pub(crate) fn union_all<'it, It>(alternatives: It) -> JsType
+    pub(crate) fn to_string(&self) -> Option<String> {
+        match self {
+            JsType::TheString(s) => Some(s.clone()),
+            JsType::TheNumber(num) => {
+                let mut buf = ryu_js::Buffer::new();
+                Some(buf.format(num.into_inner()).to_string())
+            }
+            JsType::Undefined => Some("undefined".to_string()),
+            _ => None,
+        }
+    }
+
+    /// Returns the type that encompasses all `alternatives`. If there are none, returns None
+    pub(crate) fn union_all<'it, It>(alternatives: It) -> Option<JsType>
     where
         It: IntoIterator<Item = &'it JsType> + Clone,
     {
         let mut alternatives = alternatives.into_iter();
 
-        let mut result = alternatives
-            .next()
-            .expect("phi with no alternatives")
-            .clone();
+        let mut result = alternatives.next()?.clone();
 
         for t in alternatives {
             result = result.union(t);
@@ -80,7 +100,7 @@ impl JsType {
             }
         }
 
-        result
+        Some(result)
     }
 
     /// Returns a type that represents all values that are either `self` or `other`.
@@ -113,6 +133,7 @@ impl JsType {
                 (Boolean, TheBoolean(b)) | (TheBoolean(b), Boolean) => Some(TheBoolean(*b)),
                 (String, TheString(s)) | (TheString(s), String) => Some(TheString(s.clone())),
                 (Function, TheFunction(id)) | (TheFunction(id), Function) => Some(TheFunction(*id)),
+                (Object, TheObject(pps)) | (TheObject(pps), Object) => Some(TheObject(pps.clone())),
                 _ => None,
             }
         }
@@ -149,6 +170,9 @@ impl std::fmt::Debug for JsType {
             JsType::TheFunction(id) => write!(f, "TheFunction({})", id.0),
             JsType::Array => write!(f, "Array"),
             JsType::TheArray(items) => write!(f, "TheArray({:?})", items),
+            JsType::Object => write!(f, "Object"),
+            JsType::TheObject(props) => write!(f, "TheObject({:?})", props),
+            JsType::Pattern(items) => write!(f, "Pattern({:?})", items),
             JsType::Any => write!(f, "Any"),
         }
     }

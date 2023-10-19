@@ -1,10 +1,11 @@
 use std::fmt::{Debug, Error, Formatter};
 
-use crate::basic_blocks::ObjectProp;
+use crate::basic_blocks::{ObjectMember, ObjectProp};
 
 use super::{
-    ArrayElement, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup,
-    BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, NonLocalId,
+    ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit,
+    BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, NonLocalId,
+    ObjectPatternPiece,
 };
 
 impl Debug for BasicBlock {
@@ -72,6 +73,50 @@ impl Debug for BasicBlockInstruction {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
+            }
+            BasicBlockInstruction::Member(base, member) => match member {
+                ObjectMember::KeyValue(member) => write!(f, "${base}.{member}"),
+                ObjectMember::Private(member) => write!(f, "${base}.#{member}"),
+                ObjectMember::Computed(member) => write!(f, "${base}[${member}]"),
+            },
+            BasicBlockInstruction::MemberSet(base, member, value) => match member {
+                ObjectMember::KeyValue(member) => write!(f, "${base}.{member} = ${value}"),
+                ObjectMember::Private(member) => write!(f, "${base}.#{member} = ${value}"),
+                ObjectMember::Computed(member) => write!(f, "${base}[${member}] = ${value}"),
+            },
+            BasicBlockInstruction::ArrayPattern(input, items) => write!(
+                f,
+                "pack ${} [{}]",
+                input,
+                items
+                    .iter()
+                    .map(|item| {
+                        match item {
+                            ArrayPatternPiece::Item => format!("_"),
+                            ArrayPatternPiece::Spread => format!("_..."),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            BasicBlockInstruction::ObjectPattern(input, props) => write!(
+                f,
+                "pack ${} {{{}}}",
+                input,
+                props
+                    .iter()
+                    .map(|prop| {
+                        match prop {
+                            ObjectPatternPiece::TakeKey(key) => format!("{}: _", key),
+                            ObjectPatternPiece::TakeComputedKey(comp) => format!("[${}]: _", comp),
+                            ObjectPatternPiece::Spread => format!("..._"),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            BasicBlockInstruction::PatternUnpack(pattern, index) => {
+                write!(f, "unpack ${}[{}]", pattern, index)
             }
             BasicBlockInstruction::Function(id) => {
                 write!(f, "{:?}", id)

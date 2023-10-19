@@ -1,8 +1,8 @@
 use swc_ecma_ast::{FnExpr, Pat};
 
 use super::{
-    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, FromAstCtx, FuncBlockOrRetExpr,
-    FunctionLike,
+    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
+    FuncBlockOrRetExpr, FunctionLike, PatType,
 };
 use crate::basic_blocks::{
     BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId, NonLocalId,
@@ -59,16 +59,14 @@ pub fn function_to_basic_blocks(
             .into_iter()
             .enumerate()
             .for_each(|(i, pat)| match pat {
-                Pat::Ident(ident) => {
-                    let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
-                    ctx.assign_name(&ident.id.sym.to_string(), arg);
-                }
-                Pat::Rest(ident) => {
-                    let name = ident.arg.as_ident().as_ref().unwrap().id.sym.to_string();
+                Pat::Rest(rest_pat) => {
                     let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
-                    ctx.assign_name(&name, arg);
+                    pat_to_basic_blocks(ctx, PatType::FunArg, &rest_pat.arg, arg);
                 }
-                _ => todo!("non-ident function param"),
+                _ => {
+                    let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
+                    pat_to_basic_blocks(ctx, PatType::FunArg, pat, arg);
+                }
             });
 
         // If this is a named FnExpr, we need another binding here.

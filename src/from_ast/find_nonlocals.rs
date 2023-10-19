@@ -1,8 +1,7 @@
-use fix_fn::fix_fn;
 use swc_ecma_ast::{
     AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, GetterProp, IfStmt,
-    Lit, MethodProp, Module, ModuleItem, ObjectLit, Param, Pat, PatOrExpr, Prop, PropName,
-    PropOrSpread, SetterProp, Stmt, VarDeclKind, YieldExpr,
+    Lit, MethodProp, Module, ModuleItem, ObjectLit, ObjectPatProp, Param, Pat, PatOrExpr, Prop,
+    PropName, PropOrSpread, SetterProp, Stmt, VarDeclKind, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
@@ -64,7 +63,11 @@ impl<'a> NonLocalsContext<'a> {
         if funscoped && self.depth == 0 && !self.found_funscoped.contains(&name) {
             self.found_funscoped.push(name.clone());
         }
-        self.scopes.insert(name.clone(), ());
+        if funscoped {
+            self.scopes.insert_at_function(name.clone(), ());
+        } else {
+            self.scopes.insert(name.clone(), ());
+        }
     }
 
     fn read_name(&mut self, name: String) {
@@ -84,30 +87,16 @@ impl<'a> NonLocalsContext<'a> {
         }
     }
 
-    fn insert_params(&mut self, params: &[Param]) {
-        let insert_pat = fix_fn!(|insert_pat, ctx: &mut NonLocalsContext, pat: &Pat| -> () {
-            if let Pat::Ident(id) = &pat {
-                ctx.assign_name(id.sym.to_string(), true);
-            } else if let Pat::Assign(assign) = &pat {
-                insert_pat(ctx, &assign.left);
-            } else if let Pat::Rest(rest) = &pat {
-                insert_pat(ctx, &rest.arg);
-            } else {
-                todo!("pattern params")
-            }
-        });
-        params.iter().for_each(|param| {
-            insert_pat(self, &param.pat);
-        });
+    fn insert_params(&mut self, params: &'a [Param]) {
+        for param in params {
+            pat_nonlocals(self, &param.pat, PatType::FunArg);
+        }
     }
-    fn insert_pats(&mut self, pats: &[Pat], funscoped: bool) {
-        pats.iter().for_each(|pat| {
-            if let Pat::Ident(id) = &pat {
-                self.assign_name(id.sym.to_string(), funscoped);
-            } else {
-                todo!("pattern params")
-            }
-        });
+
+    fn insert_pats(&mut self, pats: &'a [Pat]) {
+        for pat in pats {
+            pat_nonlocals(self, pat, PatType::FunArg);
+        }
     }
 
     pub fn defer(&mut self, expr: FunctionLike<'a>) {
@@ -132,7 +121,7 @@ impl<'a> NonLocalsContext<'a> {
                 block_nonlocals(self, &function.function.body.as_ref().unwrap().stmts);
             }
             FunctionLike::ArrowExpr(arrow) => {
-                self.insert_pats(&arrow.params, true);
+                self.insert_pats(&arrow.params);
                 match arrow.body.as_ref() {
                     BlockStmtOrExpr::BlockStmt(b) => block_nonlocals(self, &b.stmts),
                     BlockStmtOrExpr::Expr(e) => expr_nonlocals(self, &e),
@@ -203,9 +192,17 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
         }
         Stmt::Decl(Decl::Var(var)) => {
             for decl in &var.decls {
-                let Pat::Ident(ident) = &decl.name else {todo!()};
-                expr_nonlocals(ctx, decl.init.as_ref().unwrap());
-                ctx.assign_name(ident.sym.to_string(), var.kind == VarDeclKind::Var);
+                if let Some(ref init) = decl.init {
+                    expr_nonlocals(ctx, init)
+                }
+                pat_nonlocals(
+                    ctx,
+                    &decl.name,
+                    match var.kind {
+                        VarDeclKind::Var => PatType::DeclareVar,
+                        VarDeclKind::Let | VarDeclKind::Const => PatType::DeclareLet,
+                    },
+                );
             }
         }
         Stmt::Decl(Decl::Fn(fn_decl)) => {
@@ -264,17 +261,79 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
     }
 }
 
+#[derive(Copy, Clone)]
+enum PatType {
+    Assign,
+    DeclareVar,
+    DeclareLet,
+    FunArg,
+}
+
+fn pat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, pat_expr: &'a Pat, pat_type: PatType) {
+    match &pat_expr {
+        Pat::Ident(ident) => {
+            let name = ident.id.sym.to_string();
+            match pat_type {
+                PatType::Assign => ctx.read_name(name),
+                PatType::DeclareVar | PatType::FunArg => ctx.assign_name(name, true),
+                PatType::DeclareLet => ctx.assign_name(name, false),
+            }
+        }
+        Pat::Array(rx) => rx.elems.iter().for_each(|elem| match elem {
+            Some(elem) => pat_nonlocals(ctx, elem, pat_type),
+            None => (),
+        }),
+        Pat::Rest(rest) => pat_nonlocals(ctx, rest.arg.as_ref(), pat_type),
+        Pat::Object(object_pat) => {
+            object_pat.props.iter().for_each(|prop| {
+                match prop {
+                    ObjectPatProp::KeyValue(pat_prop) => {
+                        match &pat_prop.key {
+                            PropName::Computed(computed) => {
+                                expr_nonlocals(ctx, &computed.expr);
+                            }
+                            PropName::Ident(_)
+                            | PropName::Str(_)
+                            | PropName::Num(_)
+                            | PropName::BigInt(_) => {} // nothing inside
+                        }
+                        pat_nonlocals(ctx, &pat_prop.value, pat_type);
+                    }
+                    ObjectPatProp::Assign(pat_prop) => {
+                        if let Some(value) = &pat_prop.value {
+                            expr_nonlocals(ctx, value);
+                        }
+                        let name = pat_prop.key.sym.to_string();
+                        match pat_type {
+                            PatType::Assign => ctx.read_name(name),
+                            _ => ctx.assign_name(name, matches!(pat_type, PatType::DeclareVar)),
+                        };
+                    }
+                    ObjectPatProp::Rest(pat_prop) => {
+                        pat_nonlocals(ctx, pat_prop.arg.as_ref(), pat_type)
+                    }
+                }
+            })
+        }
+        Pat::Assign(assign_pat) => {
+            expr_nonlocals(ctx, &assign_pat.right);
+            pat_nonlocals(ctx, &assign_pat.left, pat_type);
+        }
+        Pat::Invalid(_) => todo!(),
+        Pat::Expr(assignee_expr) => {
+            expr_nonlocals(ctx, assignee_expr.as_ref());
+        }
+    }
+}
+
 fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
     match exp {
         // WRITES
         Expr::Assign(assign) => {
             match &assign.left {
-                PatOrExpr::Pat(e) => match e.as_ref() {
-                    Pat::Ident(ident) => ctx.read_name(ident.id.sym.to_string()),
-                    _ => todo!(),
-                },
-                _ => todo!(),
-            };
+                PatOrExpr::Pat(pattern) => pat_nonlocals(ctx, pattern.as_ref(), PatType::Assign),
+                PatOrExpr::Expr(expr) => expr_nonlocals(ctx, expr.as_ref()),
+            }
             expr_nonlocals(ctx, &assign.right)
         }
         // READS

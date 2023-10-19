@@ -8,6 +8,9 @@ mod functions;
 mod loops;
 
 #[cfg(test)]
+mod objects;
+
+#[cfg(test)]
 mod tool;
 
 #[cfg(test)]
