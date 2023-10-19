@@ -66,7 +66,18 @@ where
     }
 
     pub fn insert(&mut self, name: String, value: Of) {
-        let scope = &mut self.scopes[self.current_scope.0];
+        self.insert_at(self.current_scope, name, value);
+    }
+
+    pub fn insert_at_function(&mut self, name: String, value: Of) {
+        let fscope = self
+            .get_closest_function_scope_at(self.current_scope)
+            .expect("no function scope available");
+        self.insert_at(fscope, name, value);
+    }
+
+    fn insert_at(&mut self, n: ScopeTreeHandle, name: String, value: Of) {
+        let scope = &mut self.scopes[n.0];
         scope.vars.insert(name, value);
     }
 

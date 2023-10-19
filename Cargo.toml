@@ -35,6 +35,7 @@ swc_ecma_codegen = "0.141.2"
 swc_ecma_parser = "0.136.0"
 swc_ecma_ast = "0.106.0"
 swc_common = "0.31.12"
+ryu-js = "1.0.0"
 
 
 [dev-dependencies]

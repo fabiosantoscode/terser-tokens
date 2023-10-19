@@ -15,9 +15,8 @@ pub enum FuncBlockOrRetExpr<'a> {
 impl<'a> FunctionLike<'a> {
     pub fn function_length(&self) -> usize {
         let param_counts = |pat: &Pat| match pat {
-            swc_ecma_ast::Pat::Ident(_) => true,
-            swc_ecma_ast::Pat::Rest(_) => false,
-            _ => todo!("non-ident function param"),
+            Pat::Rest(_) | Pat::Assign(_) => false,
+            _ => true,
         };
         match self {
             FunctionLike::FnDecl(FnDecl { function, .. })

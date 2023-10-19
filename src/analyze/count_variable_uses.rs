@@ -15,26 +15,6 @@ pub fn count_variable_uses(module: &BasicBlockModule) -> BTreeMap<usize, u32> {
     usages
 }
 
-/// Count how often a variable is used.
-pub fn count_variable_uses_block_group(block_group: &BasicBlockGroup) -> BTreeMap<usize, u32> {
-    let mut usages: BTreeMap<usize, u32> = BTreeMap::new();
-
-    for (_, block) in block_group.iter() {
-        count_block(&mut usages, block);
-    }
-
-    usages
-}
-
-/// Count how often a variable is used.
-pub fn count_variable_uses_block(block: &BasicBlock) -> BTreeMap<usize, u32> {
-    let mut usages: BTreeMap<usize, u32> = BTreeMap::new();
-
-    count_block(&mut usages, block);
-
-    usages
-}
-
 fn count_block(usages: &mut BTreeMap<usize, u32>, block: &BasicBlock) {
     for (_, ins) in block.iter() {
         // Increment the use count for each operand
