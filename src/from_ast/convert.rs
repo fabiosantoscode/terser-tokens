@@ -265,6 +265,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Lit(Lit::Str(s)) => {
             return ctx.push_instruction(BasicBlockInstruction::LitString(s.value.to_string()))
         }
+        Expr::Lit(Lit::Null(_)) => return ctx.push_instruction(BasicBlockInstruction::Null),
         Expr::Bin(bin) => {
             let l = expr_to_basic_blocks(ctx, &bin.left);
             let r = expr_to_basic_blocks(ctx, &bin.right);
@@ -337,10 +338,11 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 "undefined" => BasicBlockInstruction::Undefined,
                 "Infinity" => BasicBlockInstruction::LitNumber(f64::INFINITY),
                 ident => {
-                    let Some(var_idx) = ctx.read_name(ident) else {
-                        todo!("{} not found in scope", ident)
-                    };
-                    BasicBlockInstruction::Ref(var_idx)
+                    if let Some(var_idx) = ctx.read_name(ident) {
+                        BasicBlockInstruction::Ref(var_idx)
+                    } else {
+                        BasicBlockInstruction::GlobalRef(ident.to_string())
+                    }
                 }
             };
 
@@ -406,6 +408,12 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         }
         Expr::Unary(unary_expr) => match unary_expr.op {
             UnaryOp::TypeOf => {
+                if let Expr::Ident(global_ident) = &unary_expr.arg.as_ref() {
+                    let s = global_ident.sym.to_string();
+                    if ctx.is_global_name(&s) {
+                        return ctx.push_instruction(BasicBlockInstruction::TypeOfGlobal(s));
+                    }
+                }
                 let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
                 return ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
             }

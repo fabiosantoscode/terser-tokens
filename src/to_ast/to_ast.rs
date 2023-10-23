@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use swc_ecma_ast::{
     AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
     Expr, ExprOrSpread, ExprStmt, Ident, KeyValueProp, Lit, MemberExpr, MemberProp, Module,
-    ModuleItem, ObjectLit, PatOrExpr, PrivateName, Prop, PropName, PropOrSpread, ReturnStmt,
+    ModuleItem, Null, ObjectLit, PatOrExpr, PrivateName, Prop, PropName, PropOrSpread, ReturnStmt,
     SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, WhileStmt, YieldExpr,
 };
 
@@ -18,8 +18,8 @@ use crate::{
 };
 
 use super::{
-    build_binding_identifier, build_identifier, function_to_ast, get_inlined_variables,
-    pattern_to_statement, Base54, ToAstContext,
+    build_binding_identifier, build_identifier, build_identifier_str, function_to_ast,
+    get_inlined_variables, pattern_to_statement, Base54, ToAstContext,
 };
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
@@ -263,6 +263,9 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         BasicBlockInstruction::Undefined => {
             Expr::Ident(Ident::new("undefined".into(), Default::default()))
         }
+        BasicBlockInstruction::Null => Expr::Lit(Lit::Null(Null {
+            span: Default::default(),
+        })),
         BasicBlockInstruction::UnaryOp(op, operand) => {
             let operand = ref_or_inlined_expr(ctx, *operand);
 
@@ -284,6 +287,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             })
         }
         BasicBlockInstruction::Ref(var_idx) => ref_or_inlined_expr(ctx, *var_idx),
+        BasicBlockInstruction::GlobalRef(varname) => build_identifier_str(varname.as_str()),
         BasicBlockInstruction::This => Expr::Ident(Ident::new("this".into(), Default::default())),
         BasicBlockInstruction::TypeOf(var_idx) => {
             let var = ref_or_inlined_expr(ctx, *var_idx);
@@ -294,6 +298,11 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 arg: Box::new(var),
             })
         }
+        BasicBlockInstruction::TypeOfGlobal(varname) => Expr::Unary(UnaryExpr {
+            span: Default::default(),
+            op: UnaryOp::TypeOf,
+            arg: Box::new(build_identifier_str(varname.as_str())),
+        }),
         BasicBlockInstruction::Array(items) => {
             let items = items
                 .iter()

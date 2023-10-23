@@ -7,6 +7,10 @@ pub fn build_identifier(i: String) -> Expr {
     Expr::Ident(Ident::new(i.into(), Default::default()))
 }
 
+pub fn build_identifier_str(i: &str) -> Expr {
+    Expr::Ident(Ident::new(i.into(), Default::default()))
+}
+
 pub fn build_binding_identifier(i: &str) -> Pat {
     Pat::Ident(BindingIdent {
         id: Ident::new(i.into(), Default::default()),

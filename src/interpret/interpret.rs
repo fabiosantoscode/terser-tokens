@@ -19,6 +19,7 @@ pub fn interpret(
         BasicBlockInstruction::LitBool(b) => JsType::TheBoolean(*b),
         BasicBlockInstruction::LitString(s) => JsType::TheString(s.clone()),
         BasicBlockInstruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
+        BasicBlockInstruction::GlobalRef(_) => return None, // May throw
         BasicBlockInstruction::UnaryOp(op, operand) => {
             let operand = ctx.get_variable(*operand)?;
 
@@ -31,11 +32,9 @@ pub fn interpret(
                     Some(num) => JsType::new_number(num),
                     None => JsType::Number,
                 },
-                swc_ecma_ast::UnaryOp::Bang => {
-                    match operand.to_boolean() {
-                        Some(b) => JsType::TheBoolean(!b),
-                        None => JsType::Boolean,
-                    }
+                swc_ecma_ast::UnaryOp::Bang => match operand.to_boolean() {
+                    Some(b) => JsType::TheBoolean(!b),
+                    None => JsType::Boolean,
                 },
                 swc_ecma_ast::UnaryOp::Tilde => JsType::Number,
                 swc_ecma_ast::UnaryOp::Void
@@ -72,8 +71,10 @@ pub fn interpret(
             }
         }
         BasicBlockInstruction::Undefined => JsType::Undefined,
+        BasicBlockInstruction::Null => JsType::Null,
         BasicBlockInstruction::This => None?, // TODO: grab from context?
         BasicBlockInstruction::TypeOf(t) => ctx.get_variable(*t)?.typeof_string(),
+        BasicBlockInstruction::TypeOfGlobal(_) => JsType::String,
         BasicBlockInstruction::CaughtError => None?, // TODO: grab from context?
         BasicBlockInstruction::Array(elements) => {
             let plain_items = elements

@@ -7,6 +7,7 @@ use crate::basic_blocks::{BasicBlockInstruction, FunctionId};
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub enum JsType {
     Undefined,
+    Null,
     Boolean,
     TheBoolean(bool),
     String,
@@ -40,6 +41,7 @@ impl JsType {
     pub fn is_truthy(&self) -> Option<bool> {
         match self {
             JsType::Undefined => Some(false),
+            JsType::Null => Some(false),
             JsType::Boolean => None,
             JsType::TheBoolean(b) => Some(*b),
             JsType::String => None,
@@ -65,6 +67,7 @@ impl JsType {
                 Some(buf.format(num.into_inner()).to_string())
             }
             JsType::Undefined => Some("undefined".to_string()),
+            JsType::Null => Some("null".to_string()),
             _ => None,
         }
     }
@@ -143,6 +146,7 @@ impl JsType {
         match self {
             JsType::TheBoolean(b) => Some(*b),
             JsType::Undefined => Some(false),
+            JsType::Null => Some(false),
             JsType::TheNumber(n) => Some(n.into_inner() != 0.0 && n.into_inner() != -0.0),
             JsType::TheString(s) => Some(s.len() > 0),
             JsType::TheObject(_)
@@ -179,6 +183,7 @@ impl JsType {
     pub(crate) fn typeof_string(&self) -> JsType {
         match self {
             JsType::Undefined => JsType::TheString("undefined".to_string()),
+            JsType::Null => JsType::TheString("object".to_string()),
             JsType::Boolean => JsType::TheString("boolean".to_string()),
             JsType::TheBoolean(_) => JsType::TheString("boolean".to_string()),
             JsType::String => JsType::TheString("string".to_string()),
@@ -201,6 +206,7 @@ impl std::fmt::Debug for JsType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             JsType::Undefined => write!(f, "Undefined"),
+            JsType::Null => write!(f, "Null"),
             JsType::Boolean => write!(f, "Boolean"),
             JsType::TheBoolean(b) => write!(f, "TheBoolean({})", b),
             JsType::String => write!(f, "String"),

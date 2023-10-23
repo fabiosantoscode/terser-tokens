@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::basic_blocks::{
-    BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, NonLocalId,
-};
+use crate::basic_blocks::{BasicBlock, BasicBlockInstruction, BasicBlockModule, NonLocalId};
 
 /// Count how often a variable is used.
 pub fn count_variable_uses(module: &BasicBlockModule) -> BTreeMap<usize, u32> {

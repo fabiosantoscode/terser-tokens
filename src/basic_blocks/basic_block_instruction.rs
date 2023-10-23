@@ -9,11 +9,14 @@ pub enum BasicBlockInstruction {
     LitBool(bool),
     LitString(String),
     Ref(usize),
+    GlobalRef(String),
     UnaryOp(swc_ecma_ast::UnaryOp, usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
     Undefined,
+    Null,
     This,
     TypeOf(usize),
+    TypeOfGlobal(String),
     CaughtError,
     Array(Vec<ArrayElement>),
     /// __proto__, object props
@@ -97,12 +100,15 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![*id],
+            BasicBlockInstruction::GlobalRef(_) => vec![],
             BasicBlockInstruction::UnaryOp(_, v) => vec![*v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
             BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),
             BasicBlockInstruction::Undefined => vec![],
+            BasicBlockInstruction::Null => vec![],
             BasicBlockInstruction::This => vec![],
             BasicBlockInstruction::TypeOf(v) => vec![*v],
+            BasicBlockInstruction::TypeOfGlobal(_) => vec![],
             BasicBlockInstruction::Array(elements) => elements
                 .iter()
                 .filter_map(|e| match e {
@@ -155,12 +161,15 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![id],
+            BasicBlockInstruction::GlobalRef(_) => vec![],
             BasicBlockInstruction::UnaryOp(_, v) => vec![v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
             BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
             BasicBlockInstruction::Undefined => vec![],
+            BasicBlockInstruction::Null => vec![],
             BasicBlockInstruction::This => vec![],
             BasicBlockInstruction::TypeOf(v) => vec![v],
+            BasicBlockInstruction::TypeOfGlobal(_) => vec![],
             BasicBlockInstruction::Array(elements) => elements
                 .iter_mut()
                 .filter_map(|e| match e {

@@ -56,7 +56,14 @@ impl FromAstCtx {
         }
     }
 
-    fn is_unwritten_funscoped(&mut self, name: &str) -> bool {
+    pub fn is_global_name(&self, name: &str) -> bool {
+        match name {
+            "undefined" | "Infinity" => false,
+            _ => !self.is_unwritten_funscoped(name) && self.scope_tree.lookup(name).is_none(),
+        }
+    }
+
+    fn is_unwritten_funscoped(&self, name: &str) -> bool {
         match self.nonlocalinfo.as_ref() {
             Some(nli) => {
                 self.scope_tree.lookup_in_function(name).is_none()

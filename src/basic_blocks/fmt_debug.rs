@@ -40,14 +40,23 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::Ref(id) => {
                 write!(f, "${}", id)
             }
+            BasicBlockInstruction::GlobalRef(name) => {
+                write!(f, "global {:?}", name)
+            }
             BasicBlockInstruction::Undefined => {
                 write!(f, "undefined")
+            }
+            BasicBlockInstruction::Null => {
+                write!(f, "null")
             }
             BasicBlockInstruction::This => {
                 write!(f, "this")
             }
             BasicBlockInstruction::TypeOf(var) => {
                 write!(f, "typeof ${}", var)
+            }
+            BasicBlockInstruction::TypeOfGlobal(var) => {
+                write!(f, "typeof global {:?}", var)
             }
             BasicBlockInstruction::Array(elements) => {
                 write!(

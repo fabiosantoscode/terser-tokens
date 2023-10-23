@@ -5,6 +5,9 @@ mod conditions;
 mod functions;
 
 #[cfg(test)]
+mod globals;
+
+#[cfg(test)]
 mod loops;
 
 #[cfg(test)]

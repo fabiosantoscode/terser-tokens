@@ -8,12 +8,15 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => false,
             BasicBlockInstruction::LitString(_) => false,
             BasicBlockInstruction::Ref(_) => false,
+            BasicBlockInstruction::GlobalRef(_) => true, // Global refs may throw
             BasicBlockInstruction::UnaryOp(_, _) => false,
             // may throw due to bigint
             BasicBlockInstruction::BinOp(_, _, _) => true,
             BasicBlockInstruction::Undefined => false,
+            BasicBlockInstruction::Null => false,
             BasicBlockInstruction::This => false,
             BasicBlockInstruction::TypeOf(_) => false,
+            BasicBlockInstruction::TypeOfGlobal(_) => false,
             BasicBlockInstruction::CaughtError => false,
             // may throw due to unspreadable array items
             BasicBlockInstruction::Array(items) => {
