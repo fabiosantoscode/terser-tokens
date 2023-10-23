@@ -1,25 +1,25 @@
 use std::collections::BTreeMap;
 
 use swc_ecma_ast::{
-    ArrayLit, AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName,
-    ContinueStmt, Expr, ExprOrSpread, ExprStmt, FnExpr, Function, Ident, KeyValueProp, Lit,
-    MemberExpr, MemberProp, Module, ModuleItem, ObjectLit, PatOrExpr, PrivateName, Prop, PropName,
-    PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, ThrowStmt, TryStmt, WhileStmt, YieldExpr,
+    AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
+    Expr, ExprOrSpread, ExprStmt, Ident, KeyValueProp, Lit, MemberExpr, MemberProp, Module,
+    ModuleItem, ObjectLit, PatOrExpr, PrivateName, Prop, PropName, PropOrSpread, ReturnStmt,
+    SpreadElement, Stmt, Str, ThrowStmt, TryStmt, WhileStmt, YieldExpr,
 };
 
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectMember, ObjectProp,
-        StructuredFlow, TempExitType,
+        ArrayElement, BasicBlock, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectMember,
+        ObjectProp, StructuredFlow, TempExitType,
     },
     block_ops::{block_group_to_structured_flow, remove_phi},
     to_ast::{build_block, build_var_assign, build_var_decl},
 };
 
 use super::{
-    build_binding_identifier, build_identifier, get_inlined_variables, pattern_to_statement,
-    Base54, ToAstContext,
+    build_binding_identifier, build_identifier, function_to_ast, get_inlined_variables,
+    pattern_to_statement, Base54, ToAstContext,
 };
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
@@ -70,7 +70,7 @@ pub fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
     to_statements(&mut ctx, &tree)
 }
 
-fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
+pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
     let to_stat_vec = |ctx: &mut ToAstContext, stats: &Vec<StructuredFlow>| -> Vec<Stmt> {
         stats
             .iter()
@@ -377,26 +377,9 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             build_identifier(ctx.get_varname_for_pattern(*pat_var, *idx))
         }
         BasicBlockInstruction::Function(id) => {
-            let func = ctx.module.take_function(*id).unwrap().blocks;
+            let func = ctx.module.take_function(*id).unwrap();
 
-            let stmts = to_statements(ctx, &block_group_to_structured_flow(func));
-
-            Expr::Fn(FnExpr {
-                ident: None,
-                function: Box::new(Function {
-                    span: Default::default(),
-                    decorators: Default::default(),
-                    params: Default::default(),
-                    body: Some(BlockStmt {
-                        span: Default::default(),
-                        stmts,
-                    }),
-                    is_generator: false,
-                    is_async: false,
-                    type_params: None,
-                    return_type: None,
-                }),
-            })
+            function_to_ast(ctx, func)
         }
         BasicBlockInstruction::Call(func_idx, args) => {
             let args = args
@@ -412,42 +395,8 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             })
         }
 
-        BasicBlockInstruction::ArgumentRead(idx) => Expr::Member(MemberExpr {
-            span: Default::default(),
-            obj: Box::new(Expr::Ident(Ident::new(
-                "arguments".into(),
-                Default::default(),
-            ))),
-            prop: MemberProp::Computed(ComputedPropName {
-                span: Default::default(),
-                expr: Box::new(Expr::Lit(Lit::Num((*idx).into()))),
-            }),
-        }),
-        BasicBlockInstruction::ArgumentRest(from_idx) => {
-            // [...arguments].slice(from_idx)
-            Expr::Call(CallExpr {
-                span: Default::default(),
-                callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
-                    span: Default::default(),
-                    obj: Box::new(Expr::Array(ArrayLit {
-                        span: Default::default(),
-                        elems: vec![Some(ExprOrSpread {
-                            spread: Some(Default::default()),
-                            expr: Box::new(Expr::Ident(Ident::new(
-                                "arguments".into(),
-                                Default::default(),
-                            ))),
-                        })],
-                    })),
-                    prop: MemberProp::Ident(Ident::new("slice".into(), Default::default())),
-                }))),
-                args: vec![ExprOrSpread {
-                    spread: None,
-                    expr: Box::new(Expr::Lit(Lit::Num((*from_idx).into()))),
-                }],
-                type_args: None,
-            })
-        }
+        BasicBlockInstruction::ArgumentRead(_) => unreachable!("handled in function_to_ast"),
+        BasicBlockInstruction::ArgumentRest(_) => unreachable!("handled in function_to_ast"),
 
         BasicBlockInstruction::ReadNonLocal(id) => Expr::Ident(Ident::new(
             ctx.get_varname_for(id.0).into(),
@@ -528,41 +477,6 @@ mod tests {
             a = 2;
         } else {}
         return a;
-        "###);
-    }
-
-    #[test]
-    fn to_functions() {
-        let block_group = test_basic_blocks_module(
-            "var foo = function foo() {
-                var foo_inner = function foo_inner(arg) {
-                    return arg;
-                }
-                return foo_inner(123);
-            }
-            var bar = function bar() { return 456; }
-            foo() + bar()",
-        );
-
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
-        var a = undefined;
-        var d = function() {
-            var b = undefined;
-            var c = function() {
-                return arguments[0];
-            };
-            b = c;
-            return c(123);
-        };
-        a = d;
-        var e = undefined;
-        var f = function() {
-            return 456;
-        };
-        e = f;
-        d() + f();
-        return undefined;
         "###);
     }
 

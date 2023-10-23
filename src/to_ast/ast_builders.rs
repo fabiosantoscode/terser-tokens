@@ -28,10 +28,10 @@ pub fn build_var_decl(name: Pat, init: Expr) -> Stmt {
     })))
 }
 
-pub fn build_block(stats: Vec<Stmt>) -> Stmt {
+pub fn build_block(stmts: Vec<Stmt>) -> Stmt {
     Stmt::Block(swc_ecma_ast::BlockStmt {
         span: Default::default(),
-        stmts: stats,
+        stmts,
     })
 }
 

@@ -157,18 +157,18 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function() {
-            var { x: a, y: b, ...c } = arguments[0];
-            var d = b;
-            if (d === undefined) {
-                var e = 123;
+        function(a) {
+            var { x: b, y: c, ...d } = a;
+            var e = c;
+            if (e === undefined) {
+                var f = 123;
             } else {
-                e = d;
+                f = e;
             }
             return [
-                a,
-                e,
-                c
+                b,
+                f,
+                d
             ];
         }();
         return undefined;
@@ -181,18 +181,18 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function() {
-            var [a, b, ...c] = arguments[0];
-            var d = b;
-            if (d === undefined) {
-                var e = [];
+        function(a) {
+            var [b, c, ...d] = a;
+            var e = c;
+            if (e === undefined) {
+                var f = [];
             } else {
-                e = d;
+                f = e;
             }
             return [
-                a,
-                e,
-                c
+                b,
+                f,
+                d
             ];
         }();
         return undefined;
@@ -205,23 +205,19 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function() {
-            var a = arguments[0];
+        function(a, ...b) {
             if (a === undefined) {
-                var b = 2;
+                var c = 2;
             } else {
-                b = a;
+                c = a;
             }
-            var c = [
-                ...arguments
-            ].slice(1);
-            if (c === undefined) {
+            if (b === undefined) {
                 var d = [];
             } else {
-                d = c;
+                d = b;
             }
             return [
-                b,
+                c,
                 d
             ];
         }();
@@ -240,21 +236,20 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function() {
-            var a = undefined;
-            a = arguments[0];
-            var b = arguments[1];
+        function(a, b) {
+            var c = undefined;
+            c = a;
             if (b === undefined) {
-                var d = function() {
-                    var c = 2;
-                    a = c;
-                    return c;
+                var e = function() {
+                    var d = 2;
+                    c = d;
+                    return d;
                 };
             } else {
-                d = b;
+                e = b;
             }
-            d();
-            return a;
+            e();
+            return c;
         }(1);
         return undefined;
         "###);

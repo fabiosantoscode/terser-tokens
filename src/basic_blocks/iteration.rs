@@ -75,9 +75,11 @@ impl StructuredFlow {
         })
     }
 
-    pub fn iter_all_instructions<'a>(&'a self) -> impl Iterator<Item = &'a BasicBlockInstruction> {
+    pub fn iter_all_instructions<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (usize, &'a BasicBlockInstruction)> {
         self.iter_all_blocks()
-            .flat_map(|block| block.iter().map(|(_, ins)| ins))
+            .flat_map(|block| block.iter().map(|(varname, ins)| (*varname, ins)))
     }
 }
 

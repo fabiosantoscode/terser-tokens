@@ -97,11 +97,10 @@ fn fold_blocks(
     for (preceding_bbs, item) in fold_basic_blocks(as_tree) {
         resolve_forward_jumps(out_blocks, &mut to_label);
 
-        let mut instructions = vec![];
-
-        for blk in preceding_bbs {
-            instructions.extend(blk);
-        }
+        let instructions = preceding_bbs
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
 
         let item = match item {
             Some(item) => item,

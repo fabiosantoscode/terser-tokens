@@ -159,6 +159,24 @@ impl StructuredFlow {
         }
     }
 
+    pub fn retain_instructions<DoRetain>(&mut self, do_retain: &mut DoRetain) -> ()
+    where
+        DoRetain: FnMut((usize, &BasicBlockInstruction)) -> bool,
+    {
+        match self {
+            StructuredFlow::BasicBlock(block) => {
+                block.retain(|(varname, ins)| do_retain((*varname, ins)));
+            }
+            _ => {
+                for children in self.children_mut().iter_mut() {
+                    for child in children.iter_mut() {
+                        child.retain_instructions(do_retain);
+                    }
+                }
+            }
+        }
+    }
+
     fn get_all_break_targets(&self) -> HashSet<BreakableId> {
         let mut ret = HashSet::new();
         if let Some(breakable_id) = self.breaks_to_id() {

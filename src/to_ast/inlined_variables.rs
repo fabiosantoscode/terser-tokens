@@ -93,7 +93,13 @@ impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
     }
 
     fn force_mark_inlineable(&mut self, index: usize, ins: &BasicBlockInstruction) -> bool {
-        if matches!(ins, BasicBlockInstruction::Phi(_)) || self.phi_participants.contains(&index) {
+        if matches!(
+            ins,
+            BasicBlockInstruction::Phi(_)
+                | BasicBlockInstruction::ArgumentRead(_)
+                | BasicBlockInstruction::ArgumentRest(_)
+        ) || self.phi_participants.contains(&index)
+        {
             return false;
         }
 

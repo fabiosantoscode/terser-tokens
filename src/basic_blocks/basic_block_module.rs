@@ -40,7 +40,7 @@ impl BasicBlockModule {
         &self.functions[&FunctionId(0)]
     }
 
-    /// Get a function. FunctionId(0) is the top level stats.
+    /// Remove a function. FunctionId(0) is the top level stats.
     pub fn take_function(&mut self, id: FunctionId) -> Option<BasicBlockGroup> {
         self.functions.remove(&id)
     }
