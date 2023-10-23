@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
 use ordered_float::NotNan;
-use swc_ecma_ast::ObjectPatProp;
 
 use crate::basic_blocks::{
     ArrayElement, ArrayPatternPiece, BasicBlockInstruction, ObjectPatternPiece, ObjectProp,
@@ -20,6 +19,30 @@ pub fn interpret(
         BasicBlockInstruction::LitBool(b) => JsType::TheBoolean(*b),
         BasicBlockInstruction::LitString(s) => JsType::TheString(s.clone()),
         BasicBlockInstruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
+        BasicBlockInstruction::UnaryOp(op, operand) => {
+            let operand = ctx.get_variable(*operand)?;
+
+            match op {
+                swc_ecma_ast::UnaryOp::Minus => match operand.to_numeric() {
+                    Some(num) => JsType::new_number(-num),
+                    None => JsType::Number,
+                },
+                swc_ecma_ast::UnaryOp::Plus => match operand.to_numeric() {
+                    Some(num) => JsType::new_number(num),
+                    None => JsType::Number,
+                },
+                swc_ecma_ast::UnaryOp::Bang => {
+                    match operand.to_boolean() {
+                        Some(b) => JsType::TheBoolean(!b),
+                        None => JsType::Boolean,
+                    }
+                },
+                swc_ecma_ast::UnaryOp::Tilde => JsType::Number,
+                swc_ecma_ast::UnaryOp::Void
+                | swc_ecma_ast::UnaryOp::TypeOf
+                | swc_ecma_ast::UnaryOp::Delete => unreachable!(),
+            }
+        }
         BasicBlockInstruction::BinOp(op, l, r) => {
             use swc_ecma_ast::BinaryOp::*;
             let l = ctx.get_variable(*l)?;
@@ -50,6 +73,7 @@ pub fn interpret(
         }
         BasicBlockInstruction::Undefined => JsType::Undefined,
         BasicBlockInstruction::This => None?, // TODO: grab from context?
+        BasicBlockInstruction::TypeOf(t) => ctx.get_variable(*t)?.typeof_string(),
         BasicBlockInstruction::CaughtError => None?, // TODO: grab from context?
         BasicBlockInstruction::Array(elements) => {
             let plain_items = elements
@@ -413,5 +437,14 @@ mod tests {
             let { a = 1, [1]: b, ...c } = { 1: 2, xrest: 3 };
             return [a, b, c];
         "), @"TheArray([TheNumber(1), TheNumber(2), TheObject({\"xrest\": TheNumber(3)})])");
+    }
+
+    #[test]
+    fn interp_typeof() {
+        insta::assert_debug_snapshot!(test_interp_js("return typeof undefined"), @"TheString(\"undefined\")");
+        insta::assert_debug_snapshot!(test_interp_js("return typeof {}"), @"TheString(\"object\")");
+        insta::assert_debug_snapshot!(test_interp_js("return typeof []"), @"TheString(\"object\")");
+        insta::assert_debug_snapshot!(test_interp_js("return typeof function(){}"), @"TheString(\"function\")");
+        // TODO missingvar typeofs insta::assert_debug_snapshot!(test_interp_js("typeof missingVar"), @"TheString(\"undefined\")");
     }
 }

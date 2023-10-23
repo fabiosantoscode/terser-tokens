@@ -33,21 +33,6 @@ impl JsType {
         }
     }
 
-    pub fn is_numeric(&self) -> bool {
-        match self {
-            JsType::Number => true,
-            JsType::TheNumber(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_nullish(&self) -> bool {
-        match self {
-            JsType::Undefined => true,
-            _ => false,
-        }
-    }
-
     /// Returns `Some(true)` if the type is definitely truthy, `Some(false)` if the type is
     /// definitely falsy, or `None` if the type is unknown.
     ///
@@ -146,12 +131,68 @@ impl JsType {
         }
     }
 
+    pub(crate) fn as_number(&self) -> Option<f64> {
+        match self {
+            JsType::TheNumber(n) => Some(n.into_inner()),
+            _ => None,
+        }
+    }
+
+    /// https://262.ecma-international.org/#sec-toboolean
+    pub fn to_boolean(&self) -> Option<bool> {
+        match self {
+            JsType::TheBoolean(b) => Some(*b),
+            JsType::Undefined => Some(false),
+            JsType::TheNumber(n) => Some(n.into_inner() != 0.0 && n.into_inner() != -0.0),
+            JsType::TheString(s) => Some(s.len() > 0),
+            JsType::TheObject(_)
+            | JsType::Object
+            | JsType::Function
+            | JsType::TheFunction(_)
+            | JsType::Array
+            | JsType::TheArray(_) => Some(true),
+            _ => None,
+        }
+    }
+
+    /// https://262.ecma-international.org/#sec-tonumeric
+    /// Note: can't return BigInt yet
+    pub fn to_numeric(&self) -> Option<f64> {
+        match self {
+            JsType::TheNumber(n) => Some(n.into_inner()),
+            JsType::Undefined => None, // Actually NaN, but we don't handle it in here
+            JsType::TheBoolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+            // Objects, strings, and arrays can be turned into numbers but we don't care
+            _ => None,
+        }
+    }
+
     pub(crate) fn as_small_literal_instruction(&self) -> Option<BasicBlockInstruction> {
         match self {
             JsType::TheBoolean(b) => Some(BasicBlockInstruction::LitBool(*b)),
             JsType::TheNumber(n) => Some(BasicBlockInstruction::LitNumber((*n).into())),
             JsType::TheString(s) => Some(BasicBlockInstruction::LitString(s.clone())),
             _ => None,
+        }
+    }
+
+    pub(crate) fn typeof_string(&self) -> JsType {
+        match self {
+            JsType::Undefined => JsType::TheString("undefined".to_string()),
+            JsType::Boolean => JsType::TheString("boolean".to_string()),
+            JsType::TheBoolean(_) => JsType::TheString("boolean".to_string()),
+            JsType::String => JsType::TheString("string".to_string()),
+            JsType::TheString(_) => JsType::TheString("string".to_string()),
+            JsType::Number => JsType::TheString("number".to_string()),
+            JsType::TheNumber(_) => JsType::TheString("number".to_string()),
+            JsType::Function => JsType::TheString("function".to_string()),
+            JsType::TheFunction(_) => JsType::TheString("function".to_string()),
+            JsType::Array => JsType::TheString("object".to_string()),
+            JsType::TheArray(_) => JsType::TheString("object".to_string()),
+            JsType::Object => JsType::TheString("object".to_string()),
+            JsType::TheObject(_) => JsType::TheString("object".to_string()),
+            JsType::Any => JsType::String,
+            JsType::Pattern(_) => unreachable!(),
         }
     }
 }

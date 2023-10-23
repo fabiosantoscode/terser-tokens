@@ -31,6 +31,9 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::LitString(s) => {
                 write!(f, "{:?}", s)
             }
+            BasicBlockInstruction::UnaryOp(op, operand) => {
+                write!(f, "{}${}", op, operand)
+            }
             BasicBlockInstruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }
@@ -42,6 +45,9 @@ impl Debug for BasicBlockInstruction {
             }
             BasicBlockInstruction::This => {
                 write!(f, "this")
+            }
+            BasicBlockInstruction::TypeOf(var) => {
+                write!(f, "typeof ${}", var)
             }
             BasicBlockInstruction::Array(elements) => {
                 write!(

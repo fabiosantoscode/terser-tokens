@@ -1,7 +1,8 @@
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, Expr, ExprOrSpread, GetterProp, IfStmt,
-    Lit, MethodProp, Module, ModuleItem, ObjectLit, ObjectPatProp, Param, Pat, PatOrExpr, Prop,
-    PropName, PropOrSpread, SetterProp, Stmt, VarDeclKind, YieldExpr,
+    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, DoWhileStmt, Expr, ExprOrSpread, ForHead,
+    ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt, MethodProp, Module, ModuleItem, ObjectLit,
+    ObjectPatProp, Param, Pat, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp, Stmt, VarDecl,
+    VarDeclKind, VarDeclOrExpr, WhileStmt, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
@@ -59,7 +60,7 @@ struct NonLocalsContext<'a> {
 }
 
 impl<'a> NonLocalsContext<'a> {
-    fn assign_name(&mut self, name: String, funscoped: bool) {
+    fn declare_name(&mut self, name: String, funscoped: bool) {
         if funscoped && self.depth == 0 && !self.found_funscoped.contains(&name) {
             self.found_funscoped.push(name.clone());
         }
@@ -70,7 +71,7 @@ impl<'a> NonLocalsContext<'a> {
         }
     }
 
-    fn read_name(&mut self, name: String) {
+    fn use_name(&mut self, name: String) {
         let root_scope = ScopeTreeHandle(0);
 
         if !self
@@ -115,7 +116,7 @@ impl<'a> NonLocalsContext<'a> {
         match expr {
             FunctionLike::FnExpr(function) => {
                 if let Some(name) = function.ident.as_ref() {
-                    self.assign_name(name.sym.to_string(), true);
+                    self.declare_name(name.sym.to_string(), true);
                 }
                 self.insert_params(&function.function.params);
                 block_nonlocals(self, &function.function.body.as_ref().unwrap().stmts);
@@ -129,7 +130,7 @@ impl<'a> NonLocalsContext<'a> {
             }
             FunctionLike::FnDecl(fn_decl) => {
                 // TODO does the function name exist differently inside the function, or is it the same as the symbol defined outside?
-                self.assign_name(fn_decl.ident.sym.to_string(), true);
+                self.declare_name(fn_decl.ident.sym.to_string(), true);
                 // TODO hoisted fn decls: self.push_fndecl(fn_decl);
                 self.insert_params(&fn_decl.function.params);
                 block_nonlocals(self, &fn_decl.function.body.as_ref().unwrap().stmts);
@@ -176,7 +177,7 @@ fn block_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a [Stmt]) {
 fn stat_hoist(ctx: &mut NonLocalsContext<'_>, stat: &Stmt) {
     match stat {
         Stmt::Decl(Decl::Fn(fn_decl)) => {
-            ctx.assign_name(fn_decl.ident.sym.to_string(), false);
+            ctx.declare_name(fn_decl.ident.sym.to_string(), false);
         }
         Stmt::Labeled(labeled) => {
             stat_hoist(ctx, &labeled.body);
@@ -190,31 +191,50 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
         Stmt::Expr(expr) => {
             expr_nonlocals(ctx, expr.expr.as_ref());
         }
-        Stmt::Decl(Decl::Var(var)) => {
-            for decl in &var.decls {
-                if let Some(ref init) = decl.init {
-                    expr_nonlocals(ctx, init)
-                }
-                pat_nonlocals(
-                    ctx,
-                    &decl.name,
-                    match var.kind {
-                        VarDeclKind::Var => PatType::DeclareVar,
-                        VarDeclKind::Let | VarDeclKind::Const => PatType::DeclareLet,
-                    },
-                );
-            }
-        }
+        Stmt::Decl(Decl::Var(var)) => vardecl_nonlocals(ctx, var),
         Stmt::Decl(Decl::Fn(fn_decl)) => {
             ctx.defer(FunctionLike::FnDecl(fn_decl));
         }
-        Stmt::DoWhile(_) => todo!(),
-        Stmt::For(_) => todo!(),
-        Stmt::ForIn(_) => todo!(),
-        Stmt::ForOf(_) => todo!(),
-        Stmt::While(whil) => {
-            expr_nonlocals(ctx, &whil.test);
-            stat_nonlocals(ctx, &whil.body);
+        Stmt::ForIn(ForInStmt {
+            left, right, body, ..
+        })
+        | Stmt::ForOf(ForOfStmt {
+            left, right, body, ..
+        }) => {
+            match left {
+                ForHead::VarDecl(var) => vardecl_nonlocals(ctx, var),
+                ForHead::Pat(pat) => pat_nonlocals(ctx, pat, PatType::ForInOf),
+                ForHead::UsingDecl(_) => todo!(),
+            }
+            expr_nonlocals(ctx, right);
+            stat_nonlocals(ctx, body);
+        }
+        Stmt::For(ForStmt {
+            init,
+            test,
+            update,
+            body,
+            ..
+        }) => {
+            match init {
+                Some(VarDeclOrExpr::Expr(exp)) => expr_nonlocals(ctx, exp),
+                Some(VarDeclOrExpr::VarDecl(var)) => vardecl_nonlocals(ctx, var),
+                _ => {}
+            };
+            match test {
+                Some(expr) => expr_nonlocals(ctx, expr),
+                _ => {}
+            };
+            match update {
+                Some(expr) => expr_nonlocals(ctx, expr),
+                _ => {}
+            }
+            stat_nonlocals(ctx, body);
+        }
+        Stmt::DoWhile(DoWhileStmt { test, body, .. })
+        | Stmt::While(WhileStmt { test, body, .. }) => {
+            expr_nonlocals(ctx, test);
+            stat_nonlocals(ctx, body);
         }
         Stmt::If(IfStmt {
             test, cons, alt, ..
@@ -245,7 +265,7 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
-                    ctx.assign_name(p.clone().ident().unwrap(/* TODO */).sym.to_string(), false);
+                    ctx.declare_name(p.clone().ident().unwrap(/* TODO */).sym.to_string(), false);
                 }
                 block_nonlocals(ctx, &handler.body.stmts);
             }
@@ -261,12 +281,29 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
     }
 }
 
+fn vardecl_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, var: &'a Box<VarDecl>) {
+    for decl in &var.decls {
+        if let Some(ref init) = decl.init {
+            expr_nonlocals(ctx, init)
+        }
+        pat_nonlocals(
+            ctx,
+            &decl.name,
+            match var.kind {
+                VarDeclKind::Var => PatType::DeclareVar,
+                VarDeclKind::Let | VarDeclKind::Const => PatType::DeclareLet,
+            },
+        );
+    }
+}
+
 #[derive(Copy, Clone)]
 enum PatType {
     Assign,
     DeclareVar,
     DeclareLet,
     FunArg,
+    ForInOf,
 }
 
 fn pat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, pat_expr: &'a Pat, pat_type: PatType) {
@@ -274,9 +311,9 @@ fn pat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, pat_expr: &'a Pat, pat_type
         Pat::Ident(ident) => {
             let name = ident.id.sym.to_string();
             match pat_type {
-                PatType::Assign => ctx.read_name(name),
-                PatType::DeclareVar | PatType::FunArg => ctx.assign_name(name, true),
-                PatType::DeclareLet => ctx.assign_name(name, false),
+                PatType::Assign | PatType::ForInOf => ctx.use_name(name),
+                PatType::DeclareVar | PatType::FunArg => ctx.declare_name(name, true),
+                PatType::DeclareLet => ctx.declare_name(name, false),
             }
         }
         Pat::Array(rx) => rx.elems.iter().for_each(|elem| match elem {
@@ -305,8 +342,8 @@ fn pat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, pat_expr: &'a Pat, pat_type
                         }
                         let name = pat_prop.key.sym.to_string();
                         match pat_type {
-                            PatType::Assign => ctx.read_name(name),
-                            _ => ctx.assign_name(name, matches!(pat_type, PatType::DeclareVar)),
+                            PatType::Assign | PatType::ForInOf => ctx.use_name(name),
+                            _ => ctx.declare_name(name, matches!(pat_type, PatType::DeclareVar)),
                         };
                     }
                     ObjectPatProp::Rest(pat_prop) => {
@@ -338,13 +375,13 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
         }
         // READS
         Expr::Ident(ident) => {
-            ctx.read_name(ident.sym.to_string());
+            ctx.use_name(ident.sym.to_string());
         }
         // PUSH CLOSURES FOR THE FUTURE. IN THE FUTURE, DO THEM
         Expr::Fn(fn_expr) => ctx.defer(FunctionLike::FnExpr(fn_expr)),
         Expr::Arrow(arrow) => ctx.defer(FunctionLike::ArrowExpr(arrow)),
         // TERMINALS
-        Expr::Lit(Lit::Num(_) | Lit::Str(_)) | Expr::This(_) => {}
+        Expr::Lit(_) | Expr::This(_) => {}
         // VISIT BELOW
         Expr::Bin(bin) => {
             expr_nonlocals(ctx, &bin.left);
@@ -379,7 +416,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
                         expr_nonlocals(ctx, &spread.expr);
                     }
                     PropOrSpread::Prop(prop) => match prop.as_ref() {
-                        Prop::Shorthand(ident) => ctx.read_name(ident.sym.to_string()),
+                        Prop::Shorthand(ident) => ctx.use_name(ident.sym.to_string()),
                         Prop::KeyValue(kv) => {
                             if let PropName::Computed(expr) = &kv.key {
                                 expr_nonlocals(ctx, &expr.expr)
@@ -398,7 +435,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
                 }
             }
         }
-        Expr::Unary(_) => todo!(),
+        Expr::Unary(unary_expr) => expr_nonlocals(ctx, &unary_expr.arg),
         Expr::Update(_) => todo!(),
         Expr::Member(member) => {
             expr_nonlocals(ctx, &member.obj);
@@ -444,9 +481,6 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
         | Expr::TsAs(_)
         | Expr::TsInstantiation(_)
         | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
-        _ => {
-            todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
-        }
     };
 }
 

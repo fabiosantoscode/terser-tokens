@@ -4,14 +4,14 @@ use swc_ecma_ast::{
     AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
     Expr, ExprOrSpread, ExprStmt, Ident, KeyValueProp, Lit, MemberExpr, MemberProp, Module,
     ModuleItem, ObjectLit, PatOrExpr, PrivateName, Prop, PropName, PropOrSpread, ReturnStmt,
-    SpreadElement, Stmt, Str, ThrowStmt, TryStmt, WhileStmt, YieldExpr,
+    SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, WhileStmt, YieldExpr,
 };
 
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlock, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectMember,
-        ObjectProp, StructuredFlow, TempExitType,
+        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectMember, ObjectProp,
+        StructuredFlow, TempExitType,
     },
     block_ops::{block_group_to_structured_flow, remove_phi},
     to_ast::{build_block, build_var_assign, build_var_decl},
@@ -263,6 +263,15 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         BasicBlockInstruction::Undefined => {
             Expr::Ident(Ident::new("undefined".into(), Default::default()))
         }
+        BasicBlockInstruction::UnaryOp(op, operand) => {
+            let operand = ref_or_inlined_expr(ctx, *operand);
+
+            Expr::Unary(UnaryExpr {
+                span: Default::default(),
+                op: op.clone(),
+                arg: Box::new(operand),
+            })
+        }
         BasicBlockInstruction::BinOp(op, left, right) => {
             let left = ref_or_inlined_expr(ctx, *left);
             let right = ref_or_inlined_expr(ctx, *right);
@@ -276,6 +285,15 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         }
         BasicBlockInstruction::Ref(var_idx) => ref_or_inlined_expr(ctx, *var_idx),
         BasicBlockInstruction::This => Expr::Ident(Ident::new("this".into(), Default::default())),
+        BasicBlockInstruction::TypeOf(var_idx) => {
+            let var = ref_or_inlined_expr(ctx, *var_idx);
+
+            Expr::Unary(UnaryExpr {
+                span: Default::default(),
+                op: UnaryOp::TypeOf,
+                arg: Box::new(var),
+            })
+        }
         BasicBlockInstruction::Array(items) => {
             let items = items
                 .iter()

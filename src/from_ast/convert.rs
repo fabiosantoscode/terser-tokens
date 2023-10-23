@@ -1,7 +1,7 @@
 use swc_ecma_ast::{
     AwaitExpr, Decl, Expr, ExprOrSpread, GetterProp, IfStmt, LabeledStmt, Lit, MemberExpr,
     MemberProp, MethodProp, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp, Stmt,
-    ThrowStmt, YieldExpr,
+    ThrowStmt, UnaryOp, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -404,7 +404,21 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
 
             return ctx.push_instruction(BasicBlockInstruction::Object(proto, kvs));
         }
-        Expr::Unary(_) => todo!(),
+        Expr::Unary(unary_expr) => match unary_expr.op {
+            UnaryOp::TypeOf => {
+                let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
+                return ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
+            }
+            UnaryOp::Delete => todo!(),
+            UnaryOp::Void => {
+                expr_to_basic_blocks(ctx, &unary_expr.arg);
+                return ctx.push_instruction(BasicBlockInstruction::Undefined);
+            }
+            UnaryOp::Minus | UnaryOp::Plus | UnaryOp::Bang | UnaryOp::Tilde => {
+                let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
+                return ctx.push_instruction(BasicBlockInstruction::UnaryOp(unary_expr.op, expr));
+            }
+        },
         Expr::Update(_) => todo!(),
         Expr::Member(MemberExpr { obj, prop, .. }) => {
             let obj = expr_to_basic_blocks(ctx, obj);
@@ -572,6 +586,26 @@ mod tests {
             $6 = $4 + $5
             $7 = undefined
             exit = return $7
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_simple_unary() {
+        let s = test_basic_blocks(
+            "var a = 10;
+            typeof a;
+            void a;",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 10
+            $1 = $0
+            $2 = typeof $1
+            $3 = $0
+            $4 = undefined
+            $5 = undefined
+            exit = return $5
         }
         "###);
     }

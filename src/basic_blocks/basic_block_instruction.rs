@@ -9,9 +9,11 @@ pub enum BasicBlockInstruction {
     LitBool(bool),
     LitString(String),
     Ref(usize),
+    UnaryOp(swc_ecma_ast::UnaryOp, usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
     Undefined,
     This,
+    TypeOf(usize),
     CaughtError,
     Array(Vec<ArrayElement>),
     /// __proto__, object props
@@ -95,10 +97,12 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![*id],
+            BasicBlockInstruction::UnaryOp(_, v) => vec![*v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
             BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),
             BasicBlockInstruction::Undefined => vec![],
             BasicBlockInstruction::This => vec![],
+            BasicBlockInstruction::TypeOf(v) => vec![*v],
             BasicBlockInstruction::Array(elements) => elements
                 .iter()
                 .filter_map(|e| match e {
@@ -151,10 +155,12 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![id],
+            BasicBlockInstruction::UnaryOp(_, v) => vec![v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
             BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
             BasicBlockInstruction::Undefined => vec![],
             BasicBlockInstruction::This => vec![],
+            BasicBlockInstruction::TypeOf(v) => vec![v],
             BasicBlockInstruction::Array(elements) => elements
                 .iter_mut()
                 .filter_map(|e| match e {
