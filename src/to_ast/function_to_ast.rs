@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use swc_ecma_ast::{BlockStmt, Expr, FnExpr, Function, Param, Pat, RestPat};
+use swc_ecma_ast::{BlockStmt, Expr, FnExpr, Function, Param, ParenExpr, Pat, RestPat};
 
 use crate::{
     basic_blocks::{BasicBlockGroup, BasicBlockInstruction, StructuredFlow},
@@ -15,21 +15,24 @@ pub fn function_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Expr {
     let params = take_param_readers(ctx, &mut blocks);
     let stmts = to_statements(ctx, &blocks);
 
-    Expr::Fn(FnExpr {
-        ident: None,
-        function: Box::new(Function {
-            span: Default::default(),
-            decorators: Default::default(),
-            params,
-            body: Some(BlockStmt {
+    Expr::Paren(ParenExpr {
+        expr: Box::new(Expr::Fn(FnExpr {
+            ident: None,
+            function: Box::new(Function {
                 span: Default::default(),
-                stmts,
+                decorators: Default::default(),
+                params,
+                body: Some(BlockStmt {
+                    span: Default::default(),
+                    stmts,
+                }),
+                is_generator: false,
+                is_async: false,
+                type_params: None,
+                return_type: None,
             }),
-            is_generator: false,
-            is_async: false,
-            type_params: None,
-            return_type: None,
-        }),
+        })),
+        span: Default::default(),
     })
 }
 
@@ -110,19 +113,19 @@ mod tests {
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
         var a = undefined;
-        var e = function() {
+        var e = (function() {
             var b = undefined;
-            var d = function(c) {
+            var d = (function(c) {
                 return c;
-            };
+            });
             b = d;
             return d(123);
-        };
+        });
         a = e;
         var f = undefined;
-        var g = function() {
+        var g = (function() {
             return 456;
-        };
+        });
         f = g;
         e() + g();
         return undefined;

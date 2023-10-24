@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Error, Formatter};
 
-use crate::basic_blocks::{ObjectMember, ObjectProp};
+use crate::basic_blocks::{ForInOfKind, ObjectMember, ObjectProp};
 
 use super::{
     ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit,
@@ -178,6 +178,9 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::CaughtError => {
                 write!(f, "caught_error()")
             }
+            BasicBlockInstruction::ForInOfValue => {
+                write!(f, "for_in_of_value()")
+            }
         }
     }
 }
@@ -195,6 +198,17 @@ impl Debug for BasicBlockExit {
             BasicBlockExit::Loop(start, end) => {
                 write!(f, "loop @{}..@{}", start, end)
             }
+            BasicBlockExit::ForInOfLoop(loop_var, kind, start, end) => match kind {
+                ForInOfKind::ForIn => {
+                    write!(f, "for in ${} @{}..@{}", loop_var, start, end)
+                }
+                ForInOfKind::ForOf => {
+                    write!(f, "for of ${} @{}..@{}", loop_var, start, end)
+                }
+                ForInOfKind::ForAwaitOf => {
+                    write!(f, "for await of ${} @{}..@{}", loop_var, start, end)
+                }
+            },
             BasicBlockExit::Jump(to) => {
                 write!(f, "jump @{}", to)
             }

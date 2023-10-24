@@ -8,6 +8,7 @@ use crate::{
 #[derive(Debug)]
 pub struct ToAstContext<'a> {
     pub caught_error: Option<Base54>,
+    pub for_in_of_value: Option<Base54>,
     pub module: &'a mut BasicBlockModule,
     pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
     pub variable_use_count: BTreeMap<usize, u32>,
@@ -45,6 +46,22 @@ impl ToAstContext<'_> {
         self.gen_var_index = error_index.next();
         self.caught_error = Some(error_index);
         error_index.to_string()
+    }
+
+    pub fn get_for_in_of_value(&mut self) -> String {
+        let value = self
+            .for_in_of_value
+            .take()
+            .expect("reference to for-in/of value must be inside for-in/of block");
+
+        value.to_string()
+    }
+
+    pub fn set_for_in_of_value(&mut self) -> String {
+        let value_index = self.gen_var_index;
+        self.gen_var_index = value_index.next();
+        self.for_in_of_value = Some(value_index);
+        value_index.to_string()
     }
 
     /// Create variables found in a destructuring pattern

@@ -156,37 +156,19 @@ fn generate_phi_nodes_inner(
                 ));
                 out_recursive.extend(phi_block.into_iter());
             }
-            StructuredFlow::Loop(brk, mut contents) => {
-                // We may re-use variables coming back to the top of the loop
-                ctx.enter_conditional();
-                let vars_used_and_defined_in_loop = get_loop_reentry_vars(&mut contents);
-                let mut loop_top_phis = vec![];
-                for canonical_name in vars_used_and_defined_in_loop {
-                    if let Some(current_name) = ctx.read_name_cond(canonical_name) {
-                        let new_name = ctx.make_name();
-                        loop_top_phis.push((canonical_name, current_name, new_name));
-                        ctx.write_name(canonical_name, new_name);
-                    }
-                }
-
-                let contents = generate_phi_nodes_inner(ctx, contents);
-
-                // Top-phi
-                let mut phi_instructions = vec![];
-                for (canonical_name, name_before_loop, name_in_loop) in loop_top_phis {
-                    let phi = BasicBlockInstruction::Phi(vec![
-                        name_before_loop,
-                        ctx.read_name(canonical_name),
-                    ]);
-                    phi_instructions.push((name_in_loop, phi));
-                }
-
-                let loop_top_phi = ctx.insert_phi_nodes(phi_instructions);
-                let contents = loop_top_phi.into_iter().chain(contents).collect();
-
-                let phi_block = ctx.leave_conditional();
+            StructuredFlow::Loop(brk, contents) => {
+                let (phi_block, contents) = generate_phi_nodes_loops(ctx, contents);
 
                 out_recursive.push(StructuredFlow::Loop(brk, contents));
+                out_recursive.extend(phi_block.into_iter());
+            }
+            StructuredFlow::ForInOfLoop(brk, looped_var, kind, contents) => {
+                // ForInOf will perform a read at the start
+                let looped_var = ctx.read_name(looped_var);
+
+                let (phi_block, contents) = generate_phi_nodes_loops(ctx, contents);
+
+                out_recursive.push(StructuredFlow::ForInOfLoop(brk, looped_var, kind, contents));
                 out_recursive.extend(phi_block.into_iter());
             }
             StructuredFlow::TryCatch(brk, body, catch, fin) => {
@@ -207,6 +189,39 @@ fn generate_phi_nodes_inner(
     }
 
     out_recursive
+}
+
+fn generate_phi_nodes_loops(
+    ctx: &mut PhiGenerationCtx,
+    mut contents: Vec<StructuredFlow>,
+) -> (Option<StructuredFlow>, Vec<StructuredFlow>) {
+    // We may re-use variables coming back to the top of the loop
+    ctx.enter_conditional();
+    let vars_used_and_defined_in_loop = get_loop_reentry_vars(&mut contents);
+    let mut loop_top_phis = vec![];
+    for canonical_name in vars_used_and_defined_in_loop {
+        if let Some(current_name) = ctx.read_name_cond(canonical_name) {
+            let new_name = ctx.make_name();
+            loop_top_phis.push((canonical_name, current_name, new_name));
+            ctx.write_name(canonical_name, new_name);
+        }
+    }
+
+    let contents = generate_phi_nodes_inner(ctx, contents);
+
+    // Top-phi
+    let mut phi_instructions = vec![];
+    for (canonical_name, name_before_loop, name_in_loop) in loop_top_phis {
+        let phi = BasicBlockInstruction::Phi(vec![name_before_loop, ctx.read_name(canonical_name)]);
+        phi_instructions.push((name_in_loop, phi));
+    }
+
+    let loop_top_phi = ctx.insert_phi_nodes(phi_instructions);
+    let contents = loop_top_phi.into_iter().chain(contents).collect();
+
+    let phi_block = ctx.leave_conditional();
+
+    (phi_block, contents)
 }
 
 fn get_loop_reentry_vars(contents: &Vec<StructuredFlow>) -> BTreeSet<usize> {

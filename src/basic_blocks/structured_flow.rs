@@ -3,6 +3,8 @@ use std::fmt::{Debug, Formatter};
 
 use crate::basic_blocks::{BasicBlockInstruction, ExitType};
 
+use super::ForInOfKind;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct BreakableId(pub Option<usize>);
 
@@ -20,6 +22,7 @@ impl std::fmt::Display for BreakableId {
 pub enum StructuredFlow {
     Block(Vec<StructuredFlow>),
     Loop(BreakableId, Vec<StructuredFlow>),
+    ForInOfLoop(BreakableId, usize, ForInOfKind, Vec<StructuredFlow>),
     Branch(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
     TryCatch(
         BreakableId,
@@ -48,6 +51,7 @@ impl StructuredFlow {
             StructuredFlow::Break(_) => "Break".to_string(),
             StructuredFlow::Continue(_) => "Continue".to_string(),
             StructuredFlow::Loop(_, _) => "Loop".to_string(),
+            StructuredFlow::ForInOfLoop(_, _, _, _) => "ForInOfLoop".to_string(),
             StructuredFlow::Block(_) => "Block".to_string(),
             StructuredFlow::Return(_, _) => "Return".to_string(),
             StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
@@ -128,8 +132,9 @@ impl StructuredFlow {
             }
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => vec![x.iter().collect()],
-            StructuredFlow::Block(x) => vec![x.iter().collect()],
+            StructuredFlow::Loop(_, body) => vec![body.iter().collect()],
+            StructuredFlow::ForInOfLoop(_, _, _, body) => vec![body.iter().collect()],
+            StructuredFlow::Block(body) => vec![body.iter().collect()],
             StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
@@ -145,8 +150,9 @@ impl StructuredFlow {
             }
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, x) => vec![x.iter_mut().collect()],
-            StructuredFlow::Block(x) => vec![x.iter_mut().collect()],
+            StructuredFlow::Loop(_, body) => vec![body.iter_mut().collect()],
+            StructuredFlow::ForInOfLoop(_, _, _, body) => vec![body.iter_mut().collect()],
+            StructuredFlow::Block(body) => vec![body.iter_mut().collect()],
             StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
@@ -226,6 +232,7 @@ impl StructuredFlow {
             StructuredFlow::Break(_) => None,
             StructuredFlow::Continue(_) => None,
             StructuredFlow::Loop(_, _) => None,
+            StructuredFlow::ForInOfLoop(_, loop_var, _, _) => Some(*loop_var),
             StructuredFlow::Block(_) => None,
             StructuredFlow::Return(_, Some(ret_val)) => Some(*ret_val),
             StructuredFlow::Return(_, None) => unreachable!("we shouldn't see this anymore"),
@@ -264,6 +271,20 @@ impl Debug for StructuredFlow {
             StructuredFlow::Block(items) => print_vec(f, items),
             StructuredFlow::Loop(brk, body) => {
                 write!(f, "loop{} ", print_brk(brk))?;
+                print_vec(f, body)
+            }
+            StructuredFlow::ForInOfLoop(brk, loop_var, kind, body) => {
+                match kind {
+                    ForInOfKind::ForIn => {
+                        write!(f, "for in{} (${}) ", print_brk(brk), loop_var)?;
+                    }
+                    ForInOfKind::ForOf => {
+                        write!(f, "for of{} (${}) ", print_brk(brk), loop_var)?;
+                    }
+                    ForInOfKind::ForAwaitOf => {
+                        write!(f, "for await of{} (${}) ", print_brk(brk), loop_var)?;
+                    }
+                }
                 print_vec(f, body)
             }
             StructuredFlow::Branch(brk, cond, cons, alt) => {

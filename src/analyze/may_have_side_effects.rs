@@ -18,6 +18,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::TypeOf(_) => false,
             BasicBlockInstruction::TypeOfGlobal(_) => false,
             BasicBlockInstruction::CaughtError => false,
+            BasicBlockInstruction::ForInOfValue => false,
             // may throw due to unspreadable array items
             BasicBlockInstruction::Array(items) => {
                 items.iter().any(|it| matches!(it, ArrayElement::Spread(_)))

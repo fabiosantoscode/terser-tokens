@@ -157,7 +157,7 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function(a) {
+        (function(a) {
             var { x: b, y: c, ...d } = a;
             var e = c;
             if (e === undefined) {
@@ -170,7 +170,7 @@ mod tests {
                 f,
                 d
             ];
-        }();
+        })();
         return undefined;
         "###);
 
@@ -181,7 +181,7 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function(a) {
+        (function(a) {
             var [b, c, ...d] = a;
             var e = c;
             if (e === undefined) {
@@ -194,7 +194,7 @@ mod tests {
                 f,
                 d
             ];
-        }();
+        })();
         return undefined;
         "###);
 
@@ -205,7 +205,7 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function(a, ...b) {
+        (function(a, ...b) {
             if (a === undefined) {
                 var c = 2;
             } else {
@@ -220,7 +220,7 @@ mod tests {
                 c,
                 d
             ];
-        }();
+        })();
         return undefined;
         "###);
     }
@@ -236,21 +236,21 @@ mod tests {
 
         let tree = to_ast_inner(obj);
         insta::assert_snapshot!(stats_to_string(tree), @r###"
-        function(a, b) {
+        (function(a, b) {
             var c = undefined;
             c = a;
             if (b === undefined) {
-                var e = function() {
+                var e = (function() {
                     var d = 2;
                     c = d;
                     return d;
-                };
+                });
             } else {
                 e = b;
             }
             e();
             return c;
-        }(1);
+        })(1);
         return undefined;
         "###);
     }

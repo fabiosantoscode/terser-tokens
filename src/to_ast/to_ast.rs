@@ -2,19 +2,20 @@ use std::collections::BTreeMap;
 
 use swc_ecma_ast::{
     AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
-    Expr, ExprOrSpread, ExprStmt, Ident, KeyValueProp, Lit, MemberExpr, MemberProp, Module,
-    ModuleItem, Null, ObjectLit, PatOrExpr, PrivateName, Prop, PropName, PropOrSpread, ReturnStmt,
-    SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, WhileStmt, YieldExpr,
+    Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp, Lit,
+    MemberExpr, MemberProp, Module, ModuleItem, Null, ObjectLit, PatOrExpr, PrivateName, Prop,
+    PropName, PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr,
+    UnaryOp, WhileStmt, YieldExpr,
 };
 
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ObjectMember, ObjectProp,
-        StructuredFlow, TempExitType,
+        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ForInOfKind, ObjectMember,
+        ObjectProp, StructuredFlow, TempExitType,
     },
     block_ops::{block_group_to_structured_flow, remove_phi},
-    to_ast::{build_block, build_var_assign, build_var_decl},
+    to_ast::{build_block, build_empty_var_decl, build_var_assign, build_var_decl},
 };
 
 use super::{
@@ -57,6 +58,7 @@ pub fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
 
     let mut ctx = ToAstContext {
         caught_error: None,
+        for_in_of_value: None,
         module: &mut block_module,
         inlined_variables,
         variable_use_count,
@@ -148,6 +150,37 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
             });
 
             vec![while_stmt]
+        }
+        StructuredFlow::ForInOfLoop(brk_id, looped_var, kind, body) => {
+            let for_in_of_stmt = ctx.enter_breakable(brk_id, true, |ctx| {
+                let left = ctx.set_for_in_of_value();
+
+                let looped_var = ref_or_inlined_expr(ctx, *looped_var);
+
+                let body = to_stat_vec(ctx, body);
+
+                match kind {
+                    ForInOfKind::ForIn => Stmt::ForIn(ForInStmt {
+                        body: Box::new(build_block(body)),
+                        left: ForHead::VarDecl(Box::new(build_empty_var_decl(
+                            build_binding_identifier(&left),
+                        ))),
+                        right: Box::new(looped_var),
+                        span: Default::default(),
+                    }),
+                    _ => Stmt::ForOf(ForOfStmt {
+                        body: Box::new(build_block(body)),
+                        is_await: *kind == ForInOfKind::ForAwaitOf,
+                        left: ForHead::VarDecl(Box::new(build_empty_var_decl(
+                            build_binding_identifier(&left),
+                        ))),
+                        right: Box::new(looped_var),
+                        span: Default::default(),
+                    }),
+                }
+            });
+
+            vec![for_in_of_stmt]
         }
         StructuredFlow::TryCatch(brk_id, try_block, catch_block, finally_block) => {
             let try_stmt = ctx.enter_breakable(brk_id, true, |ctx| {
@@ -340,17 +373,16 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                         expr: Box::new(ref_or_inlined_expr(ctx, *spread_obj)),
                     }),
                     ObjectProp::KeyValue(key, value) => {
-                        if key.chars().all(|c| c.is_ascii_alphabetic()) {
-                            PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
-                                key: PropName::Ident(Ident::new(
-                                    key.as_str().into(),
-                                    Default::default(),
-                                )),
-                                value: Box::new(ref_or_inlined_expr(ctx, *value)),
-                            })))
+                        let key = if key.chars().all(|c| c.is_ascii_alphabetic()) {
+                            PropName::Ident(Ident::new(key.as_str().into(), Default::default()))
                         } else {
-                            todo!("object keys that aren't just identifiers, also shorthands")
-                        }
+                            PropName::Str(key.as_str().into())
+                        };
+
+                        PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
+                            key,
+                            value: Box::new(ref_or_inlined_expr(ctx, *value)),
+                        })))
                     }
                     ObjectProp::Computed(key, value) => {
                         PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
@@ -454,6 +486,10 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             ctx.get_caught_error().into(),
             Default::default(),
         )),
+        BasicBlockInstruction::ForInOfValue => Expr::Ident(Ident::new(
+            ctx.get_for_in_of_value().into(),
+            Default::default(),
+        )),
         BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
     }
 }
@@ -532,9 +568,9 @@ mod tests {
         var a = undefined;
         a = 1;
         var b = undefined;
-        var c = function() {
+        var c = (function() {
             return a;
-        };
+        });
         b = c;
         return c;
         "###);
@@ -552,11 +588,11 @@ mod tests {
         var a = undefined;
         a = 1;
         var b = undefined;
-        var d = function() {
+        var d = (function() {
             var c = a + 1;
             a = c;
             return undefined;
-        };
+        });
         b = d;
         return d;
         "###);
@@ -577,6 +613,24 @@ mod tests {
             } else {
                 break;
             }
+        }
+        return undefined;
+        "###);
+    }
+
+    #[test]
+    fn to_loop_forin() {
+        let block_group = test_basic_blocks_module(
+            "for (var x in {}) {
+                x()
+            }",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        for(var a in {}){
+            a();
+            continue;
         }
         return undefined;
         "###);

@@ -200,6 +200,26 @@ fn fold_blocks(
                     to_label.extend(broken_from);
                 }
             }
+            StructuredFlow::ForInOfLoop(brk, looped_var, loop_kind, body) => {
+                if brk.0.is_some() {
+                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                }
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::ForInOfLoop(looped_var, loop_kind, MAX, MAX),
+                });
+                let head = out_blocks.len() - 1;
+
+                let (body_labels, body) = fold_blocks(out_blocks, body, jump_targets);
+
+                out_blocks[head].exit = BasicBlockExit::ForInOfLoop(looped_var, loop_kind, head + 1, body);
+
+                to_label.extend(body_labels);
+                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
+                    to_label.extend(broken_from);
+                }
+            }
             StructuredFlow::TryCatch(brk, body, catch, finally) => {
                 if brk.0.is_some() {
                     jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));

@@ -12,8 +12,6 @@ pub fn run_checks(s: &str) -> String {
 
 pub fn run_checks_inner(isolate: &mut v8::Isolate, s: &str) -> String {
     let scope = &mut v8::HandleScope::new(isolate);
-    let context = v8::Context::new(scope);
-    let scope = &mut v8::ContextScope::new(scope, context);
 
     let Some(reference) = run_code_for_logs(scope, s) else {
         panic!("failed to run reference code {s}")
@@ -46,31 +44,42 @@ pub fn run_checks_inner(isolate: &mut v8::Isolate, s: &str) -> String {
     reference // return reference for snapshot
 }
 
-fn run_code_for_logs(
-    scope: &mut v8::ContextScope<'_, v8::HandleScope<'_>>,
-    s: &str,
-) -> Option<String> {
-    let code = format!(
-        r###"
-        {{
-            let __str = s =>
-                Array.isArray(s) ? '[' + s.map(__str).join(', ') + ']' :
-                typeof s === 'object' && s ? JSON.stringify(s) :
-                String(s)
+fn run_code_for_logs(scope: &mut v8::HandleScope<'_, ()>, s: &str) -> Option<String> {
+    let ctx = v8::Context::new(scope);
+    let ctx_scope = &mut v8::ContextScope::new(scope, ctx);
 
-            __str((function () {{
-                {s}
-            }}()))
-        }}
-    "###
-    );
-    let code = v8::String::new(scope, &code)?;
-    let script = v8::Script::compile(scope, code, None)?;
+    {
+        let code = format!(
+            r###"
+                let __str = s =>
+                    Array.isArray(s) ? '[' + s.map(__str).join(', ') + ']' :
+                    s == null ? String(s) :
+                    JSON.stringify(s);
 
-    println!("running code: {}", s);
-    let result = script.run(scope)?;
+                (async function () {{
+                    {s}
+                }})().then(result => {{
+                    globalThis.RESULT = __str(result);
+                }});
+            "###
+        );
+        println!("running code: {}", s);
 
-    Some(result.to_string(scope)?.to_rust_string_lossy(scope))
+        let code = v8::String::new(ctx_scope, &code)?;
+        let script = v8::Script::compile(ctx_scope, code, None)?;
+        script.run(ctx_scope)?;
+
+        ctx_scope.perform_microtask_checkpoint();
+    };
+
+    // Read the results
+    {
+        let code = v8::String::new(ctx_scope, "globalThis.RESULT")?;
+        let script = v8::Script::compile(ctx_scope, code, None)?;
+        let result = script.run(ctx_scope)?;
+
+        Some(result.to_string(ctx_scope)?.to_rust_string_lossy(ctx_scope))
+    }
 }
 
 fn create_v8_isolate() -> v8::OwnedIsolate {
@@ -95,7 +104,7 @@ where
     use std::time::Duration;
 
     std::thread::scope(|scope| {
-        let timeout = Duration::from_secs(5);
+        let timeout = Duration::from_secs(10);
 
         let (handle_sender, handle_receiver) = std::sync::mpsc::channel();
         let (ret_sender, ret_receiver) = std::sync::mpsc::channel();
@@ -114,9 +123,9 @@ where
 
         match ret_receiver.recv_timeout(timeout) {
             Ok(result) => result,
-            Err(_) => {
+            Err(timeout_error) => {
                 handle.terminate_execution();
-                panic!("timeout");
+                panic!("timeout error {timeout_error:?}");
             }
         }
     })

@@ -32,6 +32,20 @@ pub fn build_var_decl(name: Pat, init: Expr) -> Stmt {
     })))
 }
 
+pub fn build_empty_var_decl(name: Pat) -> VarDecl {
+    VarDecl {
+        span: Default::default(),
+        kind: VarDeclKind::Var,
+        declare: false,
+        decls: vec![VarDeclarator {
+            span: Default::default(),
+            name,
+            init: None,
+            definite: false,
+        }],
+    }
+}
+
 pub fn build_block(stmts: Vec<Stmt>) -> Stmt {
     Stmt::Block(swc_ecma_ast::BlockStmt {
         span: Default::default(),

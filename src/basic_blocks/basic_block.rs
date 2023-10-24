@@ -42,6 +42,9 @@ pub enum BasicBlockExit {
     Cond(usize, usize, usize, usize, usize),
     /// (start, end). Loop from start to end until something jumps out.
     Loop(usize, usize),
+    /// (looped_var, for_in_of_kind, start, end). A for-in or for-of loop. looped_var is the variable that gets assigned to.
+    /// https://262.ecma-international.org/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
+    ForInOfLoop(usize, ForInOfKind, usize, usize),
     /// Just like Jump() but signals a break out of a loop or block
     Break(usize),
     /// Just like a backwards Jump() but signals a continue in a loop
@@ -63,6 +66,7 @@ impl BasicBlockExit {
         match self {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![*cond_var],
             BasicBlockExit::ExitFn(_, returned) => vec![*returned],
+            BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![*looped_var],
             BasicBlockExit::Jump(_)
             | BasicBlockExit::Break(_)
             | BasicBlockExit::Continue(_)
@@ -78,6 +82,7 @@ impl BasicBlockExit {
         match self {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![cond_var],
             BasicBlockExit::ExitFn(_, returned) => vec![returned],
+            BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![looped_var],
             BasicBlockExit::Jump(_)
             | BasicBlockExit::Break(_)
             | BasicBlockExit::Continue(_)
@@ -96,8 +101,17 @@ impl Default for BasicBlockExit {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[repr(u8)]
+#[derive(Clone, Debug, PartialEq, Copy)]
 pub enum ExitType {
     Return,
     Throw,
+}
+
+#[repr(u8)]
+#[derive(Clone, PartialEq, Copy)]
+pub enum ForInOfKind {
+    ForIn,
+    ForOf,
+    ForAwaitOf,
 }

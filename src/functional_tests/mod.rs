@@ -14,6 +14,9 @@ mod loops;
 mod objects;
 
 #[cfg(test)]
+mod real_world;
+
+#[cfg(test)]
 mod tool;
 
 #[cfg(test)]

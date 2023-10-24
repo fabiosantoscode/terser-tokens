@@ -1,12 +1,12 @@
 use swc_ecma_ast::{
-    AwaitExpr, Decl, Expr, ExprOrSpread, GetterProp, IfStmt, LabeledStmt, Lit, MemberExpr,
-    MemberProp, MethodProp, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp, Stmt,
-    ThrowStmt, UnaryOp, YieldExpr,
+    AwaitExpr, Decl, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, GetterProp, IfStmt,
+    LabeledStmt, Lit, MemberExpr, MemberProp, MethodProp, ObjectLit, PatOrExpr, Prop, PropName,
+    PropOrSpread, SetterProp, Stmt, ThrowStmt, UnaryOp, VarDeclKind, YieldExpr,
 };
 
 use crate::basic_blocks::{
-    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ObjectMember, ObjectProp,
-    TempExitType,
+    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, ObjectMember,
+    ObjectProp, TempExitType,
 };
 
 use super::{
@@ -71,14 +71,72 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         }
         Stmt::DoWhile(_) => todo!(),
         Stmt::For(_) => todo!(),
-        Stmt::ForIn(_) => todo!(),
-        Stmt::ForOf(_) => todo!(),
+        // https://262.ecma-international.org/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
+        Stmt::ForOf(ForOfStmt {
+            left, right, body, ..
+        })
+        | Stmt::ForIn(ForInStmt {
+            left, right, body, ..
+        }) => {
+            ctx.wrap_up_block();
+
+            // ForInOfLoop($right, {kind}, 1, 3)
+            // 1: (take and assign the ForInOfValue)
+            // 2: $body
+            // 3: Jump(1)
+            // 4: (outside now)
+
+            let right = expr_to_basic_blocks(ctx, &right);
+
+            let blockidx_loop_head = ctx.wrap_up_block(); // '0 ForInOfLoop(1..3)
+
+            ctx.enter_conditional_branch();
+
+            let blockidx_bind_start = ctx.wrap_up_block();
+
+            let loop_value = ctx.push_instruction(BasicBlockInstruction::ForInOfValue);
+            match left {
+                ForHead::VarDecl(var_decl) => {
+                    assert_eq!(var_decl.decls.len(), 1, "for-in/of var decls should have exactly one binding");
+                    let only_decl = &var_decl.decls[0];
+
+                    match var_decl.kind {
+                        VarDeclKind::Var => {
+                            pat_to_basic_blocks(ctx, PatType::VarDecl, &only_decl.name, loop_value)
+                        }
+                        VarDeclKind::Let => todo!(),
+                        VarDeclKind::Const => todo!(),
+                    }
+                }
+                ForHead::Pat(ref pat) => {
+                    pat_to_basic_blocks(ctx, PatType::Assign, pat, loop_value)
+                },
+                ForHead::UsingDecl(_) => todo!(),
+            };
+
+            let kind = match stat {
+                Stmt::ForIn(_) => ForInOfKind::ForIn,
+                Stmt::ForOf(st) if !st.is_await => ForInOfKind::ForOf,
+                Stmt::ForOf(_) => ForInOfKind::ForAwaitOf,
+                _ => unreachable!(),
+            };
+
+            stat_to_basic_blocks(ctx, body);
+
+            ctx.leave_conditional_branch();
+
+            let blockidx_jump_back = ctx.wrap_up_block();
+
+            ctx.set_exit(blockidx_loop_head, BasicBlockExit::ForInOfLoop(right, kind, blockidx_bind_start, blockidx_jump_back));
+
+            ctx.set_exit(blockidx_jump_back, BasicBlockExit::Continue(blockidx_bind_start));
+        }
         Stmt::While(whil) => {
             // Loop(1, 4)
             // 1: Cond($test, 2, 4)
             // 2:   then: $body
-            // 3:         Jump(1)
-            // 4:   else: Jump(5)
+            // 3:         Continue(1)
+            // 4:   else: Break(5)
             // 5: (outside now)
 
             let blockidx_loop = ctx.wrap_up_block(); // '0 Loop(1..4)
@@ -1315,6 +1373,31 @@ mod tests {
         @13: {
             $9 = $0
             exit = return $9
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_for_in() {
+        let s = test_basic_blocks(
+            "for (var x in {}) {
+                x();
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = {}
+            exit = for in $0 @1..@1
+        }
+        @1: {
+            $1 = for_in_of_value()
+            $2 = $1
+            $3 = call $2()
+            exit = continue @1
+        }
+        @2: {
+            $4 = undefined
+            exit = return $4
         }
         "###);
     }

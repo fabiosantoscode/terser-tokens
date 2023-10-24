@@ -75,6 +75,7 @@ pub fn interpret(
         BasicBlockInstruction::This => None?, // TODO: grab from context?
         BasicBlockInstruction::TypeOf(t) => ctx.get_variable(*t)?.typeof_string(),
         BasicBlockInstruction::TypeOfGlobal(_) => JsType::String,
+        BasicBlockInstruction::ForInOfValue => None?, // TODO: grab from context?
         BasicBlockInstruction::CaughtError => None?, // TODO: grab from context?
         BasicBlockInstruction::Array(elements) => {
             let plain_items = elements
@@ -289,7 +290,7 @@ fn interp_comparisons(op: &swc_ecma_ast::BinaryOp, l: &JsType, r: &JsType) -> Op
         _ => false,
     };
 
-    let is_equal = if can_compare_type(l) && can_compare_type(r) {
+    let is_equal = if can_compare_type(l) && can_compare_type(r) && matches!(op, EqEqEq | NotEqEq) {
         l == r
     } else {
         match (l, r) {

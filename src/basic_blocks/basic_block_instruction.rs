@@ -18,6 +18,7 @@ pub enum BasicBlockInstruction {
     TypeOf(usize),
     TypeOfGlobal(String),
     CaughtError,
+    ForInOfValue,
     Array(Vec<ArrayElement>),
     /// __proto__, object props
     Object(Option<usize>, Vec<ObjectProp>),
@@ -141,6 +142,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
             BasicBlockInstruction::TempExit(_, arg) => vec![*arg],
             BasicBlockInstruction::CaughtError => vec![],
+            BasicBlockInstruction::ForInOfValue => vec![],
             BasicBlockInstruction::Function(_) => vec![],
             BasicBlockInstruction::Call(callee, args) => {
                 let mut res = Vec::with_capacity(args.len() + 1);
@@ -202,6 +204,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
             BasicBlockInstruction::CaughtError => vec![],
+            BasicBlockInstruction::ForInOfValue => vec![],
             BasicBlockInstruction::Function(_) => vec![],
             BasicBlockInstruction::Call(callee, args) => {
                 let mut res = Vec::with_capacity(args.len() + 1);

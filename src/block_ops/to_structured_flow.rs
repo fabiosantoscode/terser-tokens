@@ -133,6 +133,19 @@ fn do_tree_chunk(
                         )])
                     })
                 }
+                BasicBlockExit::ForInOfLoop(looped_var, loop_type, start, end) => {
+                    rest = end + 1;
+
+                    let loop_brk_id = ctx.get_breakable_id();
+                    ctx.push_within(BreakAndRange(loop_brk_id, start, end), |ctx| {
+                        blocks.extend(vec![StructuredFlow::ForInOfLoop(
+                            loop_brk_id,
+                            looped_var,
+                            loop_type,
+                            do_tree_chunk(ctx, func, start, end),
+                        )])
+                    })
+                }
                 BasicBlockExit::ExitFn(ref exit_type, yielded_val) => {
                     blocks.extend(vec![StructuredFlow::Return(
                         exit_type.clone(),
