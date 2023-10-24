@@ -59,7 +59,7 @@ impl PhiGenerationCtx {
     }
     fn read_name(&mut self, varname: usize) -> usize {
         self.read_name_cond(varname)
-            .expect("variable is yet to defined")
+            .unwrap_or_else(|| panic!("variable ${varname} is yet to defined"))
     }
     fn write_name(&mut self, varname: usize, value: usize) {
         self.conditionals
@@ -311,17 +311,21 @@ fn remove_phi_inner(block: &mut BasicBlock, phies_to_final_name: &mut BTreeMap<u
         _ => true,
     });
 
-    for x in block.iter_varnames_mut() {
-        if let Some(final_name) = phies_to_final_name.get(&x) {
-            *x = *final_name;
+    for (varname, ins) in block.instructions.iter_mut() {
+        if let Some(final_name) = phies_to_final_name.get(&varname) {
+            *varname = *final_name;
         }
-    }
 
-    for (_, ins) in block.iter_mut() {
         for used_var in ins.used_vars_mut() {
             if let Some(final_name) = phies_to_final_name.get(used_var) {
                 *used_var = *final_name;
             }
+        }
+    }
+
+    for x in block.exit.used_vars_mut() {
+        if let Some(final_name) = phies_to_final_name.get(x) {
+            *x = *final_name;
         }
     }
 }
