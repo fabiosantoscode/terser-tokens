@@ -3,9 +3,8 @@ use std::collections::BTreeMap;
 use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
-    BasicBlock, BasicBlockEnvironment, BasicBlockEnvironmentType, BasicBlockExit, BasicBlockGroup,
-    BasicBlockInstruction, BasicBlockModule, ExitType, Export, FunctionId, Import, ModuleSummary,
-    NonLocalId,
+    BasicBlock, BasicBlockEnvironment, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
+    BasicBlockModule, ExitType, Export, FunctionId, Import, ModuleSummary, NonLocalId,
 };
 use crate::block_ops::{normalize_basic_blocks, normalize_module};
 use crate::scope::ScopeTree;
@@ -208,10 +207,7 @@ impl FromAstCtx {
         let module_bg = BasicBlockGroup {
             id,
             blocks,
-            environment: BasicBlockEnvironment {
-                env_type: BasicBlockEnvironmentType::Module,
-                ..Default::default()
-            },
+            environment: BasicBlockEnvironment::Module,
         };
 
         self.functions.insert(id, module_bg);
@@ -230,7 +226,7 @@ impl FromAstCtx {
 
     pub fn go_into_function<C>(
         &mut self,
-        arg_count: usize,
+        environment: BasicBlockEnvironment,
         nonlocalinfo: Option<NonLocalInfo>,
         convert_in_function: C,
     ) -> Result<&BasicBlockGroup, String>
@@ -270,10 +266,7 @@ impl FromAstCtx {
         let function_bg = BasicBlockGroup {
             id,
             blocks,
-            environment: BasicBlockEnvironment {
-                env_type: BasicBlockEnvironmentType::Function(arg_count),
-                ..Default::default()
-            },
+            environment,
         };
 
         inner_ctx.functions.insert(id, function_bg);

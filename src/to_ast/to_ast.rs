@@ -463,7 +463,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         BasicBlockInstruction::WriteNonLocal(_, _) => {
             unreachable!("handled in instruction_to_statement")
         }
-        
+
         BasicBlockInstruction::ReadGlobal(varname) => build_identifier_str(varname.as_str()),
         BasicBlockInstruction::WriteGlobal(varname, new_value) => {
             let new_value = ref_or_inlined_expr(ctx, *new_value);
@@ -584,6 +584,21 @@ mod tests {
         });
         b = c;
         return c;
+        "###);
+    }
+
+    #[test]
+    fn to_gen_scopes() {
+        let block_group = test_basic_blocks_module("(function* bar() { yield 1; })");
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        var a = undefined;
+        a = (function*() {
+            yield 1;
+            return undefined;
+        });
+        return undefined;
         "###);
     }
 

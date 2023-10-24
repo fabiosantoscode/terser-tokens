@@ -13,24 +13,6 @@ pub enum FuncBlockOrRetExpr<'a> {
 }
 
 impl<'a> FunctionLike<'a> {
-    pub fn function_length(&self) -> usize {
-        let param_counts = |pat: &Pat| match pat {
-            Pat::Rest(_) | Pat::Assign(_) => false,
-            _ => true,
-        };
-        match self {
-            FunctionLike::FnDecl(FnDecl { function, .. })
-            | FunctionLike::FnExpr(FnExpr { function, .. }) => function
-                .params
-                .iter()
-                .filter(|param| param_counts(&param.pat))
-                .count(),
-            FunctionLike::ArrowExpr(ArrowExpr { params, .. }) => {
-                params.iter().filter(|pat| param_counts(pat)).count()
-            }
-        }
-    }
-
     pub fn get_params(&self) -> Vec<&Pat> {
         match self {
             FunctionLike::FnDecl(FnDecl { function, .. })

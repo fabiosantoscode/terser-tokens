@@ -83,13 +83,27 @@ fn functional_loops_async() {
     let res = run_checks(
         r###"
         var out = [];
-        for await (var x of [1]) {
-            out.push(x);
+        var order = 0;
+        async function* asyncIter() {
+            order = order + 1;
+            out.push(['in_fn', order])
+            yield await 1;
+            order = order + 1;
+            out.push(['in_fn', order])
+            yield await 2;
+            order = order + 1;
+            out.push(['in_fn', order])
+        }
+        for await (var x of asyncIter()) {
+            order = order + 1;
+            out.push(['in_loop', x, order])
         }
         return out;
         "###,
     );
-    insta::assert_display_snapshot!(res, @"[1]");
+    insta::assert_display_snapshot!(res, @r###"
+    [["in_fn", 1], ["in_loop", 1, 2], ["in_fn", 3], ["in_loop", 2, 4], ["in_fn", 5]]
+    "###);
 }
 
 #[test]

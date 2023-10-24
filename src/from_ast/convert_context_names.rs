@@ -51,7 +51,8 @@ impl FromAstCtx {
         } else if let Some(nonlocal) = self.scope_tree.lookup(name) {
             unreachable!("nonlocal {:?} not in nonlocalinfo", nonlocal)
         } else {
-            let read_global_ins = self.push_instruction(BasicBlockInstruction::ReadGlobal(name.to_string()));
+            let read_global_ins =
+                self.push_instruction(BasicBlockInstruction::ReadGlobal(name.to_string()));
             read_global_ins
         }
     }
@@ -149,7 +150,7 @@ impl FromAstCtx {
 
 #[cfg(test)]
 mod tests {
-    use crate::from_ast::NonLocalInfo;
+    use crate::{basic_blocks::BasicBlockEnvironment, from_ast::NonLocalInfo};
 
     use super::*;
 
@@ -303,7 +304,7 @@ mod tests {
         ctx.assign_name("conditional_varname", 456);
         ctx.assign_name("conditional_varname", 789);
 
-        ctx.go_into_function(1, None, |ctx| {
+        ctx.go_into_function(BasicBlockEnvironment::Function(false, false), None, |ctx| {
             ctx.assign_name("conditional_varname", 999);
 
             insta::assert_debug_snapshot!(ctx.conditionals, @"[]");

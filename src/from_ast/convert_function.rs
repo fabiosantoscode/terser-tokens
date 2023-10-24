@@ -1,11 +1,11 @@
-use swc_ecma_ast::{FnExpr, Pat};
+use swc_ecma_ast::{ArrowExpr, FnDecl, FnExpr, Pat};
 
 use super::{
     block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
     FuncBlockOrRetExpr, FunctionLike, PatType,
 };
 use crate::basic_blocks::{
-    BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId, NonLocalId,
+    BasicBlockEnvironment, BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId, NonLocalId,
 };
 
 /// Convert a function declaration to basic blocks. Function declarations are special because since they're hoisted, we don't want to create any variables here.
@@ -52,8 +52,22 @@ pub fn function_to_basic_blocks(
     };
 
     // count function.length
-    let arg_count: usize = function.function_length();
-    ctx.go_into_function(arg_count, Some(find_nonlocals(function.clone())), |ctx| {
+    let env = match function {
+        FunctionLike::ArrowExpr(ArrowExpr {
+            is_generator,
+            is_async,
+            ..
+        }) => {
+            assert!(!is_generator);
+            BasicBlockEnvironment::Function(*is_generator, *is_async)
+        }
+        FunctionLike::FnDecl(FnDecl { function, .. })
+        | FunctionLike::FnExpr(FnExpr { function, .. }) => {
+            BasicBlockEnvironment::Function(function.is_generator, function.is_async)
+        }
+    };
+
+    ctx.go_into_function(env, Some(find_nonlocals(function.clone())), |ctx| {
         function
             .get_params()
             .into_iter()

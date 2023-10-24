@@ -3,7 +3,7 @@ use std::fmt::{Debug, Error, Formatter};
 use crate::basic_blocks::{ForInOfKind, ObjectMember, ObjectProp};
 
 use super::{
-    ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironmentType, BasicBlockExit,
+    ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironment, BasicBlockExit,
     BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, NonLocalId,
     ObjectPatternPiece,
 };
@@ -300,9 +300,16 @@ impl Debug for NonLocalId {
 
 impl Debug for BasicBlockGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.environment.env_type {
-            BasicBlockEnvironmentType::Module => {}
-            BasicBlockEnvironmentType::Function(_argc) => writeln!(f, "function():")?,
+        match self.environment {
+            BasicBlockEnvironment::Module => {}
+            BasicBlockEnvironment::Function(is_generator, is_async) => {
+                match (is_generator, is_async) {
+                    (false, false) => writeln!(f, "function():")?,
+                    (true, false) => writeln!(f, "function*():")?,
+                    (false, true) => writeln!(f, "async function():")?,
+                    (true, true) => writeln!(f, "async function*():")?,
+                }
+            }
         }
         for (i, v) in self.iter() {
             if i > 0 {

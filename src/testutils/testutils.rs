@@ -8,7 +8,7 @@ use swc_ecma_ast::{ExprStmt, Script, Stmt};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{parse_file_as_expr, EsConfig};
 
-use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule};
+use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, BasicBlockEnvironment};
 use crate::from_ast::{block_to_basic_blocks, module_to_basic_blocks, FromAstCtx};
 use crate::swc_parse::swc_parse;
 
@@ -37,18 +37,22 @@ pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
     let m = parse_expression(source);
 
     let mut c = FromAstCtx::new();
-    let bg = c.go_into_function(0, None, |c: &mut FromAstCtx| {
-        block_to_basic_blocks(
-            c,
-            &vec![Stmt::Expr(ExprStmt {
-                span: Default::default(),
-                expr: Box::new(m),
-            })],
-        )
-        .unwrap();
+    let bg = c.go_into_function(
+        BasicBlockEnvironment::Function(false, false),
+        None,
+        |c: &mut FromAstCtx| {
+            block_to_basic_blocks(
+                c,
+                &vec![Stmt::Expr(ExprStmt {
+                    span: Default::default(),
+                    expr: Box::new(m),
+                })],
+            )
+            .unwrap();
 
-        Ok(())
-    });
+            Ok(())
+        },
+    );
 
     bg.unwrap().clone()
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::{BasicBlock, FunctionId, NonLocalId};
+use super::{BasicBlock, FunctionId};
 
 /// Represents a group of basic blocks that are part of the same function or module.
 #[derive(Default, Clone)]
@@ -11,17 +11,20 @@ pub struct BasicBlockGroup {
 }
 
 #[derive(Default, Clone)]
-pub struct BasicBlockEnvironment {
-    pub env_type: BasicBlockEnvironmentType,
-    pub provided_nonlocals: Vec<NonLocalId>,
-    pub used_nonlocals: Vec<NonLocalId>,
-}
-
-#[derive(Default, Clone)]
-pub enum BasicBlockEnvironmentType {
+pub enum BasicBlockEnvironment {
     #[default]
     Module,
-    Function(usize),
+    /// (is_generator, is_async)
+    Function(bool, bool),
+}
+
+impl BasicBlockEnvironment {
+    pub fn unwrap_function(&self) -> (bool, bool) {
+        match self {
+            BasicBlockEnvironment::Function(is_generator, is_async) => (*is_generator, *is_async),
+            _ => panic!("not a function"),
+        }
+    }
 }
 
 impl BasicBlockGroup {

@@ -15,6 +15,8 @@ pub fn function_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Expr {
     let params = take_param_readers(ctx, &mut blocks);
     let stmts = to_statements(ctx, &blocks);
 
+    let (is_generator, is_async) = func.environment.unwrap_function();
+
     Expr::Paren(ParenExpr {
         expr: Box::new(Expr::Fn(FnExpr {
             ident: None,
@@ -26,8 +28,8 @@ pub fn function_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Expr {
                     span: Default::default(),
                     stmts,
                 }),
-                is_generator: false,
-                is_async: false,
+                is_generator,
+                is_async,
                 type_params: None,
                 return_type: None,
             }),

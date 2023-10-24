@@ -26,10 +26,6 @@ impl BasicBlock {
             .iter_mut()
             .map(|(varname, ins)| (*varname, ins))
     }
-
-    pub(crate) fn iter_varnames_mut(&mut self) -> impl Iterator<Item = &mut usize> {
-        self.instructions.iter_mut().map(|(varname, _)| varname)
-    }
 }
 
 /// Conceptually, an exit occurs after the instructions in a block. It denotes what happens to control flow.
