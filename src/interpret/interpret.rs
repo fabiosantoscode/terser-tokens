@@ -19,7 +19,6 @@ pub fn interpret(
         BasicBlockInstruction::LitBool(b) => JsType::TheBoolean(*b),
         BasicBlockInstruction::LitString(s) => JsType::TheString(s.clone()),
         BasicBlockInstruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
-        BasicBlockInstruction::GlobalRef(_) => return None, // May throw
         BasicBlockInstruction::UnaryOp(op, operand) => {
             let operand = ctx.get_variable(*operand)?;
 
@@ -76,7 +75,7 @@ pub fn interpret(
         BasicBlockInstruction::TypeOf(t) => ctx.get_variable(*t)?.typeof_string(),
         BasicBlockInstruction::TypeOfGlobal(_) => JsType::String,
         BasicBlockInstruction::ForInOfValue => None?, // TODO: grab from context?
-        BasicBlockInstruction::CaughtError => None?, // TODO: grab from context?
+        BasicBlockInstruction::CaughtError => None?,  // TODO: grab from context?
         BasicBlockInstruction::Array(elements) => {
             let plain_items = elements
                 .iter()
@@ -243,6 +242,8 @@ pub fn interpret(
         },
         BasicBlockInstruction::ReadNonLocal(_) => None?, // TODO: grab from context?
         BasicBlockInstruction::WriteNonLocal(_, _) => None?, // TODO: grab from context?
+        BasicBlockInstruction::ReadGlobal(_) => None?, // May throw
+        BasicBlockInstruction::WriteGlobal(_, _) => None?, // May throw
     };
 
     Some(JsCompletion::Normal(normal_completion))

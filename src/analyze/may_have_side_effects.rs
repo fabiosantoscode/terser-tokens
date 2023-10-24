@@ -8,7 +8,6 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => false,
             BasicBlockInstruction::LitString(_) => false,
             BasicBlockInstruction::Ref(_) => false,
-            BasicBlockInstruction::GlobalRef(_) => true, // Global refs may throw
             BasicBlockInstruction::UnaryOp(_, _) => false,
             // may throw due to bigint
             BasicBlockInstruction::BinOp(_, _, _) => true,
@@ -46,6 +45,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::ArgumentRest(_) => false,
             BasicBlockInstruction::ReadNonLocal(_) => false,
             BasicBlockInstruction::WriteNonLocal(_, _) => true,
+            BasicBlockInstruction::ReadGlobal(_) => true, // Global refs may throw
+            BasicBlockInstruction::WriteGlobal(_, _) => true,
         }
     }
 }

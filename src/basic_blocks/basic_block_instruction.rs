@@ -9,7 +9,6 @@ pub enum BasicBlockInstruction {
     LitBool(bool),
     LitString(String),
     Ref(usize),
-    GlobalRef(String),
     UnaryOp(swc_ecma_ast::UnaryOp, usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
     Undefined,
@@ -38,6 +37,8 @@ pub enum BasicBlockInstruction {
     ArgumentRest(usize),
     ReadNonLocal(NonLocalId),
     WriteNonLocal(NonLocalId, usize),
+    ReadGlobal(String),
+    WriteGlobal(String, usize),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -101,7 +102,6 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![*id],
-            BasicBlockInstruction::GlobalRef(_) => vec![],
             BasicBlockInstruction::UnaryOp(_, v) => vec![*v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
             BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),
@@ -154,6 +154,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::ArgumentRest(_) => vec![],
             BasicBlockInstruction::ReadNonLocal(_) => vec![],
             BasicBlockInstruction::WriteNonLocal(_, val) => vec![*val],
+            BasicBlockInstruction::ReadGlobal(_) => vec![],
+            BasicBlockInstruction::WriteGlobal(_, val) => vec![*val],
         }
     }
 
@@ -163,7 +165,6 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::LitBool(_) => vec![],
             BasicBlockInstruction::LitString(_) => vec![],
             BasicBlockInstruction::Ref(id) => vec![id],
-            BasicBlockInstruction::GlobalRef(_) => vec![],
             BasicBlockInstruction::UnaryOp(_, v) => vec![v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
             BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
@@ -216,6 +217,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::ArgumentRest(_) => vec![],
             BasicBlockInstruction::ReadNonLocal(_) => vec![],
             BasicBlockInstruction::WriteNonLocal(_, val) => vec![val],
+            BasicBlockInstruction::ReadGlobal(_) => vec![],
+            BasicBlockInstruction::WriteGlobal(_, val) => vec![val],
         }
     }
 

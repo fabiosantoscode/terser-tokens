@@ -40,9 +40,6 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::Ref(id) => {
                 write!(f, "${}", id)
             }
-            BasicBlockInstruction::GlobalRef(name) => {
-                write!(f, "global {:?}", name)
-            }
             BasicBlockInstruction::Undefined => {
                 write!(f, "undefined")
             }
@@ -159,6 +156,13 @@ impl Debug for BasicBlockInstruction {
             }
             BasicBlockInstruction::WriteNonLocal(id, val) => {
                 write!(f, "write_non_local $${} ${}", id.0, val)
+            }
+
+            BasicBlockInstruction::ReadGlobal(name) => {
+                write!(f, "global {:?}", name)
+            }
+            BasicBlockInstruction::WriteGlobal(name, val) => {
+                write!(f, "global {:?} = ${}", name, val)
             }
 
             BasicBlockInstruction::TempExit(exit_type, arg) => {

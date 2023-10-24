@@ -320,7 +320,6 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             })
         }
         BasicBlockInstruction::Ref(var_idx) => ref_or_inlined_expr(ctx, *var_idx),
-        BasicBlockInstruction::GlobalRef(varname) => build_identifier_str(varname.as_str()),
         BasicBlockInstruction::This => Expr::Ident(Ident::new("this".into(), Default::default())),
         BasicBlockInstruction::TypeOf(var_idx) => {
             let var = ref_or_inlined_expr(ctx, *var_idx);
@@ -463,6 +462,18 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         )),
         BasicBlockInstruction::WriteNonLocal(_, _) => {
             unreachable!("handled in instruction_to_statement")
+        }
+        
+        BasicBlockInstruction::ReadGlobal(varname) => build_identifier_str(varname.as_str()),
+        BasicBlockInstruction::WriteGlobal(varname, new_value) => {
+            let new_value = ref_or_inlined_expr(ctx, *new_value);
+
+            Expr::Assign(AssignExpr {
+                span: Default::default(),
+                op: AssignOp::Assign,
+                left: PatOrExpr::Expr(Box::new(build_identifier_str(varname.as_str()))),
+                right: Box::new(new_value),
+            })
         }
 
         BasicBlockInstruction::TempExit(typ, arg) => match typ {

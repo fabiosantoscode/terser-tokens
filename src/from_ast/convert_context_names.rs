@@ -38,21 +38,21 @@ impl FromAstCtx {
         }
     }
 
-    pub fn read_name(&mut self, name: &str) -> Option<usize> {
+    pub fn read_name(&mut self, name: &str) -> usize {
         if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
-            let read_ins = self.push_instruction(BasicBlockInstruction::ReadNonLocal(nonlocal));
-            Some(read_ins)
+            self.push_instruction(BasicBlockInstruction::ReadNonLocal(nonlocal))
         } else if self.is_unwritten_funscoped(name) {
             let deferred_undefined = self.push_instruction(BasicBlockInstruction::Undefined);
             self.assign_name(name, deferred_undefined);
 
-            Some(deferred_undefined)
+            deferred_undefined
         } else if let Some(local) = self.scope_tree.lookup_in_function(name) {
-            Some(local.unwrap_local())
+            local.unwrap_local()
         } else if let Some(nonlocal) = self.scope_tree.lookup(name) {
             unreachable!("nonlocal {:?} not in nonlocalinfo", nonlocal)
         } else {
-            None
+            let read_global_ins = self.push_instruction(BasicBlockInstruction::ReadGlobal(name.to_string()));
+            read_global_ins
         }
     }
 
@@ -254,10 +254,10 @@ mod tests {
         "###);
 
         // time to read a not-yet-declared var
-        assert_eq!(ctx.read_name("assigned_later"), Some(6));
+        assert_eq!(ctx.read_name("assigned_later"), 6);
 
         // time to read a nonlocal
-        assert_eq!(ctx.read_name("provided_nonlocal"), Some(7));
+        assert_eq!(ctx.read_name("provided_nonlocal"), 7);
         insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[7], @r###"
         (
             7,

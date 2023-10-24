@@ -34,7 +34,7 @@ pub fn pat_to_basic_blocks(
             }
             Assign => {
                 let sym = ident.sym.to_string();
-                let Some(_old_idx) = ctx.read_name(&sym) else {todo!()};
+                ctx.read_name(&sym);
 
                 ctx.assign_name(&sym, input);
 

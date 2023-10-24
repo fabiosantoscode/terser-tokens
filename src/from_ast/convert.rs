@@ -97,7 +97,11 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             let loop_value = ctx.push_instruction(BasicBlockInstruction::ForInOfValue);
             match left {
                 ForHead::VarDecl(var_decl) => {
-                    assert_eq!(var_decl.decls.len(), 1, "for-in/of var decls should have exactly one binding");
+                    assert_eq!(
+                        var_decl.decls.len(),
+                        1,
+                        "for-in/of var decls should have exactly one binding"
+                    );
                     let only_decl = &var_decl.decls[0];
 
                     match var_decl.kind {
@@ -108,9 +112,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                         VarDeclKind::Const => todo!(),
                     }
                 }
-                ForHead::Pat(ref pat) => {
-                    pat_to_basic_blocks(ctx, PatType::Assign, pat, loop_value)
-                },
+                ForHead::Pat(ref pat) => pat_to_basic_blocks(ctx, PatType::Assign, pat, loop_value),
                 ForHead::UsingDecl(_) => todo!(),
             };
 
@@ -127,9 +129,15 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             let blockidx_jump_back = ctx.wrap_up_block();
 
-            ctx.set_exit(blockidx_loop_head, BasicBlockExit::ForInOfLoop(right, kind, blockidx_bind_start, blockidx_jump_back));
+            ctx.set_exit(
+                blockidx_loop_head,
+                BasicBlockExit::ForInOfLoop(right, kind, blockidx_bind_start, blockidx_jump_back),
+            );
 
-            ctx.set_exit(blockidx_jump_back, BasicBlockExit::Continue(blockidx_bind_start));
+            ctx.set_exit(
+                blockidx_jump_back,
+                BasicBlockExit::Continue(blockidx_bind_start),
+            );
         }
         Stmt::While(whil) => {
             // Loop(1, 4)
@@ -395,13 +403,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             let instruction = match ident.as_str() {
                 "undefined" => BasicBlockInstruction::Undefined,
                 "Infinity" => BasicBlockInstruction::LitNumber(f64::INFINITY),
-                ident => {
-                    if let Some(var_idx) = ctx.read_name(ident) {
-                        BasicBlockInstruction::Ref(var_idx)
-                    } else {
-                        BasicBlockInstruction::GlobalRef(ident.to_string())
-                    }
-                }
+                ident => BasicBlockInstruction::Ref(ctx.read_name(ident)),
             };
 
             return ctx.push_instruction(instruction);
