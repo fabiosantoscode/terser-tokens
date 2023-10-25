@@ -25,47 +25,13 @@ pub fn pat_to_basic_blocks(
     pat: &Pat,
     input: usize,
 ) -> usize {
-    use PatType::*;
     match pat {
-        Pat::Ident(ident) => match pat_type {
-            VarDecl | FunArg => {
-                ctx.assign_name(&ident.sym.to_string(), input);
-                input
-            }
-            Assign => {
-                let sym = ident.sym.to_string();
-                ctx.read_name(&sym);
-
-                ctx.assign_name(&sym, input);
-
-                return ctx.push_instruction(BasicBlockInstruction::Ref(input));
-            }
-        },
+        Pat::Ident(ident) => ident_pat(ctx, pat_type, &ident.id.sym.to_string(), input),
         Pat::Assign(assign_pat) => {
             let input = default_assign_pat(ctx, input, &assign_pat.right);
             pat_to_basic_blocks(ctx, pat_type, &assign_pat.left, input)
         }
-        Pat::Expr(expr) => match expr.as_ref() {
-            Expr::SuperProp(SuperPropExpr { .. }) => todo!(),
-            Expr::MetaProp(_) => todo!(),
-            Expr::Member(MemberExpr { obj, prop, .. }) => {
-                let base = expr_to_basic_blocks(ctx, obj.as_ref());
-                let prop = match &prop {
-                    MemberProp::Ident(ident) => ObjectMember::KeyValue(ident.sym.to_string()),
-                    MemberProp::PrivateName(pvt) => ObjectMember::Private(pvt.id.sym.to_string()),
-                    MemberProp::Computed(comp) => {
-                        let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());
-                        ObjectMember::Computed(comp)
-                    }
-                };
-
-                return ctx.push_instruction(BasicBlockInstruction::MemberSet(base, prop, input));
-            }
-            _ => unreachable!(
-                "pat_to_basic_blocks: Assign: {:?} should not be possible",
-                expr
-            ),
-        },
+        Pat::Expr(expr) => pat_like_expr_to_basic_blocks(ctx, pat_type, expr, input),
         Pat::Array(array_pat) => {
             assert!(!array_pat.optional);
 
@@ -187,6 +153,56 @@ pub fn pat_to_basic_blocks(
         }
         Pat::Rest(_) => unreachable!("handled in array/funargs pattern"),
         Pat::Invalid(_) => unreachable!(),
+    }
+}
+
+/// Member expressions and identifiers can be treated like patterns
+pub fn pat_like_expr_to_basic_blocks(
+    ctx: &mut FromAstCtx,
+    pat_type: PatType,
+    expr: &Expr,
+    input: usize,
+) -> usize {
+    match expr {
+        Expr::Ident(ident) => ident_pat(ctx, pat_type, &ident.sym.to_string(), input),
+        Expr::SuperProp(SuperPropExpr { .. }) => todo!(),
+        Expr::MetaProp(_) => todo!(),
+        Expr::Member(MemberExpr { obj, prop, .. }) => {
+            let base = expr_to_basic_blocks(ctx, obj.as_ref());
+            let prop = match &prop {
+                MemberProp::Ident(ident) => ObjectMember::KeyValue(ident.sym.to_string()),
+                MemberProp::PrivateName(pvt) => ObjectMember::Private(pvt.id.sym.to_string()),
+                MemberProp::Computed(comp) => {
+                    let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());
+                    ObjectMember::Computed(comp)
+                }
+            };
+
+            return ctx.push_instruction(BasicBlockInstruction::MemberSet(base, prop, input));
+        }
+        _ => unreachable!(
+            "pattern expression must be an identifier or member expression, got: {:?}",
+            expr
+        ),
+    }
+}
+
+fn ident_pat(ctx: &mut FromAstCtx, pat_type: PatType, name: &str, input: usize) -> usize {
+    use PatType::*;
+
+    match pat_type {
+        VarDecl | FunArg => {
+            ctx.assign_name(name, input);
+            // TODO can assign globals too
+            input
+        }
+        Assign => {
+            ctx.read_name(name);
+
+            ctx.assign_name(name, input);
+
+            ctx.push_instruction(BasicBlockInstruction::Ref(input))
+        }
     }
 }
 

@@ -85,17 +85,17 @@ fn functional_loops_async() {
         var out = [];
         var order = 0;
         async function* asyncIter() {
-            order = order + 1;
+            order++;
             out.push(['in_fn', order])
             yield await 1;
-            order = order + 1;
+            order++;
             out.push(['in_fn', order])
             yield await 2;
-            order = order + 1;
+            order++;
             out.push(['in_fn', order])
         }
         for await (var x of asyncIter()) {
-            order = order + 1;
+            order++;
             out.push(['in_loop', x, order])
         }
         return out;

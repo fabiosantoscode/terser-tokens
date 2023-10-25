@@ -1,12 +1,16 @@
 use swc_ecma_ast::{
     AwaitExpr, Decl, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, GetterProp, IfStmt,
     LabeledStmt, Lit, MemberExpr, MemberProp, MethodProp, ObjectLit, PatOrExpr, Prop, PropName,
-    PropOrSpread, SetterProp, Stmt, ThrowStmt, UnaryOp, VarDeclKind, YieldExpr,
+    PropOrSpread, SetterProp, Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDeclKind,
+    YieldExpr,
 };
 
-use crate::basic_blocks::{
-    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, ObjectMember,
-    ObjectProp, TempExitType,
+use crate::{
+    basic_blocks::{
+        ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, ObjectMember,
+        ObjectProp, TempExitType,
+    },
+    from_ast::pat_like_expr_to_basic_blocks,
 };
 
 use super::{
@@ -487,7 +491,19 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 return ctx.push_instruction(BasicBlockInstruction::UnaryOp(unary_expr.op, expr));
             }
         },
-        Expr::Update(_) => todo!(),
+        Expr::Update(UpdateExpr {
+            op, prefix, arg, ..
+        }) => {
+            let old_value = expr_to_basic_blocks(ctx, arg);
+            let new_value = ctx.push_instruction(BasicBlockInstruction::IncrDecr(
+                old_value,
+                op == &UpdateOp::PlusPlus,
+            ));
+
+            let new_value = pat_like_expr_to_basic_blocks(ctx, PatType::Assign, arg, new_value);
+
+            return if *prefix { new_value } else { old_value };
+        }
         Expr::Member(MemberExpr { obj, prop, .. }) => {
             let obj = expr_to_basic_blocks(ctx, obj);
             let prop = match prop {
@@ -662,18 +678,102 @@ mod tests {
     fn convert_simple_unary() {
         let s = test_basic_blocks(
             "var a = 10;
+            typeof globalVar;
             typeof a;
             void a;",
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 10
-            $1 = $0
-            $2 = typeof $1
-            $3 = $0
-            $4 = undefined
+            $1 = typeof global "globalVar"
+            $2 = $0
+            $3 = typeof $2
+            $4 = $0
             $5 = undefined
-            exit = return $5
+            $6 = undefined
+            exit = return $6
+        }
+        "###);
+    }
+
+    /* TODO can't write globals properly
+    #[test]
+    fn convert_global() {
+        let s = test_basic_blocks(
+            "readGlobal;
+            writeGlobal = 1;
+            readGlobalProp.prop;
+            writeGlobalProp.prop = 1;",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 10
+            $1 = typeof global "globalVar"
+            $2 = $0
+            $3 = typeof $2
+            $4 = $0
+            $5 = undefined
+            $6 = undefined
+            exit = return $6
+        }
+        "###);
+    } */
+
+    #[test]
+    fn convert_incr_decr() {
+        let s = test_basic_blocks(
+            "var a = 100;
+            a++;
+            use(a);
+            var b = 200;
+            --b;
+            use(b);",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 100
+            $1 = $0
+            $2 = ++$1
+            $3 = $2
+            $4 = global "use"
+            $5 = $4
+            $6 = $2
+            $7 = call $5($6)
+            $8 = 200
+            $9 = $8
+            $10 = --$9
+            $11 = $10
+            $12 = global "use"
+            $13 = $12
+            $14 = $10
+            $15 = call $13($14)
+            $16 = undefined
+            exit = return $16
+        }
+        "###);
+
+        let s = test_basic_blocks(
+            "var a = 100;
+            use(a++);
+            use(--a);",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 100
+            $1 = global "use"
+            $2 = $1
+            $3 = $0
+            $4 = ++$3
+            $5 = $4
+            $6 = call $2($3)
+            $7 = global "use"
+            $8 = $7
+            $9 = $4
+            $10 = --$9
+            $11 = $10
+            $12 = call $8($11)
+            $13 = undefined
+            exit = return $13
         }
         "###);
     }

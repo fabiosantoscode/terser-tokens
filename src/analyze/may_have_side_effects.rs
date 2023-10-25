@@ -11,6 +11,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::UnaryOp(_, _) => false,
             // may throw due to bigint
             BasicBlockInstruction::BinOp(_, _, _) => true,
+            // Can throw a conversion error (some_symbol++)
+            BasicBlockInstruction::IncrDecr(_, _) => true,
             BasicBlockInstruction::Undefined => false,
             BasicBlockInstruction::Null => false,
             BasicBlockInstruction::This => false,

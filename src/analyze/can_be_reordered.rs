@@ -6,8 +6,12 @@ impl BasicBlockInstruction {
         match self {
             BasicBlockInstruction::This
             | BasicBlockInstruction::BinOp(_, _, _)
+            | BasicBlockInstruction::UnaryOp(_, _)
+            | BasicBlockInstruction::IncrDecr(_, _)
             | BasicBlockInstruction::ArgumentRead(_)
             | BasicBlockInstruction::ArgumentRest(_)
+            | BasicBlockInstruction::TypeOf(_)
+            | BasicBlockInstruction::TypeOfGlobal(_)
             | BasicBlockInstruction::Function(_)
             | BasicBlockInstruction::Ref(_)
             | BasicBlockInstruction::Undefined

@@ -37,6 +37,27 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }
+            BasicBlockInstruction::IncrDecr(varname, is_incr) => {
+                let op = if *is_incr { "++" } else { "--" };
+                write!(f, "{}${}", op, varname)
+            }
+            /*
+            BasicBlockInstruction::UpdateMemberOp(op, prefix, operand_base, operand_member) => {
+                let op = match op {
+                    UpdateOp::PlusPlus => "++",
+                    UpdateOp::MinusMinus => "--",
+                };
+                let operand = match operand_member {
+                    ObjectMember::KeyValue(prop) => format!("{}.{}", operand_base, prop),
+                    ObjectMember::Computed(prop) => format!("{}[${}]", operand_base, prop),
+                    ObjectMember::Private(prop) => format!("{}.#{}", operand_base, prop),
+                };
+                if *prefix {
+                    write!(f, "{}${}", op, operand)
+                } else {
+                    write!(f, "${}{}", operand, op)
+                }
+            } */
             BasicBlockInstruction::Ref(id) => {
                 write!(f, "${}", id)
             }

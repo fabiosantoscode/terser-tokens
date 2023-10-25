@@ -436,7 +436,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
             }
         }
         Expr::Unary(unary_expr) => expr_nonlocals(ctx, &unary_expr.arg),
-        Expr::Update(_) => todo!(),
+        Expr::Update(update_expr) => expr_nonlocals(ctx, &update_expr.arg),
         Expr::Member(member) => {
             expr_nonlocals(ctx, &member.obj);
         }

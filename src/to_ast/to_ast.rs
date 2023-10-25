@@ -5,7 +5,7 @@ use swc_ecma_ast::{
     Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp, Lit,
     MemberExpr, MemberProp, Module, ModuleItem, Null, ObjectLit, PatOrExpr, PrivateName, Prop,
     PropName, PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr,
-    UnaryOp, WhileStmt, YieldExpr,
+    UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
 };
 
 use crate::{
@@ -319,6 +319,20 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 right: Box::new(right),
             })
         }
+        BasicBlockInstruction::IncrDecr(var_idx, is_incr) => {
+            let op = if *is_incr {
+                UpdateOp::PlusPlus
+            } else {
+                UpdateOp::MinusMinus
+            };
+
+            Expr::Update(UpdateExpr {
+                op,
+                arg: Box::new(ref_or_inlined_expr(ctx, *var_idx)),
+                prefix: true,
+                span: Default::default(),
+            })
+        }
         BasicBlockInstruction::Ref(var_idx) => ref_or_inlined_expr(ctx, *var_idx),
         BasicBlockInstruction::This => Expr::Ident(Ident::new("this".into(), Default::default())),
         BasicBlockInstruction::TypeOf(var_idx) => {
@@ -513,6 +527,47 @@ mod tests {
     #[test]
     fn to_tree() {
         let block_group = test_basic_blocks_module("1 + 2 + 3");
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        1 + 2 + 3;
+        return undefined;
+        "###);
+    }
+
+    #[test]
+    fn to_incr_decr() {
+        let block_group = test_basic_blocks_module(
+            "
+            var a = 100
+            use(a++);
+            var b = 200
+            use(--b);
+            ++globalVar
+            globalVar.foo--
+            a.decrProp--
+            ++a.incrProp
+        ",
+        );
+
+        let tree = to_ast_inner(block_group);
+        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        1 + 2 + 3;
+        return undefined;
+        "###);
+
+        let block_group = test_basic_blocks_module(
+            "var a = 100
+            use(a++);
+            use(a);
+            var b = 200
+            use(--b);
+            use(b);
+            use(++globalVar);
+            use(globalVar--);
+            use(++globalVar.prop);
+            use(globalVar.prop--);",
+        );
 
         let tree = to_ast_inner(block_group);
         insta::assert_snapshot!(stats_to_string(tree), @r###"

@@ -69,6 +69,15 @@ pub fn interpret(
                 _ => return None,
             }
         }
+        BasicBlockInstruction::IncrDecr(varname, is_incr) => match ctx.get_variable(*varname)? {
+            JsType::Number => JsType::Number,
+            JsType::TheNumber(n) => {
+                let diff = if *is_incr { 1.0 } else { -1.0 };
+
+                JsType::new_number(n.into_inner() + diff)
+            }
+            _ => return None,
+        },
         BasicBlockInstruction::Undefined => JsType::Undefined,
         BasicBlockInstruction::Null => JsType::Null,
         BasicBlockInstruction::This => None?, // TODO: grab from context?
@@ -242,7 +251,7 @@ pub fn interpret(
         },
         BasicBlockInstruction::ReadNonLocal(_) => None?, // TODO: grab from context?
         BasicBlockInstruction::WriteNonLocal(_, _) => None?, // TODO: grab from context?
-        BasicBlockInstruction::ReadGlobal(_) => None?, // May throw
+        BasicBlockInstruction::ReadGlobal(_) => None?,   // May throw
         BasicBlockInstruction::WriteGlobal(_, _) => None?, // May throw
     };
 
