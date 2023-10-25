@@ -26,7 +26,7 @@ where
         match get_fn_decl(stat) {
             Some(fn_decl) => {
                 let varname = ctx.bump_var_index(); // get a name for a future Function() instruction
-                ctx.assign_name(&fn_decl.ident.sym.to_string(), varname);
+                ctx.declare_name(&fn_decl.ident.sym.to_string(), varname);
                 fn_decls.push((varname, fn_decl));
             }
             _ => non_fn_decls.push(stat),

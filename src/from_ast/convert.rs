@@ -272,9 +272,8 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
-                    let sym = p.clone().ident().unwrap(/* TODO */);
                     let catcherr = ctx.push_instruction(BasicBlockInstruction::CaughtError);
-                    ctx.assign_name(&sym.sym, catcherr);
+                    pat_to_basic_blocks(ctx, PatType::VarDecl, p, catcherr);
                 }
                 block_to_basic_blocks(ctx, &handler.body.stmts).expect("todo error handling");
             }
@@ -326,16 +325,18 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
 pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
     match exp {
-        Expr::Lit(Lit::Num(num)) => {
-            return ctx.push_instruction(BasicBlockInstruction::LitNumber(num.value))
+        Expr::Lit(lit) => {
+            let lit = match lit {
+                Lit::Null(_) => BasicBlockInstruction::Null,
+                Lit::Bool(b) => BasicBlockInstruction::LitBool(b.value),
+                Lit::Num(num) => BasicBlockInstruction::LitNumber(num.value),
+                Lit::BigInt(_) => todo!(),
+                Lit::Str(s) => BasicBlockInstruction::LitString(s.value.to_string()),
+                Lit::Regex(_) => todo!(),
+                Lit::JSXText(_) => todo!(),
+            };
+            return ctx.push_instruction(lit);
         }
-        Expr::Lit(Lit::Bool(b)) => {
-            return ctx.push_instruction(BasicBlockInstruction::LitBool(b.value))
-        }
-        Expr::Lit(Lit::Str(s)) => {
-            return ctx.push_instruction(BasicBlockInstruction::LitString(s.value.to_string()))
-        }
-        Expr::Lit(Lit::Null(_)) => return ctx.push_instruction(BasicBlockInstruction::Null),
         Expr::Bin(bin) => {
             let l = expr_to_basic_blocks(ctx, &bin.left);
             let r = expr_to_basic_blocks(ctx, &bin.right);
@@ -696,7 +697,6 @@ mod tests {
         "###);
     }
 
-    /* TODO can't write globals properly
     #[test]
     fn convert_global() {
         let s = test_basic_blocks(
@@ -707,17 +707,23 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            $0 = 10
-            $1 = typeof global "globalVar"
-            $2 = $0
-            $3 = typeof $2
-            $4 = $0
-            $5 = undefined
-            $6 = undefined
-            exit = return $6
+            $0 = global "readGlobal"
+            $1 = $0
+            $2 = 1
+            $3 = global "writeGlobal" = $2
+            $4 = $2
+            $5 = global "readGlobalProp"
+            $6 = $5
+            $7 = $6.prop
+            $8 = 1
+            $9 = global "writeGlobalProp"
+            $10 = $9
+            $11 = $10.prop = $8
+            $12 = undefined
+            exit = return $12
         }
         "###);
-    } */
+    }
 
     #[test]
     fn convert_incr_decr() {
@@ -1335,6 +1341,43 @@ mod tests {
         @4: {
             $2 = undefined
             exit = return $2
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_pattern_catch() {
+        let s = test_basic_blocks(
+            "try {
+                777
+            } catch ({ message }) {
+                return message
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            exit = try @1 catch @2 finally @4 after @4
+        }
+        @1: {
+            $0 = 777
+            exit = error ? jump @2 : jump @4
+        }
+        @2: {
+            $1 = caught_error()
+            $2 = pack $1 {message: _}
+            $3 = unpack $2[0]
+            $4 = $3
+            exit = return $4
+        }
+        @3: {
+            exit = finally @4 after @4
+        }
+        @4: {
+            exit = end finally after @5
+        }
+        @5: {
+            $5 = undefined
+            exit = return $5
         }
         "###);
     }

@@ -228,11 +228,10 @@ mod tests {
         @0: {
             $11 = read_non_local $$6
             $12 = 9
-            $13 = read_non_local $$1
-            $14 = write_non_local $$1 $12
-            $15 = $12
-            $16 = undefined
-            exit = return $16
+            $13 = write_non_local $$1 $12
+            $14 = $12
+            $15 = undefined
+            exit = return $15
         }
         "###);
     }

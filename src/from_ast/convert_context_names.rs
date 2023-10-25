@@ -5,19 +5,9 @@ use crate::basic_blocks::{BasicBlockInstruction, NonLocalId};
 use super::{FromAstCtx, NonLocalInfo, NonLocalOrLocal};
 
 impl FromAstCtx {
-    pub fn assign_name(&mut self, name: &str, value: usize) {
-        if let Some(true) = self
-            .nonlocalinfo
-            .as_ref()
-            .map(|loc| loc.nonlocals.contains(&name.into()))
-        {
-            // it's a nonlocal and deserves special treatment
-            let nonlocal = self
-                .scope_tree
-                .lookup(name)
-                .expect("nonlocal not in scope tree")
-                .unwrap_nonlocal();
-
+    /// Declare or re-declare a name {name} to contain the instruction varname {value}
+    pub fn declare_name(&mut self, name: &str, value: usize) {
+        if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
             self.push_instruction(BasicBlockInstruction::WriteNonLocal(nonlocal, value));
         } else {
             let mut conditionals = self.conditionals.last_mut();
@@ -31,10 +21,19 @@ impl FromAstCtx {
                 });
 
                 entry.push(value);
-            };
+            }
 
             self.scope_tree
                 .insert(name.into(), NonLocalOrLocal::Local(value));
+        }
+    }
+
+    /// Assign or reassign {name}, which can be global, already-declared, or a nonlocal
+    pub fn assign_name(&mut self, name: &str, value: usize) {
+        if self.is_global_name(name) {
+            self.push_instruction(BasicBlockInstruction::WriteGlobal(name.to_string(), value));
+        } else {
+            self.declare_name(name, value)
         }
     }
 
@@ -297,11 +296,11 @@ mod tests {
     fn test_general() {
         let mut ctx = FromAstCtx::new();
 
-        ctx.assign_name("varname", 123);
+        ctx.declare_name("varname", 123);
 
         ctx.enter_conditional_branch();
 
-        ctx.assign_name("conditional_varname", 456);
+        ctx.declare_name("conditional_varname", 456);
         ctx.assign_name("conditional_varname", 789);
 
         ctx.go_into_function(BasicBlockEnvironment::Function(false, false), None, |ctx| {
@@ -418,12 +417,12 @@ mod tests {
     fn test_phi() {
         let mut ctx = FromAstCtx::new();
 
-        ctx.assign_name("varname_before_if", 11);
+        ctx.declare_name("varname_before_if", 11);
 
         ctx.enter_conditional_branch();
 
         ctx.assign_name("varname_before_if", 12);
-        ctx.assign_name("varname_in_if", 21);
+        ctx.declare_name("varname_in_if", 21);
         ctx.assign_name("varname_in_if", 22);
 
         insta::assert_debug_snapshot!(ctx.conditionals, @r###"
@@ -484,7 +483,7 @@ mod tests {
     fn test_nested_phi() {
         let mut ctx = FromAstCtx::new();
 
-        ctx.assign_name("varname", 11);
+        ctx.declare_name("varname", 11);
         insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
 
         ctx.enter_conditional_branch();

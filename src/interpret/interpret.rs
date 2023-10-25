@@ -142,9 +142,7 @@ pub fn interpret(
         BasicBlockInstruction::Member(_base, _member) => return None,
         BasicBlockInstruction::MemberSet(_base, _member, _value) => return None,
         BasicBlockInstruction::ArrayPattern(from_arr, pieces) => {
-            let Some(JsType::TheArray(from_arr)) = ctx.get_variable(*from_arr) else {
-                return None;
-            };
+            let from_arr = ctx.get_variable(*from_arr)?.as_array()?;
 
             let mut pattern_contents: Vec<JsType> = Vec::new();
 
@@ -161,9 +159,7 @@ pub fn interpret(
             JsType::Pattern(pattern_contents)
         }
         BasicBlockInstruction::ObjectPattern(inp_obj, pattern_props) => {
-            let Some(JsType::TheObject(obj)) = ctx.get_variable(*inp_obj) else {
-                return None;
-            };
+            let obj = ctx.get_variable(*inp_obj)?.as_object()?;
 
             let mut pattern_contents: Vec<JsType> = Vec::new();
 
@@ -457,6 +453,14 @@ mod tests {
         insta::assert_debug_snapshot!(test_interp_js("return typeof {}"), @"TheString(\"object\")");
         insta::assert_debug_snapshot!(test_interp_js("return typeof []"), @"TheString(\"object\")");
         insta::assert_debug_snapshot!(test_interp_js("return typeof function(){}"), @"TheString(\"function\")");
-        // TODO missingvar typeofs insta::assert_debug_snapshot!(test_interp_js("typeof missingVar"), @"TheString(\"undefined\")");
+        insta::assert_debug_snapshot!(test_interp_js("return typeof missingVar"), @"String");
+    }
+
+    #[test]
+    fn interp_incr() {
+        let num = test_interp_js("let a = 1; return a++;");
+        insta::assert_debug_snapshot!(num, @"TheNumber(1)");
+        let num = test_interp_js("let a = 1; return --a;");
+        insta::assert_debug_snapshot!(num, @"TheNumber(0)");
     }
 }

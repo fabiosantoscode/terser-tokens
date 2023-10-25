@@ -141,6 +141,20 @@ impl JsType {
         }
     }
 
+    pub(crate) fn as_array(&self) -> Option<&Vec<JsType>> {
+        match self {
+            JsType::TheArray(arr) => Some(arr),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_object(&self) -> Option<&BTreeMap<String, JsType>> {
+        match self {
+            JsType::TheObject(obj) => Some(obj),
+            _ => None,
+        }
+    }
+
     /// https://262.ecma-international.org/#sec-toboolean
     pub fn to_boolean(&self) -> Option<bool> {
         match self {

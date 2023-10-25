@@ -192,13 +192,11 @@ fn ident_pat(ctx: &mut FromAstCtx, pat_type: PatType, name: &str, input: usize) 
 
     match pat_type {
         VarDecl | FunArg => {
-            ctx.assign_name(name, input);
-            // TODO can assign globals too
+            ctx.declare_name(name, input);
+
             input
         }
         Assign => {
-            ctx.read_name(name);
-
             ctx.assign_name(name, input);
 
             ctx.push_instruction(BasicBlockInstruction::Ref(input))

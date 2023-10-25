@@ -1,8 +1,8 @@
 use swc_ecma_ast::{
     AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, DoWhileStmt, Expr, ExprOrSpread, ForHead,
-    ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt, MethodProp, Module, ModuleItem, ObjectLit,
-    ObjectPatProp, Param, Pat, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp, Stmt, VarDecl,
-    VarDeclKind, VarDeclOrExpr, WhileStmt, YieldExpr,
+    ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt, MemberProp, MethodProp, Module, ModuleItem,
+    ObjectLit, ObjectPatProp, Param, Pat, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
+    Stmt, VarDecl, VarDeclKind, VarDeclOrExpr, WhileStmt, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
@@ -265,7 +265,7 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
-                    ctx.declare_name(p.clone().ident().unwrap(/* TODO */).sym.to_string(), false);
+                    pat_nonlocals(ctx, p, PatType::DeclareErr);
                 }
                 block_nonlocals(ctx, &handler.body.stmts);
             }
@@ -302,6 +302,7 @@ enum PatType {
     Assign,
     DeclareVar,
     DeclareLet,
+    DeclareErr,
     FunArg,
     ForInOf,
 }
@@ -313,7 +314,7 @@ fn pat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, pat_expr: &'a Pat, pat_type
             match pat_type {
                 PatType::Assign | PatType::ForInOf => ctx.use_name(name),
                 PatType::DeclareVar | PatType::FunArg => ctx.declare_name(name, true),
-                PatType::DeclareLet => ctx.declare_name(name, false),
+                PatType::DeclareLet | PatType::DeclareErr => ctx.declare_name(name, false),
             }
         }
         Pat::Array(rx) => rx.elems.iter().for_each(|elem| match elem {
@@ -439,6 +440,10 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
         Expr::Update(update_expr) => expr_nonlocals(ctx, &update_expr.arg),
         Expr::Member(member) => {
             expr_nonlocals(ctx, &member.obj);
+
+            if let MemberProp::Computed(computed_prop) = &member.prop {
+                expr_nonlocals(ctx, &computed_prop.expr)
+            }
         }
         Expr::SuperProp(_) => todo!(),
         Expr::Call(call) => {

@@ -86,7 +86,7 @@ pub fn function_to_basic_blocks(
         // If this is a named FnExpr, we need another binding here.
         if let Some((name, nloc)) = inner_varname {
             let nloc = ctx.push_instruction(BasicBlockInstruction::ReadNonLocal(nloc));
-            ctx.assign_name(&name, nloc);
+            ctx.declare_name(&name, nloc);
         }
 
         match function.get_body() {
