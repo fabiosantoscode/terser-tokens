@@ -21,7 +21,7 @@ pub fn get_inlined_variables(
             .collect();
 
         for (_, block) in block_group.iter() {
-            ctx.non_reorderable_candidates = Default::default();
+            ctx.non_reorderable_candidates = vec![];
 
             for (var_idx, instruction) in block.iter() {
                 // In reverse, check if we can inline an argument in here.

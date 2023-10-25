@@ -4,11 +4,11 @@ use std::rc::Rc;
 
 use swc_common::SourceMap;
 use swc_common::{BytePos, SourceFile};
-use swc_ecma_ast::{ExprStmt, Script, Stmt};
+use swc_ecma_ast::{ExprStmt, Module, Stmt};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{parse_file_as_expr, EsConfig};
 
-use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, BasicBlockEnvironment};
+use crate::basic_blocks::{BasicBlockEnvironment, BasicBlockGroup, BasicBlockModule};
 use crate::from_ast::{block_to_basic_blocks, module_to_basic_blocks, FromAstCtx};
 use crate::swc_parse::swc_parse;
 
@@ -67,7 +67,7 @@ pub fn test_basic_blocks_module(source: &str) -> BasicBlockModule {
     module_to_basic_blocks("test.js", &m).unwrap()
 }
 
-pub fn stats_to_string(stats: Vec<Stmt>) -> String {
+pub fn module_to_string(stats: &Module) -> String {
     struct Buf {
         pub buf: Rc<RefCell<String>>,
     }
@@ -83,11 +83,6 @@ pub fn stats_to_string(stats: Vec<Stmt>) -> String {
         }
     }
 
-    let script: Script = Script {
-        span: Default::default(),
-        body: stats,
-        shebang: None,
-    };
     let str = Rc::new(RefCell::new(String::new()));
     let buf = Buf { buf: str.clone() };
     let writer = Box::new(buf);
@@ -99,7 +94,7 @@ pub fn stats_to_string(stats: Vec<Stmt>) -> String {
         wr: JsWriter::new(Default::default(), "\n", writer, None),
     };
 
-    emitter.emit_script(&script).unwrap();
+    emitter.emit_module(stats).unwrap();
 
     str.take()
 }

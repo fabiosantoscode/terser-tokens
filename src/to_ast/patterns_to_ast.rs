@@ -82,7 +82,7 @@ pub fn pattern_to_statement(
 
 #[cfg(test)]
 mod tests {
-    use crate::{testutils::*, to_ast::to_ast_inner};
+    use crate::{testutils::*, to_ast::module_to_ast};
 
     #[test]
     fn to_object_patterns() {
@@ -92,8 +92,8 @@ mod tests {
             return c;",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = undefined;
         var { x: b, ...c } = {
             x: {
@@ -126,8 +126,8 @@ mod tests {
             return [b, a, c, ...rest];",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = undefined;
         var [b, c, ...d] = [
             a,
@@ -155,8 +155,8 @@ mod tests {
             func()",
         );
 
-        let tree = to_ast_inner(obj);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(obj);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         (function(a) {
             var { x: b, y: c, ...d } = a;
             var e = c;
@@ -179,8 +179,8 @@ mod tests {
             func()",
         );
 
-        let tree = to_ast_inner(obj);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(obj);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         (function(a) {
             var [b, c, ...d] = a;
             var e = c;
@@ -203,8 +203,8 @@ mod tests {
             func()",
         );
 
-        let tree = to_ast_inner(obj);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(obj);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         (function(a, ...b) {
             if (a === undefined) {
                 var c = 2;
@@ -234,8 +234,8 @@ mod tests {
             })(1)",
         );
 
-        let tree = to_ast_inner(obj);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(obj);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         (function(a, b) {
             var c = undefined;
             c = a;

@@ -34,7 +34,7 @@ pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     }
 }
 
-pub fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
+fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
     let phied = block_module
         .iter_all_instructions()
         .flat_map(|(_, _, varname, ins)| match ins {
@@ -528,8 +528,8 @@ mod tests {
     fn to_tree() {
         let block_group = test_basic_blocks_module("1 + 2 + 3");
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         1 + 2 + 3;
         return undefined;
         "###);
@@ -538,29 +538,34 @@ mod tests {
     #[test]
     fn to_incr_decr() {
         let block_group = test_basic_blocks_module(
-            "
-            var a = 100
+            "var a = 100;
             use(a++);
-            var b = 200
+            var b = 200;
             use(--b);
-            ++globalVar
-            globalVar.foo--
-            a.decrProp--
-            ++a.incrProp
-        ",
+            ++globalVar;
+            globalVar.foo--;
+            a.decrProp--;
+            ++a.incrProp;",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
-        1 + 2 + 3;
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        var a = 100;
+        use(a++);
+        var b = 200;
+        use(--b);
+        ++globalVar;
+        globalVar.foo--;
+        a.decrProp--;
+        ++a.incrProp;
         return undefined;
         "###);
 
         let block_group = test_basic_blocks_module(
-            "var a = 100
+            "var a = 100;
             use(a++);
             use(a);
-            var b = 200
+            var b = 200;
             use(--b);
             use(b);
             use(++globalVar);
@@ -569,9 +574,18 @@ mod tests {
             use(globalVar.prop--);",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
-        1 + 2 + 3;
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        var a = 100;
+        use(a++);
+        use(a);
+        var b = 200;
+        use(--b);
+        use(b);
+        use(++globalVar);
+        use(globalVar--);
+        use(++globalVar.prop);
+        use(globalVar.prop--);
         return undefined;
         "###);
     }
@@ -580,8 +594,8 @@ mod tests {
     fn to_tree_cond_1() {
         let block_group = test_basic_blocks_module("return (1 ? 2 : 3)");
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         if (1) {
             var a = 2;
         } else {
@@ -599,8 +613,8 @@ mod tests {
             return x",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = 0;
         if (1) {
             a = 2;
@@ -616,8 +630,8 @@ mod tests {
             return 2",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         return 2;
         "###);
     }
@@ -629,8 +643,8 @@ mod tests {
             return function bar() { return outer; }",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = undefined;
         a = 1;
         var b = undefined;
@@ -646,8 +660,8 @@ mod tests {
     fn to_gen_scopes() {
         let block_group = test_basic_blocks_module("(function* bar() { yield 1; })");
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = undefined;
         a = (function*() {
             yield 1;
@@ -664,8 +678,8 @@ mod tests {
             return function bar() { outer = outer + 1 }",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = undefined;
         a = 1;
         var b = undefined;
@@ -683,8 +697,8 @@ mod tests {
     fn to_loop() {
         let block_group = test_basic_blocks_module("while (123) { if (456) { break; } }");
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         while(true){
             if (123) {
                 if (456) {
@@ -707,8 +721,8 @@ mod tests {
             }",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         for(var a in {}){
             a();
             continue;
@@ -726,8 +740,8 @@ mod tests {
             }",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         while(true){
             if (123) {
                 if (456) {
@@ -763,8 +777,8 @@ mod tests {
             }",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         a: while(true){
             if (123) {
                 if (456) {
@@ -799,8 +813,8 @@ mod tests {
             return x + 1",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = 10;
         if (123) {
             a = 456;
@@ -825,8 +839,8 @@ mod tests {
             return x;",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = 10;
         try {
             if (a > 10) {
@@ -857,8 +871,8 @@ mod tests {
             return x;",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = 10;
         try {
             if (a > 10) {

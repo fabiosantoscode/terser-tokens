@@ -97,7 +97,7 @@ fn take_param_readers(ctx: &mut ToAstContext, func: &mut StructuredFlow) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{testutils::*, to_ast::to_ast_inner};
+    use crate::{testutils::*, to_ast::module_to_ast};
 
     #[test]
     fn to_functions() {
@@ -112,8 +112,8 @@ mod tests {
             foo() + bar()",
         );
 
-        let tree = to_ast_inner(block_group);
-        insta::assert_snapshot!(stats_to_string(tree), @r###"
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = undefined;
         var e = (function() {
             var b = undefined;
