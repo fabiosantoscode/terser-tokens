@@ -96,7 +96,6 @@ fn take_param_readers(ctx: &mut ToAstContext, func: &mut StructuredFlow) -> Vec<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{testutils::*, to_ast::module_to_ast};
 
     #[test]

@@ -6,11 +6,12 @@ use swc_ecma_ast::{
 use crate::{
     basic_blocks::{
         ArrayPatternPiece, BasicBlockExit, BasicBlockInstruction, ObjectMember, ObjectPatternPiece,
+        LHS,
     },
     from_ast::expr_to_basic_blocks,
 };
 
-use super::FromAstCtx;
+use super::{to_basic_blocks_lhs, FromAstCtx};
 
 #[derive(Clone, Copy, Debug)]
 pub enum PatType {
@@ -168,7 +169,7 @@ pub fn pat_like_expr_to_basic_blocks(
         Expr::SuperProp(SuperPropExpr { .. }) => todo!(),
         Expr::MetaProp(_) => todo!(),
         Expr::Member(MemberExpr { obj, prop, .. }) => {
-            let base = expr_to_basic_blocks(ctx, obj.as_ref());
+            let base = to_basic_blocks_lhs(ctx, obj.as_ref());
             let prop = match &prop {
                 MemberProp::Ident(ident) => ObjectMember::KeyValue(ident.sym.to_string()),
                 MemberProp::PrivateName(pvt) => ObjectMember::Private(pvt.id.sym.to_string()),
@@ -178,7 +179,9 @@ pub fn pat_like_expr_to_basic_blocks(
                 }
             };
 
-            return ctx.push_instruction(BasicBlockInstruction::MemberSet(base, prop, input));
+            let memb = LHS::Member(Box::new(base), prop);
+
+            return ctx.push_instruction(BasicBlockInstruction::Write(memb, input));
         }
         _ => unreachable!(
             "pattern expression must be an identifier or member expression, got: {:?}",

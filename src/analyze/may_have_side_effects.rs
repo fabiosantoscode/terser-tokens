@@ -1,4 +1,4 @@
-use crate::basic_blocks::{ArrayElement, BasicBlockInstruction, ObjectProp};
+use crate::basic_blocks::{ArrayElement, BasicBlockInstruction, ObjectProp, LHS};
 
 impl BasicBlockInstruction {
     /// Will this instruction throw an error or change the state of the program besides assigning its variable?
@@ -13,6 +13,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::BinOp(_, _, _) => true,
             // Can throw a conversion error (some_symbol++)
             BasicBlockInstruction::IncrDecr(_, _) => true,
+            BasicBlockInstruction::IncrDecrPostfix(_, _) => true,
             BasicBlockInstruction::Undefined => false,
             BasicBlockInstruction::Null => false,
             BasicBlockInstruction::This => false,
@@ -28,10 +29,6 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Object(_, props) => {
                 props.iter().any(|p| matches!(p, ObjectProp::Spread(_)))
             }
-            // base may be nullish, prop may be getter
-            BasicBlockInstruction::Member(_, _) => false,
-            // may throw due to setter or nullish base, also changes a value
-            BasicBlockInstruction::MemberSet(_, _, _) => true,
             // may throw due to unspreadable array items
             BasicBlockInstruction::ArrayPattern(_, _) => true,
             // may throw due to unspreadable object items
@@ -45,10 +42,19 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Call(_, _) => true,
             BasicBlockInstruction::ArgumentRead(_) => false,
             BasicBlockInstruction::ArgumentRest(_) => false,
-            BasicBlockInstruction::ReadNonLocal(_) => false,
-            BasicBlockInstruction::WriteNonLocal(_, _) => true,
-            BasicBlockInstruction::ReadGlobal(_) => true, // Global refs may throw
-            BasicBlockInstruction::WriteGlobal(_, _) => true,
+            BasicBlockInstruction::Read(lhs) => lhs.read_may_have_side_effects(),
+            BasicBlockInstruction::Write(_, _) => true,
+        }
+    }
+}
+
+impl LHS {
+    fn read_may_have_side_effects(&self) -> bool {
+        match self {
+            LHS::Local(_) => false,
+            LHS::NonLocal(_) => false,
+            LHS::Global(_) => true,
+            LHS::Member(_, _) => true,
         }
     }
 }

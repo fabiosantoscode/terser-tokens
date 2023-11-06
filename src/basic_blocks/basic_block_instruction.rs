@@ -12,7 +12,9 @@ pub enum BasicBlockInstruction {
     UnaryOp(swc_ecma_ast::UnaryOp, usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
     /// (varname, is_incr)
-    IncrDecr(usize, bool),
+    IncrDecr(LHS, IncrDecr),
+    /// (varname, is_incr)
+    IncrDecrPostfix(LHS, IncrDecr),
     Undefined,
     Null,
     This,
@@ -23,10 +25,6 @@ pub enum BasicBlockInstruction {
     Array(Vec<ArrayElement>),
     /// __proto__, object props
     Object(Option<usize>, Vec<ObjectProp>),
-    /// base, prop
-    Member(usize, ObjectMember),
-    /// base, prop, value
-    MemberSet(usize, ObjectMember, usize),
     ArrayPattern(usize, Vec<ArrayPatternPiece>),
     ObjectPattern(usize, Vec<ObjectPatternPiece>),
     /// pattern, index
@@ -37,10 +35,8 @@ pub enum BasicBlockInstruction {
     Call(usize, Vec<usize>),
     ArgumentRead(usize),
     ArgumentRest(usize),
-    ReadNonLocal(NonLocalId),
-    WriteNonLocal(NonLocalId, usize),
-    ReadGlobal(String),
-    WriteGlobal(String, usize),
+    Read(LHS),
+    Write(LHS, usize),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -90,6 +86,37 @@ pub enum ObjectMember {
     Computed(usize),
 }
 
+/// Increment or decrement
+#[derive(Clone, PartialEq, Debug)]
+pub enum IncrDecr {
+    Incr,
+    Decr,
+}
+
+impl IncrDecr {
+    pub fn as_float_incr(&self) -> f64 {
+        match self {
+            IncrDecr::Incr => 1.0,
+            IncrDecr::Decr => -1.0,
+        }
+    }
+    pub fn op_string(&self) -> &'static str {
+        match self {
+            IncrDecr::Incr => "++",
+            IncrDecr::Decr => "--",
+        }
+    }
+}
+
+/// A left hand side expression. This can be used for assignments, typeof, and ++/--.
+#[derive(Clone, PartialEq)]
+pub enum LHS {
+    Local(usize),
+    NonLocal(NonLocalId),
+    Global(String),
+    Member(Box<LHS>, ObjectMember),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum TempExitType {
     Yield,
@@ -106,7 +133,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Ref(id) => vec![*id],
             BasicBlockInstruction::UnaryOp(_, v) => vec![*v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
-            BasicBlockInstruction::IncrDecr(v, _) => vec![*v],
+            BasicBlockInstruction::IncrDecr(v, _) => v.used_vars(),
+            BasicBlockInstruction::IncrDecrPostfix(v, _) => v.used_vars(),
             BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),
             BasicBlockInstruction::Undefined => vec![],
             BasicBlockInstruction::Null => vec![],
@@ -130,16 +158,6 @@ impl BasicBlockInstruction {
                     ObjectProp::Spread(spread_obj) => vec![*spread_obj],
                 }))
                 .collect(),
-            BasicBlockInstruction::Member(base, member) => match member {
-                ObjectMember::KeyValue(_) => vec![*base],
-                ObjectMember::Private(_) => vec![*base],
-                ObjectMember::Computed(key) => vec![*base, *key],
-            },
-            BasicBlockInstruction::MemberSet(base, member, value) => match member {
-                ObjectMember::KeyValue(_) => vec![*base, *value],
-                ObjectMember::Private(_) => vec![*base, *value],
-                ObjectMember::Computed(key) => vec![*base, *key, *value],
-            },
             BasicBlockInstruction::ArrayPattern(input, _) => vec![*input],
             BasicBlockInstruction::ObjectPattern(input, _) => vec![*input],
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
@@ -155,10 +173,12 @@ impl BasicBlockInstruction {
             }
             BasicBlockInstruction::ArgumentRead(_) => vec![],
             BasicBlockInstruction::ArgumentRest(_) => vec![],
-            BasicBlockInstruction::ReadNonLocal(_) => vec![],
-            BasicBlockInstruction::WriteNonLocal(_, val) => vec![*val],
-            BasicBlockInstruction::ReadGlobal(_) => vec![],
-            BasicBlockInstruction::WriteGlobal(_, val) => vec![*val],
+            BasicBlockInstruction::Read(lhs) => lhs.used_vars(),
+            BasicBlockInstruction::Write(lhs, val) => {
+                let mut res = lhs.used_vars();
+                res.push(*val);
+                res
+            }
         }
     }
 
@@ -170,7 +190,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Ref(id) => vec![id],
             BasicBlockInstruction::UnaryOp(_, v) => vec![v],
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
-            BasicBlockInstruction::IncrDecr(v, _) => vec![v],
+            BasicBlockInstruction::IncrDecr(v, _) => v.used_vars_mut(),
+            BasicBlockInstruction::IncrDecrPostfix(v, _) => v.used_vars_mut(),
             BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
             BasicBlockInstruction::Undefined => vec![],
             BasicBlockInstruction::Null => vec![],
@@ -194,16 +215,6 @@ impl BasicBlockInstruction {
                     ObjectProp::Spread(spread_obj) => vec![spread_obj],
                 }))
                 .collect(),
-            BasicBlockInstruction::Member(base, member) => match member {
-                ObjectMember::KeyValue(_) => vec![base],
-                ObjectMember::Private(_) => vec![base],
-                ObjectMember::Computed(key) => vec![base, key],
-            },
-            BasicBlockInstruction::MemberSet(base, member, value) => match member {
-                ObjectMember::KeyValue(_) => vec![base, value],
-                ObjectMember::Private(_) => vec![base, value],
-                ObjectMember::Computed(key) => vec![base, key, value],
-            },
             BasicBlockInstruction::ArrayPattern(input, _) => vec![input],
             BasicBlockInstruction::ObjectPattern(input, _) => vec![input],
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],
@@ -219,25 +230,39 @@ impl BasicBlockInstruction {
             }
             BasicBlockInstruction::ArgumentRead(_) => vec![],
             BasicBlockInstruction::ArgumentRest(_) => vec![],
-            BasicBlockInstruction::ReadNonLocal(_) => vec![],
-            BasicBlockInstruction::WriteNonLocal(_, val) => vec![val],
-            BasicBlockInstruction::ReadGlobal(_) => vec![],
-            BasicBlockInstruction::WriteGlobal(_, val) => vec![val],
+            BasicBlockInstruction::Read(lhs) => lhs.used_vars_mut(),
+            BasicBlockInstruction::Write(lhs, val) => {
+                let mut res = lhs.used_vars_mut();
+                res.push(val);
+                res
+            }
         }
     }
 
     pub fn get_nonlocal_id_mut(&mut self) -> Option<&mut usize> {
+        self.get_lhs_mut()?.get_nonlocal_id_mut()
+    }
+
+    pub fn get_nonlocal_id(&self) -> Option<usize> {
+        self.get_lhs()?.get_nonlocal_id()
+    }
+
+    pub fn get_lhs(&self) -> Option<&LHS> {
         match self {
-            BasicBlockInstruction::ReadNonLocal(id) => Some(&mut id.0),
-            BasicBlockInstruction::WriteNonLocal(id, _) => Some(&mut id.0),
+            BasicBlockInstruction::Read(lhs) => Some(lhs),
+            BasicBlockInstruction::Write(lhs, _) => Some(lhs),
+            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
+            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
             _ => None,
         }
     }
 
-    pub fn get_nonlocal_id(&self) -> Option<usize> {
+    pub fn get_lhs_mut(&mut self) -> Option<&mut LHS> {
         match self {
-            BasicBlockInstruction::ReadNonLocal(id) => Some(id.0),
-            BasicBlockInstruction::WriteNonLocal(id, _) => Some(id.0),
+            BasicBlockInstruction::Read(lhs) => Some(lhs),
+            BasicBlockInstruction::Write(lhs, _) => Some(lhs),
+            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
+            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
             _ => None,
         }
     }
@@ -247,6 +272,68 @@ impl BasicBlockInstruction {
         match self {
             BasicBlockInstruction::Ref(id) => *id,
             _ => panic!("Expected Ref"),
+        }
+    }
+}
+
+impl LHS {
+    pub fn used_vars(&self) -> Vec<usize> {
+        match self {
+            LHS::Local(v) => vec![*v],
+            LHS::NonLocal(_) => vec![],
+            LHS::Global(_) => vec![],
+            LHS::Member(base, memb) => {
+                let mut res = base.used_vars();
+                res.extend(memb.used_vars());
+                res
+            }
+        }
+    }
+
+    pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
+        match self {
+            LHS::Local(v) => vec![v],
+            LHS::NonLocal(_) => vec![],
+            LHS::Global(_) => vec![],
+            LHS::Member(base, memb) => {
+                let mut res = base.used_vars_mut();
+                res.extend(memb.used_vars_mut());
+                res
+            }
+        }
+    }
+
+    pub fn get_nonlocal_id(&self) -> Option<usize> {
+        match self {
+            LHS::NonLocal(id) => Some(id.0),
+            LHS::Member(base, _) => base.get_nonlocal_id(),
+            _ => None,
+        }
+    }
+
+    pub fn get_nonlocal_id_mut(&mut self) -> Option<&mut usize> {
+        match self {
+            LHS::NonLocal(id) => Some(&mut id.0),
+            LHS::Member(base, _) => base.get_nonlocal_id_mut(),
+            _ => None,
+        }
+    }
+}
+
+impl ObjectMember {
+    pub fn used_vars(&self) -> Vec<usize> {
+        match self {
+            ObjectMember::KeyValue(_) => vec![],
+            ObjectMember::Private(_) => vec![],
+            ObjectMember::Computed(v) => vec![*v],
+        }
+    }
+
+    pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
+        match self {
+            ObjectMember::KeyValue(_) => vec![],
+            ObjectMember::Private(_) => vec![],
+            ObjectMember::Computed(v) => vec![v],
         }
     }
 }

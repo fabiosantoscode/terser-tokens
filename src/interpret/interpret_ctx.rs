@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analyze::function_usage_count;
-use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, FunctionId};
+use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, FunctionId, ObjectMember, LHS};
+use crate::data_structures::CowMap;
 
 use super::{interpret_function, JsArgs, JsCompletion, JsType};
 
 #[derive(Debug)]
 pub struct InterpretCtx<'module> {
-    variables: Vec<BTreeMap<usize, JsType>>,
+    variables: Vec<CowMap<usize, JsType>>,
     arguments: Vec<JsArgs>,
     pub(crate) cached_functions: BTreeMap<FunctionId, CachedFunction>,
     module: Option<&'module BasicBlockModule>,
@@ -23,7 +24,7 @@ impl<'module> Default for InterpretCtx<'_> {
 impl<'module> InterpretCtx<'_> {
     pub(crate) fn new() -> InterpretCtx<'module> {
         InterpretCtx {
-            variables: vec![BTreeMap::new()],
+            variables: vec![CowMap::new()],
             arguments: vec![Default::default()],
             cached_functions: Default::default(),
             module: Default::default(),
@@ -33,7 +34,7 @@ impl<'module> InterpretCtx<'_> {
 
     pub(crate) fn from_module(module: &'module BasicBlockModule) -> InterpretCtx<'module> {
         InterpretCtx {
-            variables: vec![BTreeMap::new()],
+            variables: vec![CowMap::new()],
             arguments: vec![Default::default()],
             module: Some(module),
             ..Default::default()
@@ -45,6 +46,88 @@ impl<'module> InterpretCtx<'_> {
     }
     pub(crate) fn get_variable(&self, var_idx: usize) -> Option<&JsType> {
         self.variables.last().unwrap().get(&var_idx)
+    }
+
+    pub(crate) fn get_lhs(&self, lhs: &LHS) -> Option<&JsType> {
+        match lhs {
+            LHS::Local(v) => self.get_variable(*v),
+            LHS::NonLocal(_) => None, // TODO
+            LHS::Global(_) => None,   // TODO
+            LHS::Member(base, member) => {
+                let base = self.get_lhs(base)?;
+
+                let string_key = match member {
+                    ObjectMember::KeyValue(string_key) => string_key.clone(),
+                    ObjectMember::Computed(varname) => self.get_variable(*varname)?.to_string()?,
+                    _ => todo!("private fields"),
+                };
+
+                match base {
+                    JsType::TheObject(o) => o.get(&string_key),
+                    JsType::TheArray(a) => {
+                        let as_num = string_key.parse::<usize>().ok()?;
+                        a.get(as_num)
+                    }
+                    _ => return None,
+                }
+            }
+        }
+    }
+
+    pub(crate) fn set_lhs(&mut self, lhs: &LHS, new_value: &JsType) -> Option<()> {
+        match lhs {
+            LHS::Local(v) => {
+                let old = self.get_variable(*v)?;
+
+                if old == new_value {
+                    return Some(()); // Nothing was changed
+                }
+
+                self.assign_variable(*v, new_value.clone());
+
+                Some(())
+            }
+            LHS::NonLocal(_) => None, // TODO
+            LHS::Global(_) => None,   // TODO
+            LHS::Member(base, member) => {
+                let old_base = self.get_lhs(base)?;
+                let string_key = match member {
+                    ObjectMember::KeyValue(string_key) => string_key.clone(),
+                    ObjectMember::Computed(varname) => self.get_variable(*varname)?.to_string()?,
+                    _ => return None,
+                };
+
+                let old = match old_base {
+                    JsType::Object | JsType::Array => {
+                        return Some(()); // No-op
+                    }
+                    JsType::TheObject(o) => o.get(&string_key)?,
+                    JsType::TheArray(a) => {
+                        let as_num = string_key.parse::<usize>().ok()?;
+                        a.get(as_num)?
+                    }
+                    _ => return None,
+                };
+
+                if old == new_value {
+                    return Some(()); // Nothing was changed
+                }
+
+                let mut new_t = old_base.clone();
+                match &mut new_t {
+                    JsType::TheObject(ref mut o) => {
+                        o.insert(string_key, new_value.clone());
+                    }
+                    JsType::TheArray(ref mut a) => {
+                        let as_num = string_key.parse::<usize>().ok()?;
+                        a[as_num] = new_value.clone();
+                    }
+                    _ => unreachable!(),
+                };
+
+                self.set_lhs(base, &new_t)
+            }
+        }
     }
 
     pub(crate) fn get_variables(&self, items: Vec<usize>) -> Option<Vec<JsType>> {
@@ -83,12 +166,51 @@ impl<'module> InterpretCtx<'_> {
             .unwrap_or(true)
     }
 
+    pub(crate) fn start_condition(&mut self) {
+        let vars = self.variables.pop().unwrap();
+        self.variables.push(vars.fork());
+    }
+
+    pub(crate) fn end_condition(&mut self) -> BTreeMap<usize, JsType> {
+        let vars = self.variables.last_mut().unwrap();
+        let ret = vars.unfork();
+        ret
+    }
+
+    pub(crate) fn merge_branch_mutations(
+        &mut self,
+        mut a_vars: BTreeMap<usize, JsType>,
+        mut b_vars: BTreeMap<usize, JsType>,
+    ) {
+        let vars = self.variables.last_mut().unwrap();
+        let changed_vars: BTreeSet<_> = a_vars.keys().chain(b_vars.keys()).cloned().collect();
+
+        println!("Merging branch mutations: {:?} and {:?}", a_vars, b_vars);
+
+        for changed in changed_vars {
+            let merged_conds = match (a_vars.remove(&changed), b_vars.remove(&changed)) {
+                (Some(a), Some(b)) => a.union(&b),
+                (Some(only), None) | (None, Some(only)) => only,
+                _ => unreachable!(),
+            };
+
+            match vars.get_mut(&changed) {
+                Some(entry) => {
+                    *entry = entry.union(&merged_conds);
+                }
+                None => {
+                    vars.insert(changed, merged_conds);
+                }
+            };
+        }
+    }
+
     pub(crate) fn start_function(&mut self, function_id: FunctionId, args: JsArgs) {
         self.cached_functions
             .entry(function_id)
             .or_insert_with(CachedFunction::new)
             .start_caching(&args);
-        self.variables.push(Default::default());
+        self.variables.push(CowMap::new());
         self.arguments.push(args);
     }
 
@@ -99,11 +221,15 @@ impl<'module> InterpretCtx<'_> {
             .expect("unbalanced start_function() and end_function()");
         // Merge the types used in this call, with the types we had before
         let current_vars = self.variables.last_mut().unwrap();
-        for (var_idx, var_type) in assigned_vars {
-            current_vars
-                .entry(var_idx)
-                .and_modify(|existing| *existing = existing.union(&var_type))
-                .or_insert(var_type);
+        for (var_idx, var_type) in assigned_vars.into_iter() {
+            match current_vars.get_mut(&var_idx) {
+                Some(existing) => {
+                    *existing = existing.union(&var_type);
+                }
+                None => {
+                    current_vars.insert(var_idx, var_type);
+                }
+            };
         }
         let args = self
             .arguments
@@ -159,6 +285,7 @@ impl<'module> InterpretCtx<'_> {
             .collect::<Vec<_>>();
 
         for function_id in to_reeval.into_iter() {
+            // TODO we must also re-eval where we haven't seen all the calls
             let func = self.get_function(*function_id).unwrap().clone(/*TODO*/);
 
             interpret_function(self, &func, JsArgs::Unknown);
@@ -171,7 +298,7 @@ impl<'module> InterpretCtx<'_> {
     }
 
     /// Coalesce this context into an index of all variables and their values
-    pub(crate) fn into_all_variables(mut self) -> BTreeMap<usize, JsType> {
+    pub(crate) fn into_all_variables(mut self) -> CowMap<usize, JsType> {
         assert_eq!(
             self.variables.len(),
             1,

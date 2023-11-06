@@ -1,15 +1,15 @@
-use std::{collections::BTreeMap, fmt::Debug};
+use std::{borrow::Borrow, collections::BTreeMap, fmt::Debug};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ScopeTreeNode<Of = usize> {
+struct ScopeTreeNode<Key = String, Of = usize> {
     pub parent: Option<ScopeTreeHandle>,
     pub is_block: bool, // TODO there are actually two "function" scopes
-    pub vars: BTreeMap<String, Of>,
+    pub vars: BTreeMap<Key, Of>,
 }
 
 #[derive(Debug)]
-pub struct ScopeTree<Of = usize> {
-    scopes: Vec<ScopeTreeNode<Of>>,
+pub struct ScopeTree<Key = String, Of = usize> {
+    scopes: Vec<ScopeTreeNode<Key, Of>>,
     pub current_scope: ScopeTreeHandle,
 }
 
@@ -17,8 +17,9 @@ pub struct ScopeTree<Of = usize> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeTreeHandle(pub usize);
 
-impl<Of> ScopeTree<Of>
+impl<Key, Of> ScopeTree<Key, Of>
 where
+    Key: Clone + Ord,
     Of: Clone,
 {
     pub fn new() -> Self {
@@ -65,27 +66,35 @@ where
         self.current_scope = self.parent().expect("Tried to leave the root scope");
     }
 
-    pub fn insert(&mut self, name: String, value: Of) {
+    pub fn insert(&mut self, name: Key, value: Of) {
         self.insert_at(self.current_scope, name, value);
     }
 
-    pub fn insert_at_function(&mut self, name: String, value: Of) {
+    pub fn insert_at_function(&mut self, name: Key, value: Of) {
         let fscope = self
             .get_closest_function_scope_at(self.current_scope)
             .expect("no function scope available");
         self.insert_at(fscope, name, value);
     }
 
-    fn insert_at(&mut self, n: ScopeTreeHandle, name: String, value: Of) {
+    fn insert_at(&mut self, n: ScopeTreeHandle, name: Key, value: Of) {
         let scope = &mut self.scopes[n.0];
         scope.vars.insert(name, value);
     }
 
-    fn has_at(&self, n: ScopeTreeHandle, name: &str) -> bool {
+    fn has_at<Q: ?Sized>(&self, n: ScopeTreeHandle, name: &Q) -> bool
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         self.scopes[n.0].vars.contains_key(name)
     }
 
-    fn get_at(&self, n: ScopeTreeHandle, name: &str) -> Option<&Of> {
+    fn get_at<Q: ?Sized>(&self, n: ScopeTreeHandle, name: &Q) -> Option<&Of>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         self.scopes[n.0].vars.get(name)
     }
 
@@ -97,11 +106,19 @@ where
         self.parent_at(self.current_scope)
     }
 
-    pub fn lookup(&self, name: &str) -> Option<Of> {
+    pub fn lookup<Q: ?Sized>(&self, name: &Q) -> Option<Of>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         self.lookup_at(self.current_scope, name)
     }
 
-    pub fn lookup_at(&self, at: ScopeTreeHandle, name: &str) -> Option<Of> {
+    pub fn lookup_at<Q: ?Sized>(&self, at: ScopeTreeHandle, name: &Q) -> Option<Of>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         if let Some(v) = self.get_at(at, name) {
             Some(v.clone())
         } else {
@@ -110,11 +127,19 @@ where
         }
     }
 
-    pub fn lookup_in_function(&self, name: &str) -> Option<Of> {
+    pub fn lookup_in_function<Q: ?Sized>(&self, name: &Q) -> Option<Of>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         self.lookup_in_function_at(self.current_scope, name)
     }
 
-    pub fn lookup_in_function_at(&self, at: ScopeTreeHandle, name: &str) -> Option<Of> {
+    pub fn lookup_in_function_at<Q: ?Sized>(&self, at: ScopeTreeHandle, name: &Q) -> Option<Of>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         if let Some(v) = self.get_at(at, name) {
             Some(v.clone())
         } else {
@@ -127,11 +152,23 @@ where
         }
     }
 
-    pub fn lookup_scope_of(&self, name: &str) -> Option<ScopeTreeHandle> {
+    pub fn lookup_scope_of<Q: ?Sized>(&self, name: &Q) -> Option<ScopeTreeHandle>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         self.lookup_scope_of_at(self.current_scope, name)
     }
 
-    pub fn lookup_scope_of_at(&self, at: ScopeTreeHandle, name: &str) -> Option<ScopeTreeHandle> {
+    pub fn lookup_scope_of_at<Q: ?Sized>(
+        &self,
+        at: ScopeTreeHandle,
+        name: &Q,
+    ) -> Option<ScopeTreeHandle>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
         if self.has_at(at, name) {
             Some(at)
         } else {

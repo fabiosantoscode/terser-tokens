@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::basic_blocks::{BasicBlock, BasicBlockInstruction, BasicBlockModule, NonLocalId};
+use crate::basic_blocks::{BasicBlock, BasicBlockInstruction, BasicBlockModule};
 
 /// Count how often a variable is used.
 pub fn count_variable_uses(module: &BasicBlockModule) -> BTreeMap<usize, u32> {
@@ -19,8 +19,10 @@ fn count_block(usages: &mut BTreeMap<usize, u32>, block: &BasicBlock) {
         for var in ins.used_vars() {
             *usages.entry(var).or_insert(0) += 1;
         }
-        if let BasicBlockInstruction::ReadNonLocal(NonLocalId(nloc)) = ins {
-            *usages.entry(*nloc).or_insert(0) += 1;
+        if let BasicBlockInstruction::Read(ins) = ins {
+            if let Some(nloc) = ins.get_nonlocal_id() {
+                *usages.entry(nloc).or_insert(0) += 1;
+            }
         }
     }
 

@@ -2,17 +2,17 @@ use std::collections::BTreeMap;
 
 use swc_ecma_ast::{
     AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
-    Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp, Lit,
-    MemberExpr, MemberProp, Module, ModuleItem, Null, ObjectLit, PatOrExpr, PrivateName, Prop,
-    PropName, PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr,
-    UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
+    Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp, Lit, Module,
+    ModuleItem, Null, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, ReturnStmt,
+    SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp,
+    WhileStmt, YieldExpr,
 };
 
 use crate::{
     analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ForInOfKind, ObjectMember,
-        ObjectProp, StructuredFlow, TempExitType,
+        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ForInOfKind, IncrDecr,
+        ObjectProp, StructuredFlow, TempExitType, LHS,
     },
     block_ops::{block_group_to_structured_flow, remove_phi},
     to_ast::{build_block, build_empty_var_decl, build_var_assign, build_var_decl},
@@ -20,7 +20,7 @@ use crate::{
 
 use super::{
     build_binding_identifier, build_identifier, build_identifier_str, function_to_ast,
-    get_inlined_variables, pattern_to_statement, Base54, ToAstContext,
+    get_inlined_variables, lhs_to_ast_expr, pattern_to_statement, Base54, ToAstContext,
 };
 
 pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
@@ -250,7 +250,7 @@ fn instruction_to_statement(
             .collect()
     } else {
         let (expression, variable) =
-            if let BasicBlockInstruction::WriteNonLocal(id, value_of) = instruction {
+            if let BasicBlockInstruction::Write(LHS::NonLocal(id), value_of) = instruction {
                 let expression = ref_or_inlined_expr(ctx, *value_of);
                 (expression, id.0)
             } else {
@@ -319,17 +319,17 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 right: Box::new(right),
             })
         }
-        BasicBlockInstruction::IncrDecr(var_idx, is_incr) => {
-            let op = if *is_incr {
-                UpdateOp::PlusPlus
-            } else {
-                UpdateOp::MinusMinus
+        BasicBlockInstruction::IncrDecr(lhs, is_incr)
+        | BasicBlockInstruction::IncrDecrPostfix(lhs, is_incr) => {
+            let op = match is_incr {
+                IncrDecr::Incr => UpdateOp::PlusPlus,
+                IncrDecr::Decr => UpdateOp::MinusMinus,
             };
 
             Expr::Update(UpdateExpr {
                 op,
-                arg: Box::new(ref_or_inlined_expr(ctx, *var_idx)),
-                prefix: true,
+                arg: Box::new(lhs_to_ast_expr(ctx, lhs)),
+                prefix: matches!(expr, BasicBlockInstruction::IncrDecr(..)),
                 span: Default::default(),
             })
         }
@@ -409,40 +409,6 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 }))
                 .collect::<Vec<PropOrSpread>>(),
         }),
-        BasicBlockInstruction::Member(base, member) => {
-            let base = ref_or_inlined_expr(ctx, *base);
-
-            Expr::Member(MemberExpr {
-                span: Default::default(),
-                obj: Box::new(base),
-                prop: match member {
-                    ObjectMember::KeyValue(member) => {
-                        MemberProp::Ident(Ident::new(member.as_str().into(), Default::default()))
-                    }
-                    ObjectMember::Private(member) => MemberProp::PrivateName(PrivateName {
-                        span: Default::default(),
-                        id: Ident::new(member.as_str().into(), Default::default()),
-                    }),
-                    ObjectMember::Computed(member) => MemberProp::Computed(ComputedPropName {
-                        span: Default::default(),
-                        expr: Box::new(ref_or_inlined_expr(ctx, *member)),
-                    }),
-                },
-            })
-        }
-        BasicBlockInstruction::MemberSet(base, member, value) => {
-            let value = ref_or_inlined_expr(ctx, *value);
-
-            Expr::Assign(AssignExpr {
-                span: Default::default(),
-                left: PatOrExpr::Expr(Box::new(to_expression(
-                    ctx,
-                    &BasicBlockInstruction::Member(*base, member.clone()),
-                ))),
-                op: AssignOp::Assign,
-                right: Box::new(value),
-            })
-        }
         BasicBlockInstruction::ArrayPattern(_, _) => unreachable!(),
         BasicBlockInstruction::ObjectPattern(_, _) => unreachable!(),
         BasicBlockInstruction::PatternUnpack(pat_var, idx) => {
@@ -470,26 +436,6 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         BasicBlockInstruction::ArgumentRead(_) => unreachable!("handled in function_to_ast"),
         BasicBlockInstruction::ArgumentRest(_) => unreachable!("handled in function_to_ast"),
 
-        BasicBlockInstruction::ReadNonLocal(id) => Expr::Ident(Ident::new(
-            ctx.get_varname_for(id.0).into(),
-            Default::default(),
-        )),
-        BasicBlockInstruction::WriteNonLocal(_, _) => {
-            unreachable!("handled in instruction_to_statement")
-        }
-
-        BasicBlockInstruction::ReadGlobal(varname) => build_identifier_str(varname.as_str()),
-        BasicBlockInstruction::WriteGlobal(varname, new_value) => {
-            let new_value = ref_or_inlined_expr(ctx, *new_value);
-
-            Expr::Assign(AssignExpr {
-                span: Default::default(),
-                op: AssignOp::Assign,
-                left: PatOrExpr::Expr(Box::new(build_identifier_str(varname.as_str()))),
-                right: Box::new(new_value),
-            })
-        }
-
         BasicBlockInstruction::TempExit(typ, arg) => match typ {
             TempExitType::Yield => Expr::Yield(YieldExpr {
                 span: Default::default(),
@@ -516,6 +462,13 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             Default::default(),
         )),
         BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
+        BasicBlockInstruction::Read(lhs) => lhs_to_ast_expr(ctx, lhs),
+        BasicBlockInstruction::Write(lhs, assignee) => Expr::Assign(AssignExpr {
+            span: Default::default(),
+            op: AssignOp::Assign,
+            left: PatOrExpr::Expr(Box::new(lhs_to_ast_expr(ctx, lhs))),
+            right: Box::new(ref_or_inlined_expr(ctx, *assignee)),
+        }),
     }
 }
 

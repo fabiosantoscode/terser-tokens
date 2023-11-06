@@ -103,8 +103,11 @@ impl ToAstContext<'_> {
     }
 
     pub(crate) fn get_varname_for(&self, var_idx: usize) -> String {
-        let var_idx = *self.emitted_vars.get(&var_idx).unwrap();
-        var_idx.to_string()
+        if let Some(var_idx) = self.emitted_vars.get(&var_idx) {
+            var_idx.to_string()
+        } else {
+            panic!("variable ${var_idx} not found")
+        }
     }
 
     pub(crate) fn create_varname_for(&mut self, var_idx: usize) -> String {

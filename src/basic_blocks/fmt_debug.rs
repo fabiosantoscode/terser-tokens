@@ -5,7 +5,7 @@ use crate::basic_blocks::{ForInOfKind, ObjectMember, ObjectProp};
 use super::{
     ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironment, BasicBlockExit,
     BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, NonLocalId,
-    ObjectPatternPiece,
+    ObjectPatternPiece, LHS,
 };
 
 impl Debug for BasicBlock {
@@ -16,6 +16,31 @@ impl Debug for BasicBlock {
         }
         write!(f, "    exit = {:?}\n", &self.exit)?;
         write!(f, "}}")
+    }
+}
+
+impl Debug for LHS {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LHS::Local(var) => write!(f, "${}", var),
+            LHS::NonLocal(nonloc) => write!(f, "$${}", nonloc.0),
+            LHS::Global(str) => {
+                write!(f, "globalThis.{}", str)
+            }
+            LHS::Member(base, member) => {
+                write!(f, "{:?}{:?}", base, member)
+            }
+        }
+    }
+}
+
+impl Debug for ObjectMember {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectMember::KeyValue(member) => write!(f, ".{}", member),
+            ObjectMember::Private(member) => write!(f, ".#{}", member),
+            ObjectMember::Computed(member) => write!(f, "[${}]", member),
+        }
     }
 }
 
@@ -37,27 +62,12 @@ impl Debug for BasicBlockInstruction {
             BasicBlockInstruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }
-            BasicBlockInstruction::IncrDecr(varname, is_incr) => {
-                let op = if *is_incr { "++" } else { "--" };
-                write!(f, "{}${}", op, varname)
+            BasicBlockInstruction::IncrDecr(lhs, op) => {
+                write!(f, "{}{:?}", op.op_string(), lhs)
             }
-            /*
-            BasicBlockInstruction::UpdateMemberOp(op, prefix, operand_base, operand_member) => {
-                let op = match op {
-                    UpdateOp::PlusPlus => "++",
-                    UpdateOp::MinusMinus => "--",
-                };
-                let operand = match operand_member {
-                    ObjectMember::KeyValue(prop) => format!("{}.{}", operand_base, prop),
-                    ObjectMember::Computed(prop) => format!("{}[${}]", operand_base, prop),
-                    ObjectMember::Private(prop) => format!("{}.#{}", operand_base, prop),
-                };
-                if *prefix {
-                    write!(f, "{}${}", op, operand)
-                } else {
-                    write!(f, "${}{}", operand, op)
-                }
-            } */
+            BasicBlockInstruction::IncrDecrPostfix(lhs, op) => {
+                write!(f, "{:?}{}", lhs, op.op_string())
+            }
             BasicBlockInstruction::Ref(id) => {
                 write!(f, "${}", id)
             }
@@ -107,16 +117,6 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
-            BasicBlockInstruction::Member(base, member) => match member {
-                ObjectMember::KeyValue(member) => write!(f, "${base}.{member}"),
-                ObjectMember::Private(member) => write!(f, "${base}.#{member}"),
-                ObjectMember::Computed(member) => write!(f, "${base}[${member}]"),
-            },
-            BasicBlockInstruction::MemberSet(base, member, value) => match member {
-                ObjectMember::KeyValue(member) => write!(f, "${base}.{member} = ${value}"),
-                ObjectMember::Private(member) => write!(f, "${base}.#{member} = ${value}"),
-                ObjectMember::Computed(member) => write!(f, "${base}[${member}] = ${value}"),
-            },
             BasicBlockInstruction::ArrayPattern(input, items) => write!(
                 f,
                 "pack ${} [{}]",
@@ -172,19 +172,22 @@ impl Debug for BasicBlockInstruction {
                 write!(f, "arguments[{}...]", idx)
             }
 
-            BasicBlockInstruction::ReadNonLocal(id) => {
-                write!(f, "read_non_local $${}", id.0)
-            }
-            BasicBlockInstruction::WriteNonLocal(id, val) => {
-                write!(f, "write_non_local $${} ${}", id.0, val)
-            }
-
-            BasicBlockInstruction::ReadGlobal(name) => {
-                write!(f, "global {:?}", name)
-            }
-            BasicBlockInstruction::WriteGlobal(name, val) => {
-                write!(f, "global {:?} = ${}", name, val)
-            }
+            BasicBlockInstruction::Read(lhs) => match lhs {
+                LHS::Local(var) => write!(f, "read_local ${:?}", var),
+                LHS::NonLocal(nonlocal) => {
+                    write!(f, "read_non_local $${:?}", nonlocal.0)
+                }
+                LHS::Global(glob_name) => write!(f, "global {:?}", glob_name),
+                LHS::Member(base, member) => write!(f, "{:?}{:?}", base, member),
+            },
+            BasicBlockInstruction::Write(lhs, val) => match lhs {
+                LHS::Local(var) => write!(f, "write_local ${:?} ${}", var, val),
+                LHS::NonLocal(nonlocal) => {
+                    write!(f, "write_non_local $${:?} ${}", nonlocal.0, val)
+                }
+                LHS::Global(glob_name) => write!(f, "global {:?} = ${}", glob_name, val),
+                LHS::Member(base, member) => write!(f, "{:?}{:?} = ${}", base, member, val),
+            },
 
             BasicBlockInstruction::TempExit(exit_type, arg) => {
                 write!(f, "{:?} ${}", exit_type, arg)

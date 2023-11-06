@@ -6,6 +6,7 @@ use super::{
 };
 use crate::basic_blocks::{
     BasicBlockEnvironment, BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId, NonLocalId,
+    LHS,
 };
 
 /// Convert a function declaration to basic blocks. Function declarations are special because since they're hoisted, we don't want to create any variables here.
@@ -21,13 +22,17 @@ pub fn function_to_basic_blocks(
         }) => {
             let undef = ctx.push_instruction(BasicBlockInstruction::Undefined);
             let non_local_id = NonLocalId(ctx.bump_var_index());
-            ctx.push_instruction(BasicBlockInstruction::WriteNonLocal(non_local_id, undef));
+            ctx.push_instruction(BasicBlockInstruction::Write(
+                LHS::NonLocal(non_local_id),
+                undef,
+            ));
 
             let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(FunctionId(
                 ctx.function_index.0 + 1, // future function name
             )));
 
-            let write_non_local = BasicBlockInstruction::WriteNonLocal(non_local_id, outer_varname);
+            let write_non_local =
+                BasicBlockInstruction::Write(LHS::NonLocal(non_local_id), outer_varname);
             ctx.push_instruction(write_non_local);
 
             (outer_varname, Some((ident.sym.to_string(), non_local_id)))
@@ -85,7 +90,7 @@ pub fn function_to_basic_blocks(
 
         // If this is a named FnExpr, we need another binding here.
         if let Some((name, nloc)) = inner_varname {
-            let nloc = ctx.push_instruction(BasicBlockInstruction::ReadNonLocal(nloc));
+            let nloc = ctx.push_instruction(BasicBlockInstruction::Read(LHS::NonLocal(nloc)));
             ctx.declare_name(&name, nloc);
         }
 
@@ -181,15 +186,14 @@ mod tests {
                 $8 = write_non_local $$7 $6
                 $9 = FunctionId(2)
                 $10 = write_non_local $$7 $9
-                $15 = undefined
-                exit = return $15
+                $14 = undefined
+                exit = return $14
             },
             FunctionId(2): function():
             @0: {
                 $11 = read_non_local $$7
                 $12 = read_non_local $$2
-                $13 = $12
-                exit = return $13
+                exit = return $12
             },
         }
         "###);
@@ -214,15 +218,14 @@ mod tests {
                 $8 = write_non_local $$7 $6
                 $9 = FunctionId(2)
                 $10 = write_non_local $$7 $9
-                $15 = undefined
-                exit = return $15
+                $14 = undefined
+                exit = return $14
             },
             FunctionId(2): function():
             @0: {
                 $11 = read_non_local $$7
                 $12 = read_non_local $$2
-                $13 = $12
-                exit = return $13
+                exit = return $12
             },
         }
         "###);
@@ -254,40 +257,38 @@ mod tests {
                 $8 = write_non_local $$7 $6
                 $9 = FunctionId(2)
                 $10 = write_non_local $$7 $9
-                $15 = undefined
-                $17 = write_non_local $$16 $15
-                $18 = FunctionId(3)
-                $19 = write_non_local $$16 $18
-                $36 = undefined
-                exit = return $36
+                $14 = undefined
+                $16 = write_non_local $$15 $14
+                $17 = FunctionId(3)
+                $18 = write_non_local $$15 $17
+                $34 = undefined
+                exit = return $34
             },
             FunctionId(2): function():
             @0: {
                 $11 = read_non_local $$7
                 $12 = read_non_local $$2
-                $13 = $12
-                exit = return $13
+                exit = return $12
             },
             FunctionId(3): function():
             @0: {
-                $20 = undefined
-                $22 = write_non_local $$21 $20
-                $23 = read_non_local $$16
-                $24 = 2
-                $25 = write_non_local $$21 $24
-                $26 = undefined
-                $28 = write_non_local $$27 $26
-                $29 = FunctionId(4)
-                $30 = write_non_local $$27 $29
-                $35 = undefined
-                exit = return $35
+                $19 = undefined
+                $21 = write_non_local $$20 $19
+                $22 = read_non_local $$15
+                $23 = 2
+                $24 = write_non_local $$20 $23
+                $25 = undefined
+                $27 = write_non_local $$26 $25
+                $28 = FunctionId(4)
+                $29 = write_non_local $$26 $28
+                $33 = undefined
+                exit = return $33
             },
             FunctionId(4): function():
             @0: {
-                $31 = read_non_local $$27
-                $32 = read_non_local $$21
-                $33 = $32
-                exit = return $33
+                $30 = read_non_local $$26
+                $31 = read_non_local $$20
+                exit = return $31
             },
         }
         "###);
@@ -311,22 +312,20 @@ mod tests {
                 $1 = undefined
                 $3 = write_non_local $$2 $1
                 $4 = read_non_local $$2
-                $5 = $4
-                $6 = 999
-                $7 = write_non_local $$2 $6
-                $8 = undefined
-                $10 = write_non_local $$9 $8
-                $11 = FunctionId(2)
-                $12 = write_non_local $$9 $11
-                $17 = undefined
-                exit = return $17
+                $5 = 999
+                $6 = write_non_local $$2 $5
+                $7 = undefined
+                $9 = write_non_local $$8 $7
+                $10 = FunctionId(2)
+                $11 = write_non_local $$8 $10
+                $15 = undefined
+                exit = return $15
             },
             FunctionId(2): function():
             @0: {
-                $13 = read_non_local $$9
-                $14 = read_non_local $$2
-                $15 = $14
-                exit = return $15
+                $12 = read_non_local $$8
+                $13 = read_non_local $$2
+                exit = return $13
             },
         }
         "###);

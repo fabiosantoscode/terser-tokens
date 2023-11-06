@@ -1,4 +1,4 @@
-use crate::basic_blocks::BasicBlockInstruction;
+use crate::basic_blocks::{BasicBlockInstruction, LHS};
 
 impl BasicBlockInstruction {
     /// Whether this instruction can be reordered with other instructions.
@@ -7,11 +7,11 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::This
             | BasicBlockInstruction::BinOp(_, _, _)
             | BasicBlockInstruction::UnaryOp(_, _)
-            | BasicBlockInstruction::IncrDecr(_, _)
             | BasicBlockInstruction::ArgumentRead(_)
             | BasicBlockInstruction::ArgumentRest(_)
             | BasicBlockInstruction::TypeOf(_)
             | BasicBlockInstruction::TypeOfGlobal(_)
+            | BasicBlockInstruction::Read(LHS::Local(_))
             | BasicBlockInstruction::Function(_)
             | BasicBlockInstruction::Ref(_)
             | BasicBlockInstruction::Undefined

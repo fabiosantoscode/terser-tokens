@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use crate::basic_blocks::{BasicBlockInstruction, NonLocalId};
+use crate::basic_blocks::{BasicBlockInstruction, NonLocalId, LHS};
 
 use super::{FromAstCtx, NonLocalInfo, NonLocalOrLocal};
 
@@ -8,7 +8,7 @@ impl FromAstCtx {
     /// Declare or re-declare a name {name} to contain the instruction varname {value}
     pub fn declare_name(&mut self, name: &str, value: usize) {
         if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
-            self.push_instruction(BasicBlockInstruction::WriteNonLocal(nonlocal, value));
+            self.push_instruction(BasicBlockInstruction::Write(LHS::NonLocal(nonlocal), value));
         } else {
             let mut conditionals = self.conditionals.last_mut();
 
@@ -31,15 +31,36 @@ impl FromAstCtx {
     /// Assign or reassign {name}, which can be global, already-declared, or a nonlocal
     pub fn assign_name(&mut self, name: &str, value: usize) {
         if self.is_global_name(name) {
-            self.push_instruction(BasicBlockInstruction::WriteGlobal(name.to_string(), value));
+            self.push_instruction(BasicBlockInstruction::Write(
+                LHS::Global(name.to_string()),
+                value,
+            ));
         } else {
             self.declare_name(name, value)
         }
     }
 
+    /// Assign or reassign {name}, which can be global, already-declared, or a nonlocal
+    pub fn get_lhs_for_name(&mut self, name: &str) -> LHS {
+        if self.is_global_name(name) {
+            LHS::Global(name.to_string())
+        } else if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
+            LHS::NonLocal(nonlocal)
+        } else if self.is_unwritten_funscoped(name) {
+            let deferred_undefined = self.push_instruction(BasicBlockInstruction::Undefined);
+            self.assign_name(name, deferred_undefined);
+            LHS::Local(deferred_undefined)
+        } else if let Some(NonLocalOrLocal::Local(local)) = self.scope_tree.lookup_in_function(name)
+        {
+            LHS::Local(local)
+        } else {
+            unreachable!()
+        }
+    }
+
     pub fn read_name(&mut self, name: &str) -> usize {
         if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
-            self.push_instruction(BasicBlockInstruction::ReadNonLocal(nonlocal))
+            self.push_instruction(BasicBlockInstruction::Read(LHS::NonLocal(nonlocal)))
         } else if self.is_unwritten_funscoped(name) {
             let deferred_undefined = self.push_instruction(BasicBlockInstruction::Undefined);
             self.assign_name(name, deferred_undefined);
@@ -51,7 +72,7 @@ impl FromAstCtx {
             unreachable!("nonlocal {:?} not in nonlocalinfo", nonlocal)
         } else {
             let read_global_ins =
-                self.push_instruction(BasicBlockInstruction::ReadGlobal(name.to_string()));
+                self.push_instruction(BasicBlockInstruction::Read(LHS::Global(name.to_string())));
             read_global_ins
         }
     }
@@ -60,6 +81,22 @@ impl FromAstCtx {
         match name {
             "undefined" | "Infinity" => false,
             _ => !self.is_unwritten_funscoped(name) && self.scope_tree.lookup(name).is_none(),
+        }
+    }
+
+    pub fn is_nonlocal(&self, name: &str) -> Option<NonLocalId> {
+        match name {
+            "undefined" | "Infinity" => None,
+            _ => {
+                if !self.is_unwritten_funscoped(name) {
+                    match self.scope_tree.lookup(name)? {
+                        NonLocalOrLocal::NonLocal(nonloc) => Some(nonloc),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -130,7 +167,7 @@ impl FromAstCtx {
             let nonlocal_id = if !parent_nonlocals.contains(name.as_str()) {
                 let nonlocal_undef = self.push_instruction(BasicBlockInstruction::Undefined);
                 let wanted_id = NonLocalId(self.bump_var_index());
-                let read = BasicBlockInstruction::WriteNonLocal(wanted_id, nonlocal_undef);
+                let read = BasicBlockInstruction::Write(LHS::NonLocal(wanted_id), nonlocal_undef);
                 self.push_instruction(read);
 
                 NonLocalOrLocal::NonLocal(wanted_id)

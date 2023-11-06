@@ -193,8 +193,7 @@ mod tests {
         function():
         @0: {
             $8 = read_non_local $$3
-            $9 = $8
-            exit = return $9
+            exit = return $8
         }
         "###);
     }
@@ -329,15 +328,14 @@ mod tests {
                 $9 = arguments[0]
                 $10 = $9
                 $11 = read_non_local $$1
-                $12 = $11
-                $13 = call $12()
-                $14 = $10 + $13
-                exit = return $14
+                $12 = call $11()
+                $13 = $10 + $12
+                exit = return $13
             },
             FunctionId(2): function():
             @0: {
-                $15 = 100
-                exit = return $15
+                $14 = 100
+                exit = return $14
             },
         }
         "###);

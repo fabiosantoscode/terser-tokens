@@ -84,10 +84,19 @@ fn interpret_block_group_inner(
                     Some(true) => interpret_block_group_inner(ctx, block_group, *cons..=*cons_end)?,
                     Some(false) => interpret_block_group_inner(ctx, block_group, *alt..=*alt_end)?,
                     None => {
-                        let a = interpret_block_group_inner(ctx, block_group, *cons..=*cons_end)?;
-                        let b = interpret_block_group_inner(ctx, block_group, *alt..=*alt_end)?;
+                        ctx.start_condition();
 
-                        a.merge(&b)?
+                        let a = interpret_block_group_inner(ctx, block_group, *cons..=*cons_end);
+                        let a_vars = ctx.end_condition();
+
+                        ctx.start_condition();
+                        let b = interpret_block_group_inner(ctx, block_group, *alt..=*alt_end);
+                        let b_vars = ctx.end_condition();
+
+                        // merge the variables from both branches
+                        ctx.merge_branch_mutations(a_vars, b_vars);
+
+                        a?.merge(&b?)?
                     }
                 };
 

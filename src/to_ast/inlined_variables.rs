@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::basic_blocks::{BasicBlockInstruction, BasicBlockModule};
+use crate::basic_blocks::{BasicBlockInstruction, BasicBlockModule, LHS};
 
 /// Returns a map of variable indices to instructions that can be inlined.
 /// Inlining is when we take advantage of nested expressions to
@@ -24,8 +24,17 @@ pub fn get_inlined_variables(
             ctx.non_reorderable_candidates = vec![];
 
             for (var_idx, instruction) in block.iter() {
+                let used_vars = match instruction {
+                    BasicBlockInstruction::IncrDecr(_, _)
+                    | BasicBlockInstruction::IncrDecrPostfix(_, _) => vec![],
+                    BasicBlockInstruction::Write(LHS::Local(_), written_val) => {
+                        vec![*written_val]
+                    }
+                    _ => instruction.used_vars(),
+                };
+
                 // In reverse, check if we can inline an argument in here.
-                mark_deps(&mut ctx, instruction.used_vars());
+                mark_deps(&mut ctx, used_vars);
 
                 if ctx.is_single_use(var_idx) {
                     // We can inline this variable later. Is it reorderable or not?
@@ -44,7 +53,6 @@ pub fn get_inlined_variables(
 
 fn mark_deps(ctx: &mut GetInlinedVariablesCtx<'_>, dependencies: Vec<usize>) {
     for used_var in dependencies.into_iter().rev() {
-        // Let us first try reorderable candidates (TODO are they really arbitrarily reorderable?)
         if let Some(candidate) = ctx.pop_reorderable_candidate(used_var) {
             if ctx.force_mark_inlineable(used_var, candidate) {
                 continue;
@@ -65,9 +73,11 @@ fn mark_deps(ctx: &mut GetInlinedVariablesCtx<'_>, dependencies: Vec<usize>) {
 pub struct GetInlinedVariablesCtx<'blkmod> {
     pub pure_candidates: BTreeMap<usize, &'blkmod BasicBlockInstruction>,
     pub phi_participants: BTreeSet<usize>,
-    pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
     pub non_reorderable_candidates: Vec<(usize, &'blkmod BasicBlockInstruction)>,
+    /// from count_variable_uses()
     pub variable_use_count: &'blkmod BTreeMap<usize, u32>,
+    /// Our final result
+    pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
 }
 
 impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
@@ -75,9 +85,9 @@ impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
         Self {
             pure_candidates: Default::default(),
             phi_participants: phied,
-            inlined_variables: Default::default(),
             non_reorderable_candidates: Default::default(),
             variable_use_count,
+            inlined_variables: Default::default(),
         }
     }
 
@@ -186,8 +196,8 @@ mod tests {
         let module = parse_instructions_module(vec![
             "@0: {
                 $0 = 1
-                $1 = write_non_local $$0 $0
-                $2 = write_non_local $$0 $1
+                $1 = write_non_local $$99 $0
+                $2 = write_non_local $$99 $1
                 exit = return $2
             }",
         ]);
@@ -197,8 +207,8 @@ mod tests {
         insta::assert_debug_snapshot!(inlined_vars, @r###"
         {
             0: 1,
-            1: write_non_local $$0 $0,
-            2: write_non_local $$0 $1,
+            1: write_non_local $$99 $0,
+            2: write_non_local $$99 $1,
         }
         "###);
     }
@@ -209,8 +219,8 @@ mod tests {
             "@0: {
                 $0 = 1
                 $1 = 4
-                $2 = write_non_local $$0 $0
-                $3 = write_non_local $$0 $1
+                $2 = write_non_local $$99 $0
+                $3 = write_non_local $$99 $1
                 $4 = call $2($3)
                 exit = return $4
             }",
@@ -222,8 +232,8 @@ mod tests {
         {
             0: 1,
             1: 4,
-            2: write_non_local $$0 $0,
-            3: write_non_local $$0 $1,
+            2: write_non_local $$99 $0,
+            3: write_non_local $$99 $1,
             4: call $2($3),
         }
         "###);
@@ -235,10 +245,10 @@ mod tests {
             "@0: {
                 $0 = 1
                 $1 = 2
-                $2 = write_non_local $$0 $1
+                $2 = write_non_local $$99 $1
                 $3 = 4
-                $4 = write_non_local $$0 $0
-                $5 = write_non_local $$0 $3
+                $4 = write_non_local $$99 $0
+                $5 = write_non_local $$99 $3
                 $6 = call $4($5)
                 exit = return $6
             }",
@@ -251,8 +261,8 @@ mod tests {
             0: 1,
             1: 2,
             3: 4,
-            4: write_non_local $$0 $0,
-            5: write_non_local $$0 $3,
+            4: write_non_local $$99 $0,
+            5: write_non_local $$99 $3,
             6: call $4($5),
         }
         "###);

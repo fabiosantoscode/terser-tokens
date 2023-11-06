@@ -4,7 +4,7 @@ use nom::IResult;
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
-    BasicBlockModule, ExitType, FunctionId, NonLocalId, TempExitType,
+    BasicBlockModule, ExitType, FunctionId, IncrDecr, NonLocalId, ObjectMember, TempExitType, LHS,
 };
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
@@ -295,14 +295,6 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             Ok((input, BasicBlockInstruction::LitBool(bool)))
         }
 
-        fn ins_ref(input: &str) -> IResult<&str, BasicBlockInstruction> {
-            // $123
-            let (input, _) = tag("$")(input)?;
-            let (input, n) = digit1(input)?;
-            let n_usize: usize = n.parse().unwrap();
-            Ok((input, BasicBlockInstruction::Ref(n_usize)))
-        }
-
         fn ins_funcref(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // FunctionId(123)
             let (input, _) = tag("FunctionId(")(input)?;
@@ -323,6 +315,45 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
                 Ok((input, BasicBlockInstruction::ArgumentRest(n_usize)))
             } else {
                 Ok((input, BasicBlockInstruction::ArgumentRead(n_usize)))
+            }
+        }
+
+        fn ins_member_rw(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            // {lhs}.{stringkey} | {lhs}[$123] | {lhs}.#{priv}
+            // optionally, append = {rhs}
+
+            let (input, incrdecr_prefix) = opt(alt((
+                map(tag("++"), |_| IncrDecr::Incr),
+                map(tag("--"), |_| IncrDecr::Decr),
+            )))(input)?;
+
+            let (input, lhs) = parse_lhs(input)?;
+
+            let input = whitespace!(input);
+
+            let (input, incrdecr_postfix) = opt(alt((
+                map(tag("++"), |_| IncrDecr::Incr),
+                map(tag("--"), |_| IncrDecr::Decr),
+            )))(input)?;
+
+            let (input, assignee) =
+                opt(map(tuple((tag("="), space0, parse_ref)), |(_, _, r)| r))(input)?;
+
+            match (incrdecr_prefix, incrdecr_postfix, assignee) {
+                // {lhs}++ | {lhs}--
+                (None, Some(op), None) => {
+                    Ok((input, BasicBlockInstruction::IncrDecrPostfix(lhs, op)))
+                }
+                // ++{lhs} | --{lhs}
+                (Some(op), None, None) => Ok((input, BasicBlockInstruction::IncrDecr(lhs, op))),
+                // {lhs} = {rhs}
+                (None, None, Some(rhs)) => Ok((input, BasicBlockInstruction::Write(lhs, rhs))),
+                // ${ref}
+                (None, None, None) => match lhs {
+                    LHS::Local(n) => Ok((input, BasicBlockInstruction::Ref(n))),
+                    lhs => Ok((input, BasicBlockInstruction::Read(lhs))),
+                },
+                invalid => panic!("invalid update expression: {:?}", invalid),
             }
         }
 
@@ -393,7 +424,7 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
 
                 let r = cut(alt((
                     map(preceded(tag("..."), parse_ref), |r| Spread(r)),
-                    map(|input| ins_ref(input), |i| Item(i.unwrap_ref())),
+                    map(parse_ref, |i| Item(i)),
                     map(peek(tag(",")), |_| Hole),
                 )))(input);
 
@@ -423,12 +454,9 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             ))(input)?;
 
             let input = whitespace!(input);
-            let (input, ref_) = ins_ref(input)?;
+            let (input, ref_) = parse_ref(input)?;
 
-            Ok((
-                input,
-                BasicBlockInstruction::TempExit(exit_type, ref_.unwrap_ref()),
-            ))
+            Ok((input, BasicBlockInstruction::TempExit(exit_type, ref_)))
         }
 
         fn ins_phi(input: &str) -> IResult<&str, BasicBlockInstruction> {
@@ -443,24 +471,24 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             Ok((input, BasicBlockInstruction::Phi(items)))
         }
 
-        fn ins_read_non_local(input: &str) -> IResult<&str, BasicBlockInstruction> {
+        fn ins_read(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // read_non_local {ref}
             let (input, _) = tag("read_non_local")(input)?;
             let input = whitespace!(input);
-            let (input, nonloc) = parse_nonlocal_ref(input)?;
+            let (input, nonloc) = parse_lhs(input)?;
 
-            Ok((input, BasicBlockInstruction::ReadNonLocal(nonloc)))
+            Ok((input, BasicBlockInstruction::Read(nonloc)))
         }
 
-        fn ins_write_non_local(input: &str) -> IResult<&str, BasicBlockInstruction> {
+        fn ins_write(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // write_non_local {ref} {ref}
             let (input, _) = tag("write_non_local")(input)?;
             let input = whitespace!(input);
-            let (input, nonloc) = parse_nonlocal_ref(input)?;
+            let (input, nonloc) = parse_lhs(input)?;
             let input = whitespace!(input);
             let (input, value) = parse_ref(input)?;
 
-            Ok((input, BasicBlockInstruction::WriteNonLocal(nonloc, value)))
+            Ok((input, BasicBlockInstruction::Write(nonloc, value)))
         }
 
         // $123 =
@@ -477,16 +505,16 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             ins_litnumber,
             ins_litbool,
             ins_binop,
+            ins_member_rw,
             ins_call,
-            ins_ref,
             ins_funcref,
             ins_argref,
             ins_caught_error,
             ins_array,
             ins_tempexit,
             ins_phi,
-            ins_read_non_local,
-            ins_write_non_local,
+            ins_read,
+            ins_write,
         )))(input)
         .expect("bad instruction");
 
@@ -500,10 +528,35 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
         let (input, n) = digit1(input)?;
         Ok((input, n.parse().unwrap()))
     }
-    fn parse_nonlocal_ref(input: &str) -> IResult<&str, NonLocalId> {
-        let (input, _) = tag("$$")(input)?;
-        let (input, n) = digit1(input)?;
-        Ok((input, NonLocalId(n.parse().unwrap())))
+    fn parse_member(input: &str) -> IResult<&str, ObjectMember> {
+        // .name | [$123] | .#private
+        alt((
+            map(preceded(tag("."), alphanumeric1), |name: &str| {
+                ObjectMember::KeyValue(name.to_string())
+            }),
+            map(tuple((tag("["), parse_ref, tag("]"))), |(_, idx, _)| {
+                ObjectMember::Computed(idx)
+            }),
+            map(preceded(tag(".#"), alphanumeric1), |name: &str| {
+                ObjectMember::Private(name.to_string())
+            }),
+        ))(input)
+    }
+    fn parse_lhs(input: &str) -> IResult<&str, LHS> {
+        let (input, lhs) = alt((
+            map(parse_ref, |n| LHS::Local(n)),
+            map(preceded(tag("$"), parse_ref), |n| {
+                LHS::NonLocal(NonLocalId(n))
+            }),
+        ))(input)?;
+
+        let (input, lhs) = fold_many0(
+            parse_member,
+            || lhs.clone(),
+            |lhs, member| LHS::Member(Box::new(lhs), member),
+        )(input)?;
+
+        Ok((input, lhs))
     }
 
     let input = whitespace!(input);

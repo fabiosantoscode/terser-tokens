@@ -17,7 +17,7 @@ pub struct FromAstCtx {
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
     pub conditionals: Vec<BTreeMap<String, Vec<usize>>>,
-    pub scope_tree: ScopeTree<NonLocalOrLocal>,
+    pub scope_tree: ScopeTree<String, NonLocalOrLocal>,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,
     pub function_index: FunctionId,
@@ -300,12 +300,6 @@ pub enum NonLocalOrLocal {
 }
 
 impl NonLocalOrLocal {
-    pub fn unwrap_nonlocal(&self) -> NonLocalId {
-        match self {
-            NonLocalOrLocal::NonLocal(id) => *id,
-            NonLocalOrLocal::Local(_) => panic!("unwrap_nonlocal called on a local variable"),
-        }
-    }
     pub fn unwrap_local(&self) -> usize {
         match self {
             NonLocalOrLocal::NonLocal(_) => panic!("unwrap_local called on a nonlocal variable"),

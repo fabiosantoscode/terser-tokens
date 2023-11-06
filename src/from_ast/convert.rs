@@ -1,21 +1,18 @@
 use swc_ecma_ast::{
     AwaitExpr, Decl, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, GetterProp, IfStmt,
-    LabeledStmt, Lit, MemberExpr, MemberProp, MethodProp, ObjectLit, PatOrExpr, Prop, PropName,
-    PropOrSpread, SetterProp, Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDeclKind,
-    YieldExpr,
+    LabeledStmt, Lit, MethodProp, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
+    Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDeclKind, YieldExpr,
 };
 
-use crate::{
-    basic_blocks::{
-        ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, ObjectMember,
-        ObjectProp, TempExitType,
-    },
-    from_ast::pat_like_expr_to_basic_blocks,
+use crate::basic_blocks::{
+    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, IncrDecr,
+    ObjectProp, TempExitType, LHS,
 };
 
 use super::{
     block_to_basic_blocks, function_to_basic_blocks, object_propname_to_string,
-    pat_to_basic_blocks, FromAstCtx, FunctionLike, NestedIntoStatement, PatType,
+    pat_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx, FunctionLike, NestedIntoStatement,
+    PatType,
 };
 
 /// Turn a statement into basic blocks.
@@ -408,7 +405,15 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             let instruction = match ident.as_str() {
                 "undefined" => BasicBlockInstruction::Undefined,
                 "Infinity" => BasicBlockInstruction::LitNumber(f64::INFINITY),
-                ident => BasicBlockInstruction::Ref(ctx.read_name(ident)),
+                ident => {
+                    if ctx.is_global_name(ident) {
+                        BasicBlockInstruction::Read(LHS::Global(ident.to_string()))
+                    } else if let Some(nonloc) = ctx.is_nonlocal(ident) {
+                        BasicBlockInstruction::Read(LHS::NonLocal(nonloc))
+                    } else {
+                        BasicBlockInstruction::Ref(ctx.read_name(ident))
+                    }
+                }
             };
 
             return ctx.push_instruction(instruction);
@@ -495,27 +500,22 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         Expr::Update(UpdateExpr {
             op, prefix, arg, ..
         }) => {
-            let old_value = expr_to_basic_blocks(ctx, arg);
-            let new_value = ctx.push_instruction(BasicBlockInstruction::IncrDecr(
-                old_value,
-                op == &UpdateOp::PlusPlus,
-            ));
-
-            let new_value = pat_like_expr_to_basic_blocks(ctx, PatType::Assign, arg, new_value);
-
-            return if *prefix { new_value } else { old_value };
-        }
-        Expr::Member(MemberExpr { obj, prop, .. }) => {
-            let obj = expr_to_basic_blocks(ctx, obj);
-            let prop = match prop {
-                MemberProp::Ident(ident) => ObjectMember::KeyValue(ident.sym.to_string()),
-                MemberProp::PrivateName(pvt) => ObjectMember::Private(pvt.id.sym.to_string()),
-                MemberProp::Computed(expr) => {
-                    ObjectMember::Computed(expr_to_basic_blocks(ctx, &expr.expr))
-                }
+            let lhs = to_basic_blocks_lhs(ctx, arg);
+            let op = match op {
+                UpdateOp::PlusPlus => IncrDecr::Incr,
+                UpdateOp::MinusMinus => IncrDecr::Decr,
             };
+            let ins = if *prefix {
+                BasicBlockInstruction::IncrDecr(lhs, op)
+            } else {
+                BasicBlockInstruction::IncrDecrPostfix(lhs, op)
+            };
+            return ctx.push_instruction(ins);
+        }
+        Expr::Member(_) => {
+            let lhs = to_basic_blocks_lhs(ctx, exp);
 
-            return ctx.push_instruction(BasicBlockInstruction::Member(obj, prop));
+            return ctx.push_instruction(BasicBlockInstruction::Read(lhs));
         }
         Expr::SuperProp(_) => todo!(),
         Expr::Arrow(arrow_expr) => {
@@ -578,9 +578,6 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         | Expr::TsAs(_)
         | Expr::TsInstantiation(_)
         | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
-        _ => {
-            todo!("statements_to_ssa: expr_to_ssa: {:?} not implemented", exp)
-        }
     };
 }
 
@@ -708,19 +705,14 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = global "readGlobal"
-            $1 = $0
-            $2 = 1
-            $3 = global "writeGlobal" = $2
-            $4 = $2
-            $5 = global "readGlobalProp"
-            $6 = $5
-            $7 = $6.prop
-            $8 = 1
-            $9 = global "writeGlobalProp"
-            $10 = $9
-            $11 = $10.prop = $8
-            $12 = undefined
-            exit = return $12
+            $1 = 1
+            $2 = global "writeGlobal" = $1
+            $3 = $1
+            $4 = globalThis.readGlobalProp.prop
+            $5 = 1
+            $6 = globalThis.writeGlobalProp.prop = $5
+            $7 = undefined
+            exit = return $7
         }
         "###);
     }
@@ -738,23 +730,17 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 100
-            $1 = $0
-            $2 = ++$1
-            $3 = $2
-            $4 = global "use"
-            $5 = $4
-            $6 = $2
-            $7 = call $5($6)
-            $8 = 200
-            $9 = $8
-            $10 = --$9
-            $11 = $10
-            $12 = global "use"
-            $13 = $12
-            $14 = $10
-            $15 = call $13($14)
-            $16 = undefined
-            exit = return $16
+            $1 = $0++
+            $2 = global "use"
+            $3 = $0
+            $4 = call $2($3)
+            $5 = 200
+            $6 = --$5
+            $7 = global "use"
+            $8 = $5
+            $9 = call $7($8)
+            $10 = undefined
+            exit = return $10
         }
         "###);
 
@@ -767,19 +753,42 @@ mod tests {
         @0: {
             $0 = 100
             $1 = global "use"
-            $2 = $1
-            $3 = $0
-            $4 = ++$3
-            $5 = $4
-            $6 = call $2($3)
-            $7 = global "use"
-            $8 = $7
-            $9 = $4
-            $10 = --$9
-            $11 = $10
-            $12 = call $8($11)
-            $13 = undefined
-            exit = return $13
+            $2 = $0++
+            $3 = call $1($2)
+            $4 = global "use"
+            $5 = --$0
+            $6 = call $4($5)
+            $7 = undefined
+            exit = return $7
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_incr_decr_conditional() {
+        let s = test_basic_blocks(
+            "var a = 100;
+            let b = cond ? a++ : (--a, --a);",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 100
+            $1 = global "cond"
+            exit = cond $1 ? @1..@1 : @2..@2
+        }
+        @1: {
+            $2 = $0++
+            exit = jump @3
+        }
+        @2: {
+            $3 = --$0
+            $4 = --$0
+            exit = jump @3
+        }
+        @3: {
+            $5 = either($2, $4)
+            $6 = undefined
+            exit = return $6
         }
         "###);
     }
@@ -1592,18 +1601,14 @@ mod tests {
             $0 = 1
             $1 = {1: $0}
             $2 = 2
-            $3 = $1
-            $4 = $3.prop = $2
-            $5 = $1
-            $6 = $5.prop
-            $7 = $1
-            $8 = 1
-            $9 = $7[$8]
-            $10 = $1
-            $11 = "prop"
-            $12 = $10[$11]
-            $13 = undefined
-            exit = return $13
+            $3 = $1.prop = $2
+            $4 = $1.prop
+            $5 = 1
+            $6 = $1[$5]
+            $7 = "prop"
+            $8 = $1[$7]
+            $9 = undefined
+            exit = return $9
         }
         "###);
     }

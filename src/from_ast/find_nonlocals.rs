@@ -52,7 +52,7 @@ pub fn find_module_nonlocals(module: &Module) -> NonLocalInfo {
 }
 
 struct NonLocalsContext<'a> {
-    pub scopes: ScopeTree<()>,
+    pub scopes: ScopeTree<String, ()>,
     pub depth: u32,
     pub found_nonlocals: Vec<String>,
     pub deferred_fns: Vec<(FunctionLike<'a>, ScopeTreeHandle)>,

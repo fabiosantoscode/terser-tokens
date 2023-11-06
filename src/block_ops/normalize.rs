@@ -213,7 +213,8 @@ fn fold_blocks(
 
                 let (body_labels, body) = fold_blocks(out_blocks, body, jump_targets);
 
-                out_blocks[head].exit = BasicBlockExit::ForInOfLoop(looped_var, loop_kind, head + 1, body);
+                out_blocks[head].exit =
+                    BasicBlockExit::ForInOfLoop(looped_var, loop_kind, head + 1, body);
 
                 to_label.extend(body_labels);
                 if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {

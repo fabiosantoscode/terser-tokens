@@ -69,12 +69,23 @@ pub fn interpret(
                 _ => return None,
             }
         }
-        BasicBlockInstruction::IncrDecr(varname, is_incr) => match ctx.get_variable(*varname)? {
+        BasicBlockInstruction::IncrDecr(lhs, incr) => match ctx.get_lhs(lhs)? {
             JsType::Number => JsType::Number,
             JsType::TheNumber(n) => {
-                let diff = if *is_incr { 1.0 } else { -1.0 };
+                let n = JsType::new_number(n.into_inner() + incr.as_float_incr());
+                ctx.set_lhs(lhs, &n)?;
+                n
+            }
+            _ => return None,
+        },
+        BasicBlockInstruction::IncrDecrPostfix(lhs, incr) => match ctx.get_lhs(lhs)? {
+            JsType::Number => JsType::Number,
+            JsType::TheNumber(old_n) => {
+                let old_n = *old_n;
 
-                JsType::new_number(n.into_inner() + diff)
+                let n = JsType::new_number(old_n.into_inner() + incr.as_float_incr());
+                ctx.set_lhs(lhs, &n)?;
+                JsType::TheNumber(old_n)
             }
             _ => return None,
         },
@@ -139,8 +150,6 @@ pub fn interpret(
                 }
             }
         }
-        BasicBlockInstruction::Member(_base, _member) => return None,
-        BasicBlockInstruction::MemberSet(_base, _member, _value) => return None,
         BasicBlockInstruction::ArrayPattern(from_arr, pieces) => {
             let from_arr = ctx.get_variable(*from_arr)?.as_array()?;
 
@@ -245,10 +254,12 @@ pub fn interpret(
             Some(rest) => JsType::TheArray(rest.into()),
             None => JsType::Array,
         },
-        BasicBlockInstruction::ReadNonLocal(_) => None?, // TODO: grab from context?
-        BasicBlockInstruction::WriteNonLocal(_, _) => None?, // TODO: grab from context?
-        BasicBlockInstruction::ReadGlobal(_) => None?,   // May throw
-        BasicBlockInstruction::WriteGlobal(_, _) => None?, // May throw
+        BasicBlockInstruction::Read(lhs) => ctx.get_lhs(lhs)?.clone(),
+        BasicBlockInstruction::Write(lhs, new_val) => {
+            let val = ctx.get_variable(*new_val)?.clone();
+            ctx.set_lhs(lhs, &val)?;
+            val
+        }
     };
 
     Some(JsCompletion::Normal(normal_completion))
@@ -323,7 +334,7 @@ mod tests {
         testutils::*,
     };
 
-    fn test_interp(source: &str) -> Option<JsCompletion> {
+    fn test_interp_block(source: &str) -> Option<JsCompletion> {
         let mut ctx = InterpretCtx::new();
         ctx.start_function(
             FunctionId(0),
@@ -331,19 +342,23 @@ mod tests {
         );
         ctx.assign_variable(1, JsType::new_number(1.0));
         ctx.assign_variable(2, JsType::new_number(2.0));
-        let instructions = parse_instructions(&format!(
+        ctx.assign_variable(123, JsType::Number);
+        let instructions = parse_instructions(source);
+        interpret_block_group(&mut ctx, &instructions)
+    }
+
+    fn test_interp(source: &str) -> Option<JsCompletion> {
+        test_interp_block(&format!(
             "@0: {{
                 $0 = {source}
                 exit = return $0
             }}"
-        ));
-        let ins = instructions.iter_all_instructions().next().unwrap().2;
-        interpret(&mut ctx, ins)
+        ))
     }
 
     fn test_interp_normal(source: &str) -> JsType {
         match test_interp(source) {
-            Some(JsCompletion::Normal(t)) => t,
+            Some(JsCompletion::Return(t)) => t,
             comp => panic!("expected normal completion, got {:?}", comp),
         }
     }
@@ -388,6 +403,52 @@ mod tests {
         insta::assert_debug_snapshot!(test_interp_normal("undefined"), @r###"
             Undefined
         "###);
+    }
+
+    #[test]
+    fn interp_cond_mutations_1() {
+        let num = test_interp_block(
+            "@0: {
+                $0 = 5
+                exit = cond $123 ? @1..@1 : @2..@2 }
+            @1: {
+                $1 = $0++
+                exit = jump @3 }
+            @2: {
+                $2 = --$0
+                exit = jump @3 }
+            @3: {
+                exit = return $0 }",
+        )
+        .unwrap()
+        .into_return()
+        .unwrap();
+        insta::assert_debug_snapshot!(num, @"Number"); // We don't know if 4 or 6
+    }
+
+    #[test]
+    fn interp_cond_mutations_2() {
+        let num = test_interp_block(
+            "@0: {
+                $0 = [$2]
+                exit = cond $123 ? @1..@1 : @2..@2 }
+            @1: {
+                $1 = 0
+                $2 = $0[$1]++
+                exit = jump @3 }
+            @2: {
+                $3 = 0
+                $4 = --$0[$3]
+                exit = jump @3 }
+            @3: {
+                $5 = 0
+                $6 = $0[$5]
+                exit = return $6 }",
+        )
+        .unwrap()
+        .into_return()
+        .unwrap();
+        insta::assert_debug_snapshot!(num, @"Number"); // We don't know if 1 or 3
     }
 
     #[test]
@@ -460,7 +521,33 @@ mod tests {
     fn interp_incr() {
         let num = test_interp_js("let a = 1; return a++;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
-        let num = test_interp_js("let a = 1; return --a;");
-        insta::assert_debug_snapshot!(num, @"TheNumber(0)");
+        let num = test_interp_js("let a = 2; return --a;");
+        insta::assert_debug_snapshot!(num, @"TheNumber(1)");
+        let num = test_interp_js("let a = 2; a--; return a++;");
+        insta::assert_debug_snapshot!(num, @"TheNumber(1)");
+        let num = test_interp_js("let a = 1; a++; return --a;");
+        insta::assert_debug_snapshot!(num, @"TheNumber(1)");
     }
+
+    #[test]
+    fn interp_lhs() {
+        let obj = test_interp_js("let o = {a: 1}; o.a++; return o;");
+        insta::assert_debug_snapshot!(obj, @"TheObject({\"a\": TheNumber(2)})");
+        let obj = test_interp_js("let o = {a: 1}; o.a++; return o.a;");
+        insta::assert_debug_snapshot!(obj, @"TheNumber(2)");
+    }
+
+    /*
+    #[test]
+    fn interp_nonlocal() {
+        let obj = test_interp_js("
+            let a = 1;
+            function f() {
+                let b = a + 1;
+                return b;
+            }
+            return f();
+        ");
+        insta::assert_debug_snapshot!(obj, @"TheNumber(2)");
+    } */
 }

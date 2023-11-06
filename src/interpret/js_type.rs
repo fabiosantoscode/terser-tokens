@@ -4,7 +4,7 @@ use ordered_float::NotNan;
 
 use crate::basic_blocks::{BasicBlockInstruction, FunctionId};
 
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
 pub enum JsType {
     Undefined,
     Null,
@@ -23,6 +23,7 @@ pub enum JsType {
     TheObject(BTreeMap<String, JsType>),
     /// A virtual object that represents an unpacking of an array or object.
     Pattern(Vec<JsType>),
+    #[default]
     Any,
 }
 
@@ -39,6 +40,7 @@ impl JsType {
     ///
     /// Usable for "if" statements, "||", "&&", etc.
     pub fn is_truthy(&self) -> Option<bool> {
+        println!("is_truthy: {:?}", self);
         match self {
             JsType::Undefined => Some(false),
             JsType::Null => Some(false),
@@ -62,6 +64,7 @@ impl JsType {
     pub(crate) fn to_string(&self) -> Option<String> {
         match self {
             JsType::TheString(s) => Some(s.clone()),
+            JsType::TheBoolean(b) => Some(b.to_string()),
             JsType::TheNumber(num) => {
                 let mut buf = ryu_js::Buffer::new();
                 Some(buf.format(num.into_inner()).to_string())
@@ -99,10 +102,31 @@ impl JsType {
             use JsType::*;
 
             match (self, other) {
+                (TheArray(a), TheArray(b)) if a.len() == b.len() => {
+                    TheArray(a.iter().zip(b.iter()).map(|(a, b)| a.union(b)).collect())
+                }
+                (TheObject(a), TheObject(b)) if a.len() == b.len() => {
+                    let mut out_obj = BTreeMap::new();
+
+                    let mut a_iter = a.iter();
+                    let mut b_iter = b.iter();
+
+                    while let (Some(a), Some(b)) = (a_iter.next(), b_iter.next()) {
+                        if a.0 == b.0 {
+                            out_obj.insert(a.0.clone(), a.1.union(b.1));
+                        } else {
+                            return Object;
+                        }
+                    }
+
+                    TheObject(out_obj)
+                }
                 (TheNumber(_) | Number, TheNumber(_) | Number) => Number,
                 (TheBoolean(_) | Boolean, TheBoolean(_) | Boolean) => Boolean,
                 (TheString(_) | String, TheString(_) | String) => String,
                 (TheFunction(_) | Function, TheFunction(_) | Function) => Function,
+                (TheObject(_) | Object, TheObject(_) | Object) => Object,
+                (TheArray(_) | Array, TheArray(_) | Array) => Array,
                 _ => Any,
             }
         }
@@ -130,13 +154,6 @@ impl JsType {
     pub(crate) fn as_function_id(&self) -> Option<FunctionId> {
         match self {
             JsType::TheFunction(id) => Some(*id),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_number(&self) -> Option<f64> {
-        match self {
-            JsType::TheNumber(n) => Some(n.into_inner()),
             _ => None,
         }
     }
