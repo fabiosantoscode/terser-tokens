@@ -167,14 +167,11 @@ impl<'module> InterpretCtx<'_> {
     }
 
     pub(crate) fn start_condition(&mut self) {
-        let vars = self.variables.pop().unwrap();
-        self.variables.push(vars.fork());
+        self.variables.last_mut().unwrap().fork();
     }
 
     pub(crate) fn end_condition(&mut self) -> BTreeMap<usize, JsType> {
-        let vars = self.variables.last_mut().unwrap();
-        let ret = vars.unfork();
-        ret
+        self.variables.last_mut().unwrap().unfork()
     }
 
     pub(crate) fn merge_branch_mutations(

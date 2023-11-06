@@ -24,15 +24,17 @@ where
         }
     }
 
-    pub fn fork(self) -> Self {
+    pub fn fork(&mut self) {
         self.fork_inner(BTreeMap::new())
     }
 
-    fn fork_inner(self, map: BTreeMap<K, V>) -> Self {
-        Self {
-            parent: Some(Box::new(self)),
+    fn fork_inner(&mut self, map: BTreeMap<K, V>) {
+        let me = std::mem::take(self);
+
+        *self = Self {
+            parent: Some(Box::new(me)),
             map,
-        }
+        };
     }
 
     pub fn unfork(&mut self) -> BTreeMap<K, V> {
@@ -195,7 +197,7 @@ mod tests {
         map.insert("root_b".to_string(), "root_b".to_string());
         map.insert("changed".to_string(), "changed".to_string());
 
-        map = map.fork_inner(
+        map.fork_inner(
             vec![("bumped_in".to_string(), "bumped_in".to_string())]
                 .into_iter()
                 .collect(),
