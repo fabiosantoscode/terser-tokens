@@ -1,30 +1,34 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use crate::basic_blocks::{BasicBlockInstruction, NonLocalId, LHS};
 
 use super::{FromAstCtx, NonLocalInfo, NonLocalOrLocal};
 
 impl FromAstCtx {
+    /// Check if a name exists in the current function
+    pub fn read_local_name(&self, name: &str) -> Option<usize> {
+        match self.scope_tree.lookup(name) {
+            Some(NonLocalOrLocal::Local(loc)) => Some(loc),
+            _ => None,
+        }
+    }
+
     /// Declare or re-declare a name {name} to contain the instruction varname {value}
     pub fn declare_name(&mut self, name: &str, value: usize) {
-        if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
-            self.push_instruction(BasicBlockInstruction::Write(LHS::NonLocal(nonlocal), value));
-        } else {
-            let mut conditionals = self.conditionals.last_mut();
-
-            if let Some(ref mut conditionals) = conditionals {
-                let entry = conditionals.entry(name.into()).or_insert_with(|| {
-                    match self.scope_tree.lookup_in_function(name) {
-                        Some(NonLocalOrLocal::Local(existing_var)) => vec![existing_var],
-                        _ => vec![],
-                    }
-                });
-
-                entry.push(value);
+        match self.scope_tree.lookup(name) {
+            Some(NonLocalOrLocal::NonLocal(nonlocal)) => {
+                self.push_instruction(BasicBlockInstruction::Write(LHS::NonLocal(nonlocal), value));
             }
-
-            self.scope_tree
-                .insert(name.into(), NonLocalOrLocal::Local(value));
+            Some(NonLocalOrLocal::Local(already_assigned)) => {
+                self.push_instruction_with_varname(
+                    already_assigned,
+                    BasicBlockInstruction::Ref(value),
+                );
+            }
+            None => {
+                self.scope_tree
+                    .insert(name.into(), NonLocalOrLocal::Local(value));
+            }
         }
     }
 
@@ -108,42 +112,6 @@ impl FromAstCtx {
                     && !nli.nonlocals.contains(&name.into())
             }
             None => false,
-        }
-    }
-
-    pub fn enter_conditional_branch(&mut self) {
-        self.conditionals.push(match self.conditionals.last() {
-            Some(cond) => cond.clone(),
-            _ => BTreeMap::new(),
-        });
-    }
-
-    pub fn leave_conditional_branch(&mut self) {
-        // phi nodes for conditionally assigned variables
-        let to_phi = self
-            .conditionals
-            .pop()
-            .expect("unbalanced conditional branch")
-            .into_iter()
-            .filter(|(_, phies)| phies.len() > 1);
-
-        for (varname, phies) in to_phi {
-            if let Some(existing_phies) = self
-                .conditionals
-                .last_mut()
-                .and_then(|cond| cond.get_mut(&varname))
-            {
-                for phi in phies.iter() {
-                    if !existing_phies.contains(&phi) {
-                        existing_phies.push(*phi);
-                    }
-                }
-            }
-
-            let phi = BasicBlockInstruction::Phi(phies);
-            let phi_idx = self.push_instruction(phi);
-            self.scope_tree
-                .insert(varname, NonLocalOrLocal::Local(phi_idx));
         }
     }
 
@@ -263,79 +231,10 @@ mod tests {
     }
 
     #[test]
-    fn test_nonlocals() {
-        let mut ctx = FromAstCtx::new();
-
-        ctx.embed_nonlocals(
-            NonLocalInfo {
-                funscoped: vec!["assigned_later".into(), "nonlocal_assigned_later".into()],
-                nonlocals: vec!["provided_nonlocal".into(), "nonlocal_assigned_later".into()],
-            },
-            None,
-        );
-
-        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
-        ScopeTree {
-            scopes: [
-                ScopeTreeNode {
-                    parent: None,
-                    is_block: false,
-                    vars: {
-                        "nonlocal_assigned_later": NonLocal(4),
-                        "provided_nonlocal": NonLocal(1),
-                    },
-                },
-            ],
-            current_scope: ScopeTreeHandle(0),
-        }
-        "###);
-
-        // time to read a not-yet-declared var
-        assert_eq!(ctx.read_name("assigned_later"), 6);
-
-        // time to read a nonlocal
-        assert_eq!(ctx.read_name("provided_nonlocal"), 7);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[7], @r###"
-        (
-            7,
-            Some(
-                read_non_local $$1,
-            ),
-        )
-        "###);
-
-        // time to write it!
-        ctx.assign_name("provided_nonlocal", 123);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[8], @r###"
-        (
-            8,
-            Some(
-                write_non_local $$1 $123,
-            ),
-        )
-        "###);
-
-        // nonlocals are never conditional
-        ctx.enter_conditional_branch();
-        ctx.assign_name("provided_nonlocal", 777);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[9], @r###"
-        (
-            9,
-            Some(
-                write_non_local $$1 $777,
-            ),
-        )
-        "###);
-        assert!(ctx.conditionals[0].is_empty());
-    }
-
-    #[test]
     fn test_general() {
         let mut ctx = FromAstCtx::new();
 
         ctx.declare_name("varname", 123);
-
-        ctx.enter_conditional_branch();
 
         ctx.declare_name("conditional_varname", 456);
         ctx.assign_name("conditional_varname", 789);
@@ -343,7 +242,6 @@ mod tests {
         ctx.go_into_function(BasicBlockEnvironment::Function(false, false), None, |ctx| {
             ctx.assign_name("conditional_varname", 999);
 
-            insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
             insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
             ScopeTree {
                 scopes: [
@@ -373,16 +271,6 @@ mod tests {
         })
         .unwrap();
 
-        insta::assert_debug_snapshot!(ctx.conditionals, @r###"
-        [
-            {
-                "conditional_varname": [
-                    456,
-                    789,
-                ],
-            },
-        ]
-        "###);
         insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
         ScopeTree {
             scopes: [
@@ -406,183 +294,6 @@ mod tests {
             ],
             current_scope: ScopeTreeHandle(0),
         }
-        "###);
-
-        // this pops the conditionals, creates phi nodes and assigns the conditional var to the phied version
-        ctx.leave_conditional_branch();
-
-        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
-        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
-        ScopeTree {
-            scopes: [
-                ScopeTreeNode {
-                    parent: None,
-                    is_block: false,
-                    vars: {
-                        "conditional_varname": Local(1),
-                        "varname": Local(123),
-                    },
-                },
-                ScopeTreeNode {
-                    parent: Some(
-                        ScopeTreeHandle(0),
-                    ),
-                    is_block: false,
-                    vars: {
-                        "conditional_varname": Local(999),
-                    },
-                },
-            ],
-            current_scope: ScopeTreeHandle(0),
-        }
-        "###);
-        insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
-        [
-            [
-                (
-                    1,
-                    Some(
-                        either($456, $789),
-                    ),
-                ),
-            ],
-        ]
-        "###);
-    }
-
-    #[test]
-    fn test_phi() {
-        let mut ctx = FromAstCtx::new();
-
-        ctx.declare_name("varname_before_if", 11);
-
-        ctx.enter_conditional_branch();
-
-        ctx.assign_name("varname_before_if", 12);
-        ctx.declare_name("varname_in_if", 21);
-        ctx.assign_name("varname_in_if", 22);
-
-        insta::assert_debug_snapshot!(ctx.conditionals, @r###"
-        [
-            {
-                "varname_before_if": [
-                    11,
-                    12,
-                ],
-                "varname_in_if": [
-                    21,
-                    22,
-                ],
-            },
-        ]
-        "###);
-
-        // this pops the conditionals, creates phi nodes and assigns the conditional var to the phied version
-        ctx.leave_conditional_branch();
-
-        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
-        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
-        ScopeTree {
-            scopes: [
-                ScopeTreeNode {
-                    parent: None,
-                    is_block: false,
-                    vars: {
-                        "varname_before_if": Local(0),
-                        "varname_in_if": Local(1),
-                    },
-                },
-            ],
-            current_scope: ScopeTreeHandle(0),
-        }
-        "###);
-        insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
-        [
-            [
-                (
-                    0,
-                    Some(
-                        either($11, $12),
-                    ),
-                ),
-                (
-                    1,
-                    Some(
-                        either($21, $22),
-                    ),
-                ),
-            ],
-        ]
-        "###);
-    }
-
-    #[test]
-    fn test_nested_phi() {
-        let mut ctx = FromAstCtx::new();
-
-        ctx.declare_name("varname", 11);
-        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
-
-        ctx.enter_conditional_branch();
-        ctx.assign_name("varname", 12);
-        insta::assert_debug_snapshot!(ctx.conditionals[0].get("varname").unwrap(), @r###"
-        [
-            11,
-            12,
-        ]
-        "###);
-
-        ctx.enter_conditional_branch();
-        ctx.assign_name("varname", 13);
-        insta::assert_debug_snapshot!(ctx.conditionals[1].get("varname").unwrap(), @r###"
-        [
-            11,
-            12,
-            13,
-        ]
-        "###);
-
-        ctx.leave_conditional_branch();
-        insta::assert_debug_snapshot!(ctx.conditionals[0].get("varname").unwrap(), @r###"
-        [
-            11,
-            12,
-            13,
-        ]
-        "###);
-
-        ctx.leave_conditional_branch();
-        insta::assert_debug_snapshot!(ctx.conditionals, @"[]");
-
-        insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
-        ScopeTree {
-            scopes: [
-                ScopeTreeNode {
-                    parent: None,
-                    is_block: false,
-                    vars: {
-                        "varname": Local(1),
-                    },
-                },
-            ],
-            current_scope: ScopeTreeHandle(0),
-        }
-        "###);
-        insta::assert_debug_snapshot!(ctx.basic_blocks[0], @r###"
-        [
-            (
-                0,
-                Some(
-                    either($11, $12, $13),
-                ),
-            ),
-            (
-                1,
-                Some(
-                    either($11, $12, $13),
-                ),
-            ),
-        ]
         "###);
     }
 }

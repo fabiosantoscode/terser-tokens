@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::basic_blocks::BasicBlockModule;
 
-use super::{generate_phi_nodes, normalize_basic_blocks, remove_phi_module};
+use super::{normalize_basic_blocks};
 
 pub fn normalize_module(module: &mut BasicBlockModule) {
     for (_, block_group) in module.iter_mut() {
@@ -12,8 +12,7 @@ pub fn normalize_module(module: &mut BasicBlockModule) {
 
     // TODO: normalize function IDs
 
-    remove_phi_module(module);
-    generate_phi_nodes(module); // calls `normalize_varnames`
+    normalize_varnames(module);
 }
 
 /// make names start at zero and increase one by one

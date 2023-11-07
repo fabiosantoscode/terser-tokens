@@ -1,7 +1,7 @@
 use swc_ecma_ast::{
     AwaitExpr, Decl, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, GetterProp, IfStmt,
     LabeledStmt, Lit, MethodProp, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
-    Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDeclKind, YieldExpr,
+    Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDeclKind, VarDeclarator, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -54,17 +54,17 @@ pub fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
 fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
     match stat {
         Stmt::Expr(expr) => {
-            let _exprid = expr_to_basic_blocks(ctx, &expr.expr);
+            expr_or_ref(ctx, &expr.expr, false);
 
             ctx.wrap_up_block();
         }
         Stmt::Decl(Decl::Var(var)) => {
-            for decl in &var.decls {
-                let init = match decl.init.as_ref() {
-                    Some(init) => expr_to_basic_blocks(ctx, &init.as_ref()),
+            for VarDeclarator { name, init, .. } in &var.decls {
+                let init = match init.as_ref() {
+                    Some(init) => expr_or_ref(ctx, &init.as_ref(), true),
                     None => ctx.push_instruction(BasicBlockInstruction::Undefined),
                 };
-                pat_to_basic_blocks(ctx, PatType::VarDecl, &decl.name, init);
+                pat_to_basic_blocks(ctx, PatType::VarDecl, name, init);
             }
         }
         Stmt::Decl(Decl::Fn(_)) => {
@@ -87,11 +87,9 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             // 3: Jump(1)
             // 4: (outside now)
 
-            let right = expr_to_basic_blocks(ctx, &right);
+            let right = expr_or_ref(ctx, &right, true);
 
             let blockidx_loop_head = ctx.wrap_up_block(); // '0 ForInOfLoop(1..3)
-
-            ctx.enter_conditional_branch();
 
             let blockidx_bind_start = ctx.wrap_up_block();
 
@@ -126,8 +124,6 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             stat_to_basic_blocks(ctx, body);
 
-            ctx.leave_conditional_branch();
-
             let blockidx_jump_back = ctx.wrap_up_block();
 
             ctx.set_exit(
@@ -150,11 +146,9 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             let blockidx_loop = ctx.wrap_up_block(); // '0 Loop(1..4)
 
-            ctx.enter_conditional_branch();
-
             let blockidx_cond = ctx.wrap_up_block(); // '1 Cond(2..3, 4..4)
 
-            let test = expr_to_basic_blocks(ctx, &whil.test);
+            let test = expr_or_ref(ctx, &whil.test, true);
 
             let blockidx_body_start = ctx.wrap_up_block(); // '2 $body
 
@@ -165,8 +159,6 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             let blockidx_cond_else = ctx.wrap_up_block(); // '4
 
             let blockidx_outside = ctx.wrap_up_block(); // '5
-
-            ctx.leave_conditional_branch(); // insert phi nodes in '5
 
             ctx.set_exit(
                 blockidx_loop,
@@ -191,10 +183,8 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             ctx.wrap_up_block();
 
             // IF($test)
-            let test = expr_to_basic_blocks(ctx, &test);
+            let test = expr_or_ref(ctx, &test, true);
             let blockidx_before = ctx.wrap_up_block();
-
-            ctx.enter_conditional_branch();
 
             // THEN
             let blockidx_consequent_before = ctx.wrap_up_block();
@@ -209,7 +199,6 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             let blockidx_alternate_after = ctx.current_block_index();
 
             let after = ctx.wrap_up_block();
-            ctx.leave_conditional_branch();
 
             ctx.set_exit(
                 blockidx_before,
@@ -239,7 +228,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         Stmt::Switch(_) => todo!(),
         Stmt::Throw(ThrowStmt { arg, .. }) => {
             ctx.wrap_up_block();
-            let arg = expr_to_basic_blocks(ctx, arg);
+            let arg = expr_or_ref(ctx, arg, true);
 
             let throw_from = ctx.wrap_up_block();
             ctx.set_exit(throw_from, BasicBlockExit::ExitFn(ExitType::Throw, arg));
@@ -248,7 +237,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         }
         Stmt::Return(ret) => {
             ctx.wrap_up_block();
-            let expr = expr_to_basic_blocks(ctx, ret.arg.as_ref().unwrap());
+            let expr = expr_or_ref(ctx, ret.arg.as_ref().unwrap(), true);
 
             let return_from = ctx.wrap_up_block();
             ctx.set_exit(return_from, BasicBlockExit::ExitFn(ExitType::Return, expr));
@@ -259,13 +248,10 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             let catch_pusher_idx = ctx.wrap_up_block();
             let try_idx = ctx.wrap_up_block();
 
-            ctx.enter_conditional_branch();
-
             block_to_basic_blocks(ctx, &stmt.block.stmts).expect("todo error handling");
 
             let before_catch_idx = ctx.wrap_up_block();
             let catch_idx = ctx.wrap_up_block();
-            ctx.enter_conditional_branch();
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
@@ -278,15 +264,11 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             let after_catch_idx = ctx.wrap_up_block();
             let finally_idx = ctx.wrap_up_block();
 
-            ctx.leave_conditional_branch();
-
             if let Some(ref finalizer) = stmt.finalizer {
                 block_to_basic_blocks(ctx, &finalizer.stmts).expect("todo error handling");
             }
 
             let after_finally_idx = ctx.wrap_up_block();
-
-            ctx.leave_conditional_branch();
 
             let done_and_dusted = ctx.wrap_up_block();
 
@@ -320,7 +302,23 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
     }
 }
 
-pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
+pub fn expr_or_ref(ctx: &mut FromAstCtx, exp: &Expr, needs_ret: bool) -> usize {
+    match exp {
+        Expr::Ident(ident) => match ctx.read_local_name(&ident.sym.to_string()) {
+            Some(varname) => {
+                if needs_ret {
+                    varname
+                } else {
+                    usize::MAX
+                }
+            }
+            None => expr_to_basic_blocks(ctx, exp, needs_ret),
+        },
+        _ => expr_to_basic_blocks(ctx, exp, needs_ret),
+    }
+}
+
+pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr, needs_ret: bool) -> usize {
     match exp {
         Expr::Lit(lit) => {
             let lit = match lit {
@@ -335,45 +333,52 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             return ctx.push_instruction(lit);
         }
         Expr::Bin(bin) => {
-            let l = expr_to_basic_blocks(ctx, &bin.left);
-            let r = expr_to_basic_blocks(ctx, &bin.right);
+            let l = expr_or_ref(ctx, &bin.left, true);
+            let r = expr_or_ref(ctx, &bin.right, true);
 
             return ctx.push_instruction(BasicBlockInstruction::BinOp(bin.op.clone(), l, r));
         }
         Expr::Assign(assign) => match &assign.left {
             PatOrExpr::Pat(pat) => {
-                let init = expr_to_basic_blocks(ctx, &assign.right);
+                let init = expr_or_ref(ctx, &assign.right, true);
                 return pat_to_basic_blocks(ctx, PatType::Assign, pat, init);
             }
             _ => todo!(),
         },
-        Expr::Paren(paren) => return expr_to_basic_blocks(ctx, &paren.expr),
+        Expr::Paren(paren) => return expr_or_ref(ctx, &paren.expr, true),
         Expr::Seq(seq) => {
-            let mut last = None;
-            for expr in &seq.exprs {
-                last = Some(expr_to_basic_blocks(ctx, expr));
+            for (i, expr) in seq.exprs.iter().enumerate() {
+                if i == seq.exprs.len() - 1 {
+                    return expr_or_ref(ctx, expr, needs_ret);
+                } else {
+                    expr_or_ref(ctx, expr, true);
+                }
             }
-            return last.expect("Seq must have 1+ exprs");
+            unreachable!("seq exprs should have at least one expr");
         }
         Expr::Cond(cond_expr) => {
-            let test = expr_to_basic_blocks(ctx, &cond_expr.test);
+            let test = expr_or_ref(ctx, &cond_expr.test, true);
             let blockidx_before = ctx.current_block_index();
             ctx.wrap_up_block();
 
-            ctx.enter_conditional_branch();
+            let result = ctx.bump_var_index();
 
             let blockidx_consequent_before = ctx.current_block_index();
-            let cons = expr_to_basic_blocks(ctx, &cond_expr.cons);
+            let cons = expr_or_ref(ctx, &cond_expr.cons, true);
+            if needs_ret {
+                ctx.push_instruction_with_varname(result, BasicBlockInstruction::Ref(cons));
+            }
             let blockidx_consequent_after = ctx.current_block_index();
 
             let blockidx_alternate_before = ctx.wrap_up_block();
-            let alt = expr_to_basic_blocks(ctx, &cond_expr.alt);
+            let alt = expr_or_ref(ctx, &cond_expr.alt, true);
+            if needs_ret {
+                ctx.push_instruction_with_varname(result, BasicBlockInstruction::Ref(alt));
+            }
             let blockidx_alternate_after = ctx.current_block_index();
             let blockidx_after = ctx.wrap_up_block();
 
             ctx.wrap_up_block();
-
-            ctx.leave_conditional_branch();
 
             // block before gets a Cond node added
             ctx.set_exit(
@@ -397,8 +402,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 BasicBlockExit::Jump(blockidx_after),
             );
 
-            // the retval of our ternary is a phi node
-            return ctx.push_instruction(BasicBlockInstruction::Phi(vec![cons, alt]));
+            return result;
         }
         Expr::Ident(ident) => {
             let ident = ident.sym.to_string();
@@ -411,7 +415,12 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                     } else if let Some(nonloc) = ctx.is_nonlocal(ident) {
                         BasicBlockInstruction::Read(LHS::NonLocal(nonloc))
                     } else {
-                        BasicBlockInstruction::Ref(ctx.read_name(ident))
+                        let read = ctx.read_name(ident);
+                        if needs_ret {
+                            BasicBlockInstruction::Ref(read)
+                        } else {
+                            return usize::MAX;
+                        }
                     }
                 }
             };
@@ -425,8 +434,8 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             for elem in &array_lit.elems {
                 let elem = match elem {
                     Some(ExprOrSpread { spread, expr }) => match spread {
-                        None => ArrayElement::Item(expr_to_basic_blocks(ctx, expr)),
-                        Some(_) => ArrayElement::Spread(expr_to_basic_blocks(ctx, expr)),
+                        None => ArrayElement::Item(expr_or_ref(ctx, expr, true)),
+                        Some(_) => ArrayElement::Spread(expr_or_ref(ctx, expr, true)),
                     },
                     None => ArrayElement::Hole,
                 };
@@ -442,26 +451,26 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             for prop in props {
                 match prop {
                     PropOrSpread::Spread(spread) => {
-                        kvs.push(ObjectProp::Spread(expr_to_basic_blocks(ctx, &spread.expr)))
+                        kvs.push(ObjectProp::Spread(expr_or_ref(ctx, &spread.expr, true)))
                     }
                     PropOrSpread::Prop(prop) => match prop.as_ref() {
                         Prop::Shorthand(ident) => {
-                            let value = expr_to_basic_blocks(ctx, &Expr::Ident(ident.clone()));
+                            let value = expr_or_ref(ctx, &Expr::Ident(ident.clone()), true);
                             kvs.push(ObjectProp::KeyValue(ident.sym.to_string(), value));
                         }
                         Prop::KeyValue(kv) => match &kv.key {
                             PropName::Computed(expr) => kvs.push(ObjectProp::Computed(
-                                expr_to_basic_blocks(ctx, &expr.expr),
-                                expr_to_basic_blocks(ctx, &kv.value),
+                                expr_or_ref(ctx, &expr.expr, true),
+                                expr_or_ref(ctx, &kv.value, true),
                             )),
                             _ => {
                                 let prop_name = object_propname_to_string(&kv.key);
                                 if &prop_name == "__proto__" {
-                                    proto = Some(expr_to_basic_blocks(ctx, &kv.value));
+                                    proto = Some(expr_or_ref(ctx, &kv.value, true));
                                 } else {
                                     kvs.push(ObjectProp::KeyValue(
                                         prop_name,
-                                        expr_to_basic_blocks(ctx, &kv.value),
+                                        expr_or_ref(ctx, &kv.value, true),
                                     ));
                                 }
                             }
@@ -484,16 +493,16 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                         return ctx.push_instruction(BasicBlockInstruction::TypeOfGlobal(s));
                     }
                 }
-                let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
+                let expr = expr_or_ref(ctx, &unary_expr.arg, true);
                 return ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
             }
             UnaryOp::Delete => todo!(),
             UnaryOp::Void => {
-                expr_to_basic_blocks(ctx, &unary_expr.arg);
+                expr_or_ref(ctx, &unary_expr.arg, false);
                 return ctx.push_instruction(BasicBlockInstruction::Undefined);
             }
             UnaryOp::Minus | UnaryOp::Plus | UnaryOp::Bang | UnaryOp::Tilde => {
-                let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
+                let expr = expr_or_ref(ctx, &unary_expr.arg, true);
                 return ctx.push_instruction(BasicBlockInstruction::UnaryOp(unary_expr.op, expr));
             }
         },
@@ -528,13 +537,13 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         }
         Expr::Call(call) => {
             // TODO non-expr callees (super, import)
-            let callee = expr_to_basic_blocks(ctx, &call.callee.clone().expect_expr());
+            let callee = expr_or_ref(ctx, &call.callee.clone().expect_expr(), true);
 
             let mut args = Vec::with_capacity(call.args.len());
             for arg in &call.args {
                 match arg.spread {
                     Some(_) => todo!("spread args"),
-                    None => args.push(expr_to_basic_blocks(ctx, arg.expr.as_ref())),
+                    None => args.push(expr_or_ref(ctx, arg.expr.as_ref(), true)),
                 }
             }
 
@@ -553,14 +562,14 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             };
 
             let arg = match arg {
-                Some(arg) => expr_to_basic_blocks(ctx, arg),
+                Some(arg) => expr_or_ref(ctx, arg, true),
                 None => ctx.current_block_index(),
             };
 
             return ctx.push_instruction(BasicBlockInstruction::TempExit(typ, arg));
         }
         Expr::Await(AwaitExpr { arg, .. }) => {
-            let arg = expr_to_basic_blocks(ctx, arg);
+            let arg = expr_or_ref(ctx, arg, true);
 
             return ctx.push_instruction(BasicBlockInstruction::TempExit(TempExitType::Await, arg));
         }
@@ -651,23 +660,19 @@ mod tests {
     #[test]
     fn simple_add_2() {
         let s = test_basic_blocks(
-            "
-        var a = 10;
-        var b = 20;
-        var c = a + b + 30;
-        ",
+            "var a = 10;
+            var b = 20;
+            var c = a + b + 30;",
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 10
             $1 = 20
-            $2 = $0
-            $3 = $1
+            $2 = $0 + $1
+            $3 = 30
             $4 = $2 + $3
-            $5 = 30
-            $6 = $4 + $5
-            $7 = undefined
-            exit = return $7
+            $5 = undefined
+            exit = return $5
         }
         "###);
     }
@@ -684,12 +689,10 @@ mod tests {
         @0: {
             $0 = 10
             $1 = typeof global "globalVar"
-            $2 = $0
-            $3 = typeof $2
-            $4 = $0
-            $5 = undefined
-            $6 = undefined
-            exit = return $6
+            $2 = typeof $0
+            $3 = undefined
+            $4 = undefined
+            exit = return $4
         }
         "###);
     }
@@ -732,15 +735,13 @@ mod tests {
             $0 = 100
             $1 = $0++
             $2 = global "use"
-            $3 = $0
-            $4 = call $2($3)
-            $5 = 200
-            $6 = --$5
-            $7 = global "use"
-            $8 = $5
-            $9 = call $7($8)
-            $10 = undefined
-            exit = return $10
+            $3 = call $2($0)
+            $4 = 200
+            $5 = --$4
+            $6 = global "use"
+            $7 = call $6($4)
+            $8 = undefined
+            exit = return $8
         }
         "###);
 
@@ -778,42 +779,43 @@ mod tests {
         }
         @1: {
             $2 = $0++
+            $6 = $2
             exit = jump @3
         }
         @2: {
-            $3 = --$0
             $4 = --$0
+            $5 = --$0
+            $6 = $5
             exit = jump @3
         }
         @3: {
-            $5 = either($2, $4)
-            $6 = undefined
-            exit = return $6
+            $7 = undefined
+            exit = return $7
         }
         "###);
     }
 
     #[test]
     fn simple_cond() {
-        let s = test_basic_blocks_expr("1 ? 10 : 20;");
+        let s = test_basic_blocks("let x = 1 ? 10 : 20;");
         insta::assert_debug_snapshot!(s, @r###"
-        function():
         @0: {
             $0 = 1
             exit = cond $0 ? @1..@1 : @2..@2
         }
         @1: {
             $1 = 10
+            $4 = $1
             exit = jump @3
         }
         @2: {
-            $2 = 20
+            $3 = 20
+            $4 = $3
             exit = jump @3
         }
         @3: {
-            $3 = either($1, $2)
-            $4 = undefined
-            exit = return $4
+            $5 = undefined
+            exit = return $5
         }
         "###);
     }
@@ -827,24 +829,22 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            $0 = 999
+            $3 = 999
             $1 = 1
             exit = cond $1 ? @1..@1 : @2..@2
         }
         @1: {
             $2 = 2
             $3 = $2
+            $4 = $2
             exit = jump @3
         }
         @2: {
-            $4 = 3
+            $5 = 3
             exit = jump @3
         }
         @3: {
-            $5 = either($0, $2)
-            $6 = either($3, $4)
-            $7 = $5
-            exit = return $7
+            exit = return $3
         }
         "###);
     }
@@ -859,27 +859,27 @@ mod tests {
             exit = cond $0 ? @1..@4 : @5..@5
         }
         @1: {
-            $1 = 2
-            exit = cond $1 ? @2..@2 : @3..@3
+            $2 = 2
+            exit = cond $2 ? @2..@2 : @3..@3
         }
         @2: {
-            $2 = 10
+            $4 = 10
+            $3 = $4
             exit = jump @4
         }
         @3: {
-            $3 = 15
+            $5 = 15
+            $3 = $5
             exit = jump @4
         }
         @4: {
-            $4 = either($2, $3)
             exit = jump @6
         }
         @5: {
-            $5 = 20
+            $6 = 20
             exit = jump @6
         }
         @6: {
-            $6 = either($4, $5)
             $7 = undefined
             exit = return $7
         }
@@ -892,11 +892,10 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
-            $1 = $0
-            $2 = 2
-            $3 = $1 + $2
-            $4 = undefined
-            exit = return $4
+            $1 = 2
+            $2 = $0 + $1
+            $3 = undefined
+            exit = return $3
         }
         "###);
     }
@@ -1375,8 +1374,7 @@ mod tests {
             $1 = caught_error()
             $2 = pack $1 {message: _}
             $3 = unpack $2[0]
-            $4 = $3
-            exit = return $4
+            exit = return $3
         }
         @3: {
             exit = finally @4 after @4
@@ -1385,8 +1383,8 @@ mod tests {
             exit = end finally after @5
         }
         @5: {
-            $5 = undefined
-            exit = return $5
+            $4 = undefined
+            exit = return $4
         }
         "###);
     }
@@ -1406,20 +1404,19 @@ mod tests {
             exit = try @1 catch @2 finally @3 after @3
         }
         @1: {
-            $0 = 777
+            $2 = 777
             exit = error ? jump @2 : jump @3
         }
         @2: {
             $1 = 888
+            $2 = $1
             exit = finally @3 after @3
         }
         @3: {
-            $2 = either($0, $1)
             exit = end finally after @4
         }
         @4: {
-            $3 = $2
-            exit = return $3
+            exit = return $2
         }
         "###);
     }
@@ -1545,13 +1542,12 @@ mod tests {
         }
         @1: {
             $1 = for_in_of_value()
-            $2 = $1
-            $3 = call $2()
+            $2 = call $1()
             exit = continue @1
         }
         @2: {
-            $4 = undefined
-            exit = return $4
+            $3 = undefined
+            exit = return $3
         }
         "###);
     }
@@ -1573,16 +1569,14 @@ mod tests {
         @0: {
             $0 = {}
             $1 = "val"
-            $2 = $0
-            $3 = $0
-            $4 = 1000
-            $5 = 2000
-            $6 = $4 + $5
-            $7 = "computed"
-            $8 = "bignum"
-            $9 = {key: $1, ...2, other: $3, [$6]: $7, 1000000000000000000000000000000: $8}
-            $10 = undefined
-            exit = return $10
+            $2 = 1000
+            $3 = 2000
+            $4 = $2 + $3
+            $5 = "computed"
+            $6 = "bignum"
+            $7 = {key: $1, ...0, other: $0, [$4]: $5, 1000000000000000000000000000000: $6}
+            $8 = undefined
+            exit = return $8
         }
         "###);
     }

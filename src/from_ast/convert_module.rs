@@ -150,14 +150,13 @@ mod tests {
                 function():
                 @0: {
                     $2 = FunctionId(2)
-                    $3 = $2
-                    $4 = call $3()
-                    exit = return $4
+                    $3 = call $2()
+                    exit = return $3
                 },
                 function():
                 @0: {
-                    $5 = 2
-                    exit = return $5
+                    $4 = 2
+                    exit = return $4
                 },
             ],
         }
@@ -262,38 +261,34 @@ mod tests {
                 $7 = write_non_local $$6 $5
                 $8 = FunctionId(3)
                 $9 = write_non_local $$6 $8
-                $10 = $3
-                $11 = call $10()
-                $12 = $8
-                $13 = call $12()
-                $14 = $11 + $13
-                $15 = undefined
-                exit = return $15
+                $10 = call $3()
+                $11 = call $8()
+                $12 = $10 + $11
+                $13 = undefined
+                exit = return $13
             },
             FunctionId(1): function():
             @0: {
-                $16 = read_non_local $$1
-                $17 = undefined
-                $19 = write_non_local $$18 $17
-                $20 = FunctionId(2)
-                $21 = write_non_local $$18 $20
-                $22 = $20
-                $23 = 123
-                $24 = call $22($23)
-                exit = return $24
+                $14 = read_non_local $$1
+                $15 = undefined
+                $17 = write_non_local $$16 $15
+                $18 = FunctionId(2)
+                $19 = write_non_local $$16 $18
+                $20 = 123
+                $21 = call $18($20)
+                exit = return $21
             },
             FunctionId(2): function():
             @0: {
-                $25 = arguments[0]
-                $26 = read_non_local $$18
-                $27 = $25
-                exit = return $27
+                $22 = arguments[0]
+                $23 = read_non_local $$16
+                exit = return $22
             },
             FunctionId(3): function():
             @0: {
-                $28 = read_non_local $$6
-                $29 = 456
-                exit = return $29
+                $24 = read_non_local $$6
+                $25 = 456
+                exit = return $25
             },
         }
         "###);

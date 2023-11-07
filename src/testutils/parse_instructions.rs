@@ -459,18 +459,6 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             Ok((input, BasicBlockInstruction::TempExit(exit_type, ref_)))
         }
 
-        fn ins_phi(input: &str) -> IResult<&str, BasicBlockInstruction> {
-            // either({ref}, {ref}, {ref}, ...)
-            let (input, _) = tag("either")(input)?;
-            let (input, _paren) = tag("(")(input)?;
-            let input = whitespace!(input);
-            let (input, items) =
-                separated_list0(spaced_comma, preceded(multispace0, parse_ref))(input)?;
-            let (input, _paren) = tag(")")(input)?;
-
-            Ok((input, BasicBlockInstruction::Phi(items)))
-        }
-
         fn ins_read(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // read_non_local {ref}
             let (input, _) = tag("read_non_local")(input)?;
@@ -512,7 +500,6 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             ins_caught_error,
             ins_array,
             ins_tempexit,
-            ins_phi,
             ins_read,
             ins_write,
         )))(input)

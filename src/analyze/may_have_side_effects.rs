@@ -36,8 +36,6 @@ impl BasicBlockInstruction {
             // just unpacking what's conceptually already there
             BasicBlockInstruction::PatternUnpack(_, _) => false,
             BasicBlockInstruction::TempExit(_, _) => true,
-            // don't mess with phi
-            BasicBlockInstruction::Phi(_) => true,
             BasicBlockInstruction::Function(_) => false,
             BasicBlockInstruction::Call(_, _) => true,
             BasicBlockInstruction::ArgumentRead(_) => false,

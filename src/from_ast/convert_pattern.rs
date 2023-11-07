@@ -8,7 +8,7 @@ use crate::{
         ArrayPatternPiece, BasicBlockExit, BasicBlockInstruction, ObjectMember, ObjectPatternPiece,
         LHS,
     },
-    from_ast::expr_to_basic_blocks,
+    from_ast::expr_or_ref,
 };
 
 use super::{to_basic_blocks_lhs, FromAstCtx};
@@ -92,7 +92,7 @@ pub fn pat_to_basic_blocks(
                 .map(|prop| match prop {
                     ObjectPatProp::KeyValue(kv) => match &kv.key {
                         PropName::Computed(computed) => {
-                            let key = expr_to_basic_blocks(ctx, computed.expr.as_ref());
+                            let key = expr_or_ref(ctx, computed.expr.as_ref(), true);
                             ObjectPatternPiece::TakeComputedKey(key)
                         }
                         _ => ObjectPatternPiece::TakeKey(object_propname_to_string(&kv.key)),
@@ -174,7 +174,7 @@ pub fn pat_like_expr_to_basic_blocks(
                 MemberProp::Ident(ident) => ObjectMember::KeyValue(ident.sym.to_string()),
                 MemberProp::PrivateName(pvt) => ObjectMember::Private(pvt.id.sym.to_string()),
                 MemberProp::Computed(comp) => {
-                    let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());
+                    let comp = expr_or_ref(ctx, comp.expr.as_ref(), true);
                     ObjectMember::Computed(comp)
                 }
             };
@@ -227,20 +227,16 @@ fn default_assign_pat(ctx: &mut FromAstCtx, input: usize, by_default: &Expr) -> 
     let blockidx_before = ctx.wrap_up_block();
     ctx.wrap_up_block();
 
-    ctx.enter_conditional_branch();
-
     let blockidx_consequent_before = ctx.current_block_index();
-    let default_value = expr_to_basic_blocks(ctx, by_default);
+    let default_value = expr_or_ref(ctx, by_default, true);
     let blockidx_consequent_after = ctx.current_block_index();
 
     let blockidx_alternate_before = ctx.wrap_up_block();
-    let input_value = ctx.push_instruction(BasicBlockInstruction::Ref(input));
+    ctx.push_instruction_with_varname(default_value, BasicBlockInstruction::Ref(input));
     let blockidx_alternate_after = ctx.current_block_index();
 
     let blockidx_after = ctx.wrap_up_block();
     ctx.wrap_up_block();
-
-    ctx.leave_conditional_branch();
 
     ctx.set_exit(
         blockidx_before,
@@ -261,7 +257,7 @@ fn default_assign_pat(ctx: &mut FromAstCtx, input: usize, by_default: &Expr) -> 
         BasicBlockExit::Jump(blockidx_after),
     );
 
-    ctx.push_instruction(BasicBlockInstruction::Phi(vec![input_value, default_value]))
+    default_value
 }
 
 #[cfg(test)]
@@ -278,28 +274,25 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = {}
-            $1 = $0
-            $2 = pack $1 {a: _}
-            $3 = unpack $2[0]
-            $4 = pack $3 {b: _}
-            $5 = unpack $4[0]
-            $6 = undefined
-            $7 = $5 === $6
-            exit = cond $7 ? @1..@1 : @2..@2
+            $1 = pack $0 {a: _}
+            $2 = unpack $1[0]
+            $3 = pack $2 {b: _}
+            $4 = unpack $3[0]
+            $5 = undefined
+            $6 = $4 === $5
+            exit = cond $6 ? @1..@1 : @2..@2
         }
         @1: {
             $8 = 4
             exit = jump @3
         }
         @2: {
-            $9 = $5
+            $8 = $4
             exit = jump @3
         }
         @3: {
-            $10 = either($8, $9)
-            $11 = $10
-            $12 = undefined
-            exit = return $12
+            $9 = undefined
+            exit = return $9
         }
         "###);
 
@@ -312,28 +305,25 @@ mod tests {
         @0: {
             $0 = 1
             $1 = {a: $0}
-            $2 = $1
-            $3 = pack $2 {a: _}
-            $4 = unpack $3[0]
-            $5 = pack $4 {b: _}
-            $6 = unpack $5[0]
-            $7 = undefined
-            $8 = $6 === $7
-            exit = cond $8 ? @1..@1 : @2..@2
+            $2 = pack $1 {a: _}
+            $3 = unpack $2[0]
+            $4 = pack $3 {b: _}
+            $5 = unpack $4[0]
+            $6 = undefined
+            $7 = $5 === $6
+            exit = cond $7 ? @1..@1 : @2..@2
         }
         @1: {
             $9 = 4
             exit = jump @3
         }
         @2: {
-            $10 = $6
+            $9 = $5
             exit = jump @3
         }
         @3: {
-            $11 = either($9, $10)
-            $12 = $11
-            $13 = undefined
-            exit = return $13
+            $10 = undefined
+            exit = return $10
         }
         "###);
     }
@@ -349,14 +339,11 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = []
-            $1 = $0
-            $2 = pack $1 [_, _...]
-            $3 = unpack $2[0]
-            $4 = unpack $2[1]
-            $5 = $3
-            $6 = $4
-            $7 = undefined
-            exit = return $7
+            $1 = pack $0 [_, _...]
+            $2 = unpack $1[0]
+            $3 = unpack $1[1]
+            $4 = undefined
+            exit = return $4
         }
         "###);
 
@@ -369,14 +356,11 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = []
-            $1 = $0
-            $2 = pack $1 [_, _...]
-            $3 = unpack $2[0]
-            $4 = unpack $2[1]
-            $5 = $3
-            $6 = $4
-            $7 = undefined
-            exit = return $7
+            $1 = pack $0 [_, _...]
+            $2 = unpack $1[0]
+            $3 = unpack $1[1]
+            $4 = undefined
+            exit = return $4
         }
         "###);
     }
@@ -392,15 +376,15 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = {}
-            $1 = undefined
-            $2 = $0
-            $3 = pack $2 [_]
-            $4 = unpack $3[0]
-            $5 = $4
-            $6 = $0
-            $7 = pack $6 {0: _}
-            $8 = unpack $7[0]
-            $9 = $8
+            $8 = undefined
+            $2 = pack $0 [_]
+            $3 = unpack $2[0]
+            $8 = $3
+            $5 = $3
+            $6 = pack $0 {0: _}
+            $7 = unpack $6[0]
+            $8 = $7
+            $9 = $7
             $10 = undefined
             exit = return $10
         }
@@ -416,13 +400,12 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = {}
-            $1 = $0
-            $2 = pack $1 {a: _, ..._, b: _}
-            $3 = unpack $2[0]
-            $4 = unpack $2[1]
-            $5 = unpack $2[2]
-            $6 = undefined
-            exit = return $6
+            $1 = pack $0 {a: _, ..._, b: _}
+            $2 = unpack $1[0]
+            $3 = unpack $1[1]
+            $4 = unpack $1[2]
+            $5 = undefined
+            exit = return $5
         }
         "###);
 
@@ -433,12 +416,11 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = []
-            $1 = $0
-            $2 = pack $1 [_, _...]
-            $3 = unpack $2[0]
-            $4 = unpack $2[1]
-            $5 = undefined
-            exit = return $5
+            $1 = pack $0 [_, _...]
+            $2 = unpack $1[0]
+            $3 = unpack $1[1]
+            $4 = undefined
+            exit = return $4
         }
         "###);
     }
@@ -452,13 +434,12 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = {}
-            $1 = $0
-            $2 = 1
-            $3 = pack $1 {a: _, [$2]: _}
-            $4 = unpack $3[0]
-            $5 = unpack $3[1]
-            $6 = undefined
-            exit = return $6
+            $1 = 1
+            $2 = pack $0 {a: _, [$1]: _}
+            $3 = unpack $2[0]
+            $4 = unpack $2[1]
+            $5 = undefined
+            exit = return $5
         }
         "###);
     }
@@ -508,48 +489,45 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = undefined
-            $1 = $0
-            $2 = undefined
-            $3 = $2
-            $4 = {a: $1, c: $3}
-            $5 = {x: $4}
-            $6 = $5
-            $7 = pack $6 {x: _, ..._}
-            $8 = unpack $7[0]
-            $9 = unpack $7[1]
-            $10 = undefined
-            $11 = $8 === $10
-            exit = cond $11 ? @1..@1 : @2..@2
+            $19 = undefined
+            $2 = $19
+            $3 = {a: $0, c: $2}
+            $4 = {x: $3}
+            $5 = pack $4 {x: _, ..._}
+            $6 = unpack $5[0]
+            $7 = unpack $5[1]
+            $8 = undefined
+            $9 = $6 === $8
+            exit = cond $9 ? @1..@1 : @2..@2
         }
         @1: {
-            $12 = {}
+            $11 = {}
             exit = jump @3
         }
         @2: {
-            $13 = $8
+            $11 = $6
             exit = jump @3
         }
         @3: {
-            $14 = either($12, $13)
-            $15 = pack $14 {a: _, c: _}
-            $16 = unpack $15[0]
-            $17 = unpack $15[1]
-            $18 = undefined
-            $19 = $17 === $18
-            exit = cond $19 ? @4..@4 : @5..@5
+            $12 = pack $11 {a: _, c: _}
+            $13 = unpack $12[0]
+            $14 = unpack $12[1]
+            $15 = undefined
+            $16 = $14 === $15
+            exit = cond $16 ? @4..@4 : @5..@5
         }
         @4: {
-            $20 = $0
+            $18 = $0
             exit = jump @6
         }
         @5: {
-            $21 = $17
+            $18 = $14
             exit = jump @6
         }
         @6: {
-            $22 = either($20, $21)
-            $23 = undefined
-            exit = return $23
+            $19 = $18
+            $20 = undefined
+            exit = return $20
         }
         "###);
 
@@ -560,12 +538,11 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = []
-            $1 = $0
-            $2 = pack $1 [_, _...]
-            $3 = unpack $2[0]
-            $4 = unpack $2[1]
-            $5 = undefined
-            exit = return $5
+            $1 = pack $0 [_, _...]
+            $2 = unpack $1[0]
+            $3 = unpack $1[1]
+            $4 = undefined
+            exit = return $4
         }
         "###);
     }

@@ -30,7 +30,6 @@ pub enum BasicBlockInstruction {
     /// pattern, index
     PatternUnpack(usize, usize),
     TempExit(TempExitType, usize),
-    Phi(Vec<usize>),
     Function(FunctionId),
     Call(usize, Vec<usize>),
     ArgumentRead(usize),
@@ -135,7 +134,6 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
             BasicBlockInstruction::IncrDecr(v, _) => v.used_vars(),
             BasicBlockInstruction::IncrDecrPostfix(v, _) => v.used_vars(),
-            BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),
             BasicBlockInstruction::Undefined => vec![],
             BasicBlockInstruction::Null => vec![],
             BasicBlockInstruction::This => vec![],
@@ -192,7 +190,6 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
             BasicBlockInstruction::IncrDecr(v, _) => v.used_vars_mut(),
             BasicBlockInstruction::IncrDecrPostfix(v, _) => v.used_vars_mut(),
-            BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
             BasicBlockInstruction::Undefined => vec![],
             BasicBlockInstruction::Null => vec![],
             BasicBlockInstruction::This => vec![],

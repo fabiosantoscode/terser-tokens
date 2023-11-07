@@ -2,7 +2,7 @@ use swc_ecma_ast::{Expr, MemberExpr, MemberProp};
 
 use crate::basic_blocks::{ObjectMember, LHS};
 
-use super::{expr_to_basic_blocks, FromAstCtx};
+use super::{expr_or_ref, FromAstCtx};
 
 pub fn to_basic_blocks_lhs(ctx: &mut FromAstCtx, expr: &Expr) -> LHS {
     match expr {
@@ -13,14 +13,11 @@ pub fn to_basic_blocks_lhs(ctx: &mut FromAstCtx, expr: &Expr) -> LHS {
                 MemberProp::Ident(ident) => ObjectMember::KeyValue(ident.sym.to_string()),
                 MemberProp::PrivateName(pvt) => ObjectMember::Private(pvt.id.sym.to_string()),
                 MemberProp::Computed(expr) => {
-                    ObjectMember::Computed(expr_to_basic_blocks(ctx, &expr.expr))
+                    ObjectMember::Computed(expr_or_ref(ctx, &expr.expr, true))
                 }
             };
             LHS::Member(Box::new(obj), prop)
         }
-        expr => {
-            let expr = expr_to_basic_blocks(ctx, expr);
-            LHS::Local(expr)
-        }
+        expr => LHS::Local(expr_or_ref(ctx, expr, true)),
     }
 }

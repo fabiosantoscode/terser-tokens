@@ -233,13 +233,6 @@ pub fn interpret(
             contents.get(*index).cloned()?
         }
         BasicBlockInstruction::TempExit(_, _) => None?, // TODO: yield, await
-        BasicBlockInstruction::Phi(alternatives) => {
-            let types = alternatives
-                .iter()
-                // Some variables will be missing if we eliminate a branch, so we use flat_map
-                .flat_map(|alt| ctx.get_variable(*alt));
-            JsType::union_all(types)?
-        }
         BasicBlockInstruction::Function(id) => JsType::TheFunction(*id),
         BasicBlockInstruction::Call(callee, args) => {
             let the_function = ctx.get_variable(*callee)?.as_function_id()?;

@@ -9,12 +9,12 @@ use swc_ecma_ast::{
 };
 
 use crate::{
-    analyze::count_variable_uses,
+    analyze::{count_variable_uses, count_variable_writes},
     basic_blocks::{
         ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ForInOfKind, IncrDecr,
         ObjectProp, StructuredFlow, TempExitType, LHS,
     },
-    block_ops::{block_group_to_structured_flow, remove_phi},
+    block_ops::block_group_to_structured_flow,
     to_ast::{build_block, build_empty_var_decl, build_var_assign, build_var_decl},
 };
 
@@ -35,24 +35,9 @@ pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
 }
 
 fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
-    let phied = block_module
-        .iter_all_instructions()
-        .flat_map(|(_, _, varname, ins)| match ins {
-            BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
-                .into_iter()
-                .flatten()
-                .copied()
-                .collect(),
-            _ => vec![],
-        })
-        .collect();
-
-    for (_, block_group) in block_module.iter_mut() {
-        remove_phi(block_group);
-    }
-
     let variable_use_count = count_variable_uses(&block_module);
-    let inlined_variables = get_inlined_variables(&block_module, &variable_use_count, phied);
+    let variable_write_count = count_variable_writes(&block_module);
+    let inlined_variables = get_inlined_variables(&block_module, &variable_write_count, &variable_use_count);
 
     let tree = block_group_to_structured_flow(block_module.take_top_level_stats().blocks);
 
@@ -461,7 +446,6 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             ctx.get_for_in_of_value().into(),
             Default::default(),
         )),
-        BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
         BasicBlockInstruction::Read(lhs) => lhs_to_ast_expr(ctx, lhs),
         BasicBlockInstruction::Write(lhs, assignee) => Expr::Assign(AssignExpr {
             span: Default::default(),

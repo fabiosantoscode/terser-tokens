@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::basic_blocks::{BasicBlockInstruction, BasicBlockModule, LHS};
 
@@ -7,10 +7,10 @@ use crate::basic_blocks::{BasicBlockInstruction, BasicBlockModule, LHS};
 /// reduce the amount of variables that need to be emitted.
 pub fn get_inlined_variables(
     module: &BasicBlockModule,
+    variable_write_count: &BTreeMap<usize, u32>,
     variable_use_count: &BTreeMap<usize, u32>,
-    phi_participants: BTreeSet<usize>,
 ) -> BTreeMap<usize, BasicBlockInstruction> {
-    let mut ctx = GetInlinedVariablesCtx::new(variable_use_count, phi_participants);
+    let mut ctx = GetInlinedVariablesCtx::new(variable_write_count, variable_use_count);
 
     for (_id, block_group) in module.iter() {
         // variables used once that are reorderable. Wherever they were defined, they can be inlined.
@@ -72,27 +72,27 @@ fn mark_deps(ctx: &mut GetInlinedVariablesCtx<'_>, dependencies: Vec<usize>) {
 
 pub struct GetInlinedVariablesCtx<'blkmod> {
     pub pure_candidates: BTreeMap<usize, &'blkmod BasicBlockInstruction>,
-    pub phi_participants: BTreeSet<usize>,
     pub non_reorderable_candidates: Vec<(usize, &'blkmod BasicBlockInstruction)>,
     /// from count_variable_uses()
     pub variable_use_count: &'blkmod BTreeMap<usize, u32>,
+    pub variable_write_count: &'blkmod BTreeMap<usize, u32>,
     /// Our final result
     pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
 }
 
 impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
-    fn new(variable_use_count: &'blkmod BTreeMap<usize, u32>, phied: BTreeSet<usize>) -> Self {
+    fn new(variable_write_count: &'blkmod BTreeMap<usize, u32>, variable_use_count: &'blkmod BTreeMap<usize, u32>) -> Self {
         Self {
             pure_candidates: Default::default(),
-            phi_participants: phied,
             non_reorderable_candidates: Default::default(),
+            variable_write_count,
             variable_use_count,
             inlined_variables: Default::default(),
         }
     }
 
     fn is_single_use(&self, var_idx: usize) -> bool {
-        self.variable_use_count.get(&var_idx) == Some(&1)
+        self.variable_use_count.get(&var_idx) == Some(&1) && self.variable_write_count.get(&var_idx) == Some(&1)
     }
 
     fn pop_reorderable_candidate(
@@ -105,11 +105,8 @@ impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
     fn force_mark_inlineable(&mut self, index: usize, ins: &BasicBlockInstruction) -> bool {
         if matches!(
             ins,
-            BasicBlockInstruction::Phi(_)
-                | BasicBlockInstruction::ArgumentRead(_)
-                | BasicBlockInstruction::ArgumentRest(_)
-        ) || self.phi_participants.contains(&index)
-        {
+            BasicBlockInstruction::ArgumentRead(_) | BasicBlockInstruction::ArgumentRest(_)
+        ) {
             return false;
         }
 
@@ -122,23 +119,10 @@ impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{analyze::count_variable_uses, testutils::*};
+    use crate::{analyze::{count_variable_uses, count_variable_writes}, testutils::*};
 
     fn test_inlined_vars(module: &BasicBlockModule) -> BTreeMap<usize, BasicBlockInstruction> {
-        let variable_use_count = count_variable_uses(module);
-        let phied = module
-            .iter_all_instructions()
-            .flat_map(|(_, _, varname, ins)| match ins {
-                BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
-                    .into_iter()
-                    .flatten()
-                    .copied()
-                    .collect(),
-                _ => vec![],
-            })
-            .collect();
-
-        get_inlined_variables(module, &variable_use_count, phied)
+        get_inlined_variables(module, &count_variable_writes(module), &count_variable_uses(module))
     }
 
     #[test]

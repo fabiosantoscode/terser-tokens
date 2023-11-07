@@ -193,16 +193,6 @@ impl Debug for BasicBlockInstruction {
                 write!(f, "{:?} ${}", exit_type, arg)
             }
 
-            BasicBlockInstruction::Phi(vars) => {
-                write!(
-                    f,
-                    "either({})",
-                    vars.iter()
-                        .map(|v| format!("${}", v))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
             BasicBlockInstruction::CaughtError => {
                 write!(f, "caught_error()")
             }

@@ -16,7 +16,6 @@ pub struct FromAstCtx {
     pub basic_blocks: Vec<Vec<(usize, Option<BasicBlockInstruction>)>>,
     pub exits: Vec<Option<BasicBlockExit>>,
     pub var_index: usize,
-    pub conditionals: Vec<BTreeMap<String, Vec<usize>>>,
     pub scope_tree: ScopeTree<String, NonLocalOrLocal>,
     pub label_tracking: Vec<(NestedIntoStatement, Vec<usize>)>,
     pub current_function_index: Option<FunctionId>,
@@ -33,7 +32,6 @@ impl FromAstCtx {
             basic_blocks: vec![vec![]],
             exits: vec![None],
             var_index: 0,
-            conditionals: vec![],
             scope_tree: ScopeTree::new(),
             label_tracking: vec![],
             function_index: FunctionId(0),
@@ -50,6 +48,18 @@ impl FromAstCtx {
         self.var_index += 1;
         self.basic_blocks.last_mut().unwrap().push((id, Some(node)));
         id
+    }
+
+    pub fn push_instruction_with_varname(
+        &mut self,
+        varname: usize,
+        node: BasicBlockInstruction,
+    ) -> usize {
+        self.basic_blocks
+            .last_mut()
+            .unwrap()
+            .push((varname, Some(node)));
+        varname
     }
 
     /// This is used to arbitrarily set a variable name. Get it from .bump_var_index() to ensure it won't be used elsewhere, and then call this function later.
@@ -246,7 +256,6 @@ impl FromAstCtx {
             basic_blocks: vec![vec![]],
             exits: vec![None],
             var_index: self.var_index,
-            conditionals: vec![],
             scope_tree,
             label_tracking: vec![],
             function_index: self.function_index,

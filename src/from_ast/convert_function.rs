@@ -1,7 +1,7 @@
 use swc_ecma_ast::{ArrowExpr, FnDecl, FnExpr, Pat};
 
 use super::{
-    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
+    block_to_basic_blocks, expr_or_ref, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
     FuncBlockOrRetExpr, FunctionLike, PatType,
 };
 use crate::basic_blocks::{
@@ -95,9 +95,11 @@ pub fn function_to_basic_blocks(
         }
 
         match function.get_body() {
-            FuncBlockOrRetExpr::Block(block) => block_to_basic_blocks(ctx, &block.stmts)?,
+            FuncBlockOrRetExpr::Block(block) => {
+                block_to_basic_blocks(ctx, &block.stmts)?
+            },
             FuncBlockOrRetExpr::RetExpr(expr) => {
-                let varname = expr_to_basic_blocks(ctx, expr);
+                let varname = expr_or_ref(ctx, expr, true);
                 let block_ret = ctx.wrap_up_block();
                 ctx.set_exit(block_ret, BasicBlockExit::ExitFn(ExitType::Return, varname));
             }
@@ -141,10 +143,8 @@ mod tests {
             @0: {
                 $1 = arguments[0]
                 $2 = arguments[1]
-                $3 = $1
-                $4 = $2
-                $5 = $3 + $4
-                exit = return $5
+                $3 = $1 + $2
+                exit = return $3
             },
         }
         "###);
@@ -159,8 +159,7 @@ mod tests {
             @0: {
                 $1 = arguments[0]
                 $2 = arguments[1...]
-                $3 = $2
-                exit = return $3
+                exit = return $2
             },
         }
         "###);

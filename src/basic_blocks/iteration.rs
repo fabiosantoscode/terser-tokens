@@ -61,6 +61,20 @@ impl BasicBlockGroup {
     }
 }
 
+impl BasicBlock {
+    pub fn iter_all_instructions<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (usize, &'a BasicBlockInstruction)> {
+        self.iter()
+    }
+
+    pub fn iter_all_instructions_mut<'a>(
+        &'a mut self,
+    ) -> impl Iterator<Item = (usize, &'a mut BasicBlockInstruction)> {
+        self.iter_mut()
+    }
+}
+
 impl StructuredFlow {
     pub fn nested_iter<'a>(&'a self) -> impl Iterator<Item = &'a StructuredFlow> {
         StructuredFlowIter { stack: vec![self] }
