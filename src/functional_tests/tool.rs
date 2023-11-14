@@ -11,11 +11,14 @@ pub fn run_checks(s: &str) -> String {
 }
 
 pub fn run_checks_inner(isolate: &mut v8::Isolate, s: &str) -> String {
+    println!("FUNCTIONAL TEST\n// reference:\n        {s}");
+
     let scope = &mut v8::HandleScope::new(isolate);
 
     let Some(reference) = run_code_for_logs(scope, s) else {
-        panic!("failed to run reference code {s}")
+        panic!("ERROR: failed to run reference code {s}")
     };
+    println!("// output: {reference}");
 
     // Interim log
     {
@@ -23,22 +26,23 @@ pub fn run_checks_inner(isolate: &mut v8::Isolate, s: &str) -> String {
 
         let module = module_to_basic_blocks("input.js", &module).unwrap();
 
-        println!("instructions:\n{:?}", module);
+        println!("/* parsed: {:?} */", module);
     }
 
     let comp_s = compress(s);
+    println!("// compressed code:\n{}", comp_s);
     let Some(compressed) = run_code_for_logs(scope, &comp_s) else {
-        panic!("failed to run compressed code {comp_s}")
+        panic!("ERROR: failed to run compressed code {comp_s}")
     };
 
+    println!("// output: {compressed}");
+
     if reference != compressed {
-        println!(
-            "reference and compressed code should have the same output\n\
-            code: \n{s}// outputs: {reference}\n\
-            compressed code:\n{comp_s}// outputs: {compressed}\n\
-            "
+        panic!(
+            "ERROR: reference and compressed code differ:
+            compressed output: {compressed}
+            reference output: {reference}"
         );
-        assert_eq!(reference, compressed);
     }
 
     reference // return reference for snapshot
@@ -63,7 +67,6 @@ fn run_code_for_logs(scope: &mut v8::HandleScope<'_, ()>, s: &str) -> Option<Str
                 }});
             "###
         );
-        println!("running code: {}", s);
 
         let code = v8::String::new(ctx_scope, &code)?;
         let script = v8::Script::compile(ctx_scope, code, None)?;

@@ -8,6 +8,9 @@ mod functions;
 mod globals;
 
 #[cfg(test)]
+mod incr_decr;
+
+#[cfg(test)]
 mod loops;
 
 #[cfg(test)]
