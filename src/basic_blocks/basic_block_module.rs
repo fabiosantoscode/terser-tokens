@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::BasicBlockGroup;
+use super::{BasicBlockGroup, FunctionId};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ModuleSummary {
@@ -62,8 +62,3 @@ impl BasicBlockModule {
             .map(|(id, function)| (*id, function))
     }
 }
-
-/// A usize that uniquely points to a function.
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Hash, PartialOrd, Ord, Eq, Default)]
-pub struct FunctionId(pub usize);

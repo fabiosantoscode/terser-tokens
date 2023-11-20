@@ -3,7 +3,8 @@ use std::usize::MAX;
 
 use crate::{
     basic_blocks::{
-        BasicBlock, BasicBlockExit, BasicBlockInstruction, BreakableId, StructuredFlow,
+        BasicBlock, BasicBlockExit, BasicBlockInstruction, BreakableId, StructuredClassMember,
+        StructuredFlow,
     },
     block_ops::block_group_to_structured_flow,
 };
@@ -28,6 +29,7 @@ fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
             BasicBlockExit::Jump(mrk)
             | BasicBlockExit::Break(mrk)
             | BasicBlockExit::EndFinally(mrk)
+            | BasicBlockExit::ClassEnd(mrk)
                 if *mrk == MAX =>
             {
                 Some(mrk)
@@ -254,6 +256,64 @@ fn fold_blocks(
                 if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
                     to_label.extend(broken_from);
                 }
+            }
+            StructuredFlow::Class(class_var, members) => {
+                // TODO push/pop jump_targets? It's invalid to `break` out of a static block
+                let head = out_blocks.len();
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::ClassStart(class_var, head + 1, MAX),
+                });
+
+                for member in members.into_iter() {
+                    match member {
+                        StructuredClassMember::Property(block, prop) => {
+                            let mut to_label = vec![];
+
+                            let (body_labels, _) = fold_blocks(out_blocks, block, jump_targets);
+                            ensure_forward_jump_marker(out_blocks);
+
+                            to_label.extend(body_labels);
+                            resolve_forward_jumps(out_blocks, &mut to_label);
+
+                            let prop_end = out_blocks.len();
+
+                            out_blocks.push(BasicBlock {
+                                instructions: vec![],
+                                exit: BasicBlockExit::ClassProperty(prop.clone(), prop_end + 1),
+                            });
+                        }
+                        StructuredClassMember::StaticBlock(block) => {
+                            out_blocks.push(BasicBlock {
+                                instructions: vec![],
+                                exit: BasicBlockExit::ClassPushStaticBlock(MAX, MAX),
+                            });
+
+                            let sb_start = out_blocks.len() - 1;
+
+                            let (body_labels, sb_end) =
+                                fold_blocks(out_blocks, block, jump_targets);
+
+                            to_label.extend(body_labels);
+
+                            out_blocks[sb_start].exit =
+                                BasicBlockExit::ClassPushStaticBlock(sb_start + 1, sb_end + 1);
+                        }
+                    }
+                }
+
+                out_blocks.push(BasicBlock {
+                    instructions: vec![],
+                    exit: BasicBlockExit::ClassEnd(MAX),
+                });
+
+                let end = out_blocks.len() - 1;
+
+                out_blocks[head].exit = BasicBlockExit::ClassStart(class_var, head + 1, end);
+                out_blocks[end].exit = BasicBlockExit::ClassEnd(MAX);
+
+                to_label.push(end);
             }
         }
     }

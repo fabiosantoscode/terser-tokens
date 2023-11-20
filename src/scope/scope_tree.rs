@@ -13,6 +13,16 @@ pub struct ScopeTree<Key = String, Of = usize> {
     pub current_scope: ScopeTreeHandle,
 }
 
+impl<Key, Of> Default for ScopeTree<Key, Of>
+where
+    Key: Clone + Ord,
+    Of: Clone,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeTreeHandle(pub usize);

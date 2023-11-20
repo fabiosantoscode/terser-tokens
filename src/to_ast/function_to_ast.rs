@@ -8,34 +8,38 @@ use crate::{
     to_ast::build_binding_identifier,
 };
 
-use super::{to_statements, ToAstContext};
+use super::{to_blockgroup_statements, ToAstContext};
 
-pub fn function_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Expr {
-    let mut blocks = block_group_to_structured_flow(func.blocks);
-    let params = take_param_readers(ctx, &mut blocks);
-    let stmts = to_statements(ctx, &blocks);
-
-    let (is_generator, is_async) = func.environment.unwrap_function();
-
+pub fn function_expr_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Expr {
     Expr::Paren(ParenExpr {
         expr: Box::new(Expr::Fn(FnExpr {
             ident: None,
-            function: Box::new(Function {
-                span: Default::default(),
-                decorators: Default::default(),
-                params,
-                body: Some(BlockStmt {
-                    span: Default::default(),
-                    stmts,
-                }),
-                is_generator,
-                is_async,
-                type_params: None,
-                return_type: None,
-            }),
+            function: Box::new(function_to_ast(ctx, func)),
         })),
         span: Default::default(),
     })
+}
+
+pub fn function_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Function {
+    let mut blocks = block_group_to_structured_flow(func.blocks);
+    let params = take_param_readers(ctx, &mut blocks);
+    let stmts = to_blockgroup_statements(ctx, &blocks);
+
+    let (is_generator, is_async) = func.environment.unwrap_function();
+
+    Function {
+        span: Default::default(),
+        decorators: Default::default(),
+        params,
+        body: Some(BlockStmt {
+            span: Default::default(),
+            stmts,
+        }),
+        is_generator,
+        is_async,
+        type_params: None,
+        return_type: None,
+    }
 }
 
 fn take_param_readers(ctx: &mut ToAstContext, func: &mut StructuredFlow) -> Vec<Param> {

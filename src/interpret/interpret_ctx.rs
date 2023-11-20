@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analyze::function_usage_count;
-use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, FunctionId, ObjectMember, LHS};
+use crate::basic_blocks::{BasicBlockGroup, BasicBlockModule, FunctionId, ObjectKey, LHS};
 use crate::data_structures::CowMap;
 
 use super::{interpret_function, JsArgs, JsCompletion, JsType};
@@ -57,8 +57,8 @@ impl<'module> InterpretCtx<'_> {
                 let base = self.get_lhs(base)?;
 
                 let string_key = match member {
-                    ObjectMember::KeyValue(string_key) => string_key.clone(),
-                    ObjectMember::Computed(varname) => self.get_variable(*varname)?.to_string()?,
+                    ObjectKey::KeyValue(string_key) => string_key.clone(),
+                    ObjectKey::Computed(varname) => self.get_variable(*varname)?.to_string()?,
                     _ => todo!("private fields"),
                 };
 
@@ -92,8 +92,8 @@ impl<'module> InterpretCtx<'_> {
             LHS::Member(base, member) => {
                 let old_base = self.get_lhs(base)?;
                 let string_key = match member {
-                    ObjectMember::KeyValue(string_key) => string_key.clone(),
-                    ObjectMember::Computed(varname) => self.get_variable(*varname)?.to_string()?,
+                    ObjectKey::KeyValue(string_key) => string_key.clone(),
+                    ObjectKey::Computed(varname) => self.get_variable(*varname)?.to_string()?,
                     _ => return None,
                 };
 

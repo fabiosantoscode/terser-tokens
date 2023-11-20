@@ -1,8 +1,9 @@
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmtOrExpr, Callee, CondExpr, Decl, DoWhileStmt, Expr, ExprOrSpread, ForHead,
-    ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt, MemberProp, MethodProp, Module, ModuleItem,
-    ObjectLit, ObjectPatProp, Param, Pat, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
-    Stmt, VarDecl, VarDeclKind, VarDeclOrExpr, WhileStmt, YieldExpr,
+    AwaitExpr, BlockStmtOrExpr, Callee, Class, ClassMember, ClassMethod, CondExpr, Decl,
+    DoWhileStmt, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt,
+    MemberProp, MethodProp, Module, ModuleItem, ObjectLit, ObjectPatProp, Param, Pat, PatOrExpr,
+    PrivateMethod, Prop, PropName, PropOrSpread, SetterProp, Stmt, VarDecl, VarDeclKind,
+    VarDeclOrExpr, WhileStmt, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
@@ -121,6 +122,11 @@ impl<'a> NonLocalsContext<'a> {
                 self.insert_params(&function.function.params);
                 block_nonlocals(self, &function.function.body.as_ref().unwrap().stmts);
             }
+            FunctionLike::ClassMethod(ClassMethod { function, .. })
+            | FunctionLike::PrivateMethod(PrivateMethod { function, .. }) => {
+                self.insert_params(&function.params);
+                block_nonlocals(self, &function.body.as_ref().unwrap().stmts);
+            }
             FunctionLike::ArrowExpr(arrow) => {
                 self.insert_pats(&arrow.params);
                 match arrow.body.as_ref() {
@@ -194,6 +200,9 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
         Stmt::Decl(Decl::Var(var)) => vardecl_nonlocals(ctx, var),
         Stmt::Decl(Decl::Fn(fn_decl)) => {
             ctx.defer(FunctionLike::FnDecl(fn_decl));
+        }
+        Stmt::Decl(Decl::Class(class)) => {
+            class_nonlocals(ctx, class.class.as_ref());
         }
         Stmt::ForIn(ForInStmt {
             left, right, body, ..
@@ -459,10 +468,23 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
                 }
             }
         }
-        Expr::New(_) => todo!(),
+        Expr::New(new_expr) => {
+            expr_nonlocals(ctx, &new_expr.callee);
+
+            if let Some(args) = &new_expr.args {
+                for arg in args {
+                    match arg.spread {
+                        Some(_) => todo!("spread args"),
+                        None => expr_nonlocals(ctx, arg.expr.as_ref()),
+                    }
+                }
+            }
+        }
         Expr::Tpl(_) => todo!(),
         Expr::TaggedTpl(_) => todo!(),
-        Expr::Class(_) => todo!(),
+        Expr::Class(class) => {
+            class_nonlocals(ctx, class.class.as_ref());
+        }
         Expr::MetaProp(_) => todo!(),
         Expr::Yield(YieldExpr { arg, .. }) => {
             if let Some(arg) = arg {
@@ -487,6 +509,60 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
         | Expr::TsInstantiation(_)
         | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
     };
+}
+
+fn class_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, class: &'a Class) {
+    if let Some(extends) = &class.super_class {
+        expr_nonlocals(ctx, &*extends);
+    }
+
+    for member in &class.body {
+        match member {
+            ClassMember::Constructor(_constructor) => todo!(),
+            ClassMember::Method(method) => {
+                if let PropName::Computed(ident) = &method.key {
+                    expr_nonlocals(ctx, &ident.expr);
+                }
+                for dec in &method.function.decorators {
+                    expr_nonlocals(ctx, &dec.expr);
+                }
+                ctx.defer(FunctionLike::ClassMethod(&method));
+            }
+            ClassMember::PrivateMethod(method) => {
+                for dec in &method.function.decorators {
+                    expr_nonlocals(ctx, &dec.expr);
+                }
+                ctx.defer(FunctionLike::PrivateMethod(&method));
+            }
+            ClassMember::ClassProp(class_prop) => {
+                if let PropName::Computed(ident) = &class_prop.key {
+                    expr_nonlocals(ctx, &ident.expr);
+                }
+                if let Some(value) = &class_prop.value {
+                    expr_nonlocals(ctx, &value);
+                }
+                for dec in &class_prop.decorators {
+                    expr_nonlocals(ctx, &dec.expr);
+                }
+            }
+            ClassMember::PrivateProp(private_prop) => {
+                if let Some(value) = &private_prop.value {
+                    expr_nonlocals(ctx, &value);
+                }
+                for dec in &private_prop.decorators {
+                    expr_nonlocals(ctx, &dec.expr);
+                }
+            }
+            ClassMember::StaticBlock(static_block) => {
+                for stat in static_block.body.stmts.iter() {
+                    stat_nonlocals(ctx, stat);
+                }
+            }
+            ClassMember::Empty(_) => continue,
+            ClassMember::AutoAccessor(_) => todo!("auto accessors"),
+            ClassMember::TsIndexSignature(_) => unreachable!("TS index signatures"),
+        }
+    }
 }
 
 #[cfg(test)]

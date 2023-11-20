@@ -1,4 +1,4 @@
-use super::BasicBlockInstruction;
+use super::{BasicBlockInstruction, FunctionId, ObjectKey};
 
 /// A basic block encapsulates a control-free sequence of instructions. It contains an "exit" which encodes control flow.
 #[derive(Clone, Default, PartialEq)]
@@ -55,6 +55,16 @@ pub enum BasicBlockExit {
     PopFinally(usize, usize),
     /// (after_finally_block). Used when we see "}" after a finally block. We go to the after_finally_block.
     EndFinally(usize),
+    /// (class_var, start, end). Start a class. Inside it we can use Class* exits.
+    ClassStart(usize, usize, usize),
+    /// (Class only): (prop, next). Create a property
+    ClassProperty(ClassProperty, usize),
+    /// (Class only): (start, end). Start a static block
+    ClassPushStaticBlock(usize, usize),
+    /// (Class only): (next_member) End a static block.
+    ClassPopStaticBlock(usize),
+    /// (Class only): (next_block) Ends a class
+    ClassEnd(usize),
 }
 
 impl BasicBlockExit {
@@ -63,6 +73,8 @@ impl BasicBlockExit {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![*cond_var],
             BasicBlockExit::ExitFn(_, returned) => vec![*returned],
             BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![*looped_var],
+            BasicBlockExit::ClassStart(class_var, _, _) => vec![*class_var],
+            BasicBlockExit::ClassProperty(prop, _) => prop.used_vars(),
             BasicBlockExit::Jump(_)
             | BasicBlockExit::Break(_)
             | BasicBlockExit::Continue(_)
@@ -70,6 +82,9 @@ impl BasicBlockExit {
             | BasicBlockExit::PopCatch(_, _)
             | BasicBlockExit::PopFinally(_, _)
             | BasicBlockExit::EndFinally(_)
+            | BasicBlockExit::ClassPushStaticBlock(_, _)
+            | BasicBlockExit::ClassPopStaticBlock(_)
+            | BasicBlockExit::ClassEnd(_)
             | BasicBlockExit::Loop(_, _) => vec![],
         }
     }
@@ -79,6 +94,8 @@ impl BasicBlockExit {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![cond_var],
             BasicBlockExit::ExitFn(_, returned) => vec![returned],
             BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![looped_var],
+            BasicBlockExit::ClassStart(class_var, _, _) => vec![class_var],
+            BasicBlockExit::ClassProperty(prop, _) => prop.used_vars_mut(),
             BasicBlockExit::Jump(_)
             | BasicBlockExit::Break(_)
             | BasicBlockExit::Continue(_)
@@ -86,6 +103,9 @@ impl BasicBlockExit {
             | BasicBlockExit::PopCatch(_, _)
             | BasicBlockExit::PopFinally(_, _)
             | BasicBlockExit::EndFinally(_)
+            | BasicBlockExit::ClassPushStaticBlock(_, _)
+            | BasicBlockExit::ClassPopStaticBlock(_)
+            | BasicBlockExit::ClassEnd(_)
             | BasicBlockExit::Loop(_, _) => vec![],
         }
     }
@@ -94,6 +114,50 @@ impl BasicBlockExit {
 impl Default for BasicBlockExit {
     fn default() -> Self {
         BasicBlockExit::Jump(0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClassProperty {
+    pub is_static: bool,
+    pub is_private: bool,
+    pub key: ObjectKey,
+    pub value: ClassPropertyValue,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClassPropertyValue {
+    Property(usize),
+    Method(FunctionId),
+}
+
+impl ClassProperty {
+    pub fn used_vars(&self) -> Vec<usize> {
+        let key = match &self.key {
+            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::Private(_) => vec![],
+            ObjectKey::Computed(var) => vec![*var],
+        };
+        let value = match &self.value {
+            ClassPropertyValue::Property(var) => vec![*var],
+            ClassPropertyValue::Method(_fn) => vec![],
+        };
+
+        key.into_iter().chain(value.into_iter()).collect()
+    }
+
+    pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
+        let key = match &mut self.key {
+            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::Private(_) => vec![],
+            ObjectKey::Computed(var) => vec![var],
+        };
+        let value = match &mut self.value {
+            ClassPropertyValue::Property(var) => vec![var],
+            ClassPropertyValue::Method(_fn) => vec![],
+        };
+
+        key.into_iter().chain(value.into_iter()).collect()
     }
 }
 

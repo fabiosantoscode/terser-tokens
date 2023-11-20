@@ -1,9 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
-    basic_blocks::{BasicBlockInstruction, BasicBlockModule, BreakableId},
-    to_ast::Base54,
+    analyze::count_variable_uses,
+    basic_blocks::{BasicBlockInstruction, BasicBlockModule, BreakableId, StructuredFlow},
+    block_ops::{block_group_to_structured_flow, remove_phi},
 };
+
+use super::{get_inlined_variables, Base54};
 
 #[derive(Debug)]
 pub struct ToAstContext<'a> {
@@ -15,12 +18,21 @@ pub struct ToAstContext<'a> {
     pub emitted_vars: BTreeMap<usize, Base54>,
     pub gen_var_index: Base54,
 
+    /// Variables that we want to be emitted later, when the function ends
+    pub vars_later: BTreeSet<usize>,
+    /// If true, we will not emit any variable declarations and instead enqueue with
+    /// queue_var_for_later
+    pub forbid_var_decls: bool,
+
     /// break/continue - tracking
     pub breakable_stack: Vec<BreakableStackItem>,
     pub gen_label_index: Base54,
 
     /// Object/Array patterns
     pub destructuring_patterns: BTreeMap<usize, Vec<Base54>>,
+
+    /// Classes
+    pub classes: BTreeMap<usize, Option<usize>>,
 }
 
 #[derive(Debug)]
@@ -31,7 +43,86 @@ pub struct BreakableStackItem {
     is_anonymous: bool,
 }
 
-impl ToAstContext<'_> {
+impl<'a> ToAstContext<'a> {
+    pub fn new(block_module: &'a mut BasicBlockModule) -> (ToAstContext<'a>, StructuredFlow) {
+        let phied = block_module
+            .iter_all_instructions()
+            .flat_map(|(_, _, varname, ins)| match ins {
+                BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
+                    .into_iter()
+                    .flatten()
+                    .copied()
+                    .collect(),
+                _ => vec![],
+            })
+            .collect();
+
+        for (_, block_group) in block_module.iter_mut() {
+            remove_phi(block_group);
+        }
+
+        let variable_use_count = count_variable_uses(&block_module);
+        let inlined_variables = get_inlined_variables(&block_module, &variable_use_count, phied);
+
+        let tree = block_group_to_structured_flow(block_module.take_top_level_stats().blocks);
+
+        let ctx = ToAstContext {
+            caught_error: None,
+            for_in_of_value: None,
+            module: block_module,
+            inlined_variables,
+            vars_later: Default::default(),
+            forbid_var_decls: false,
+            variable_use_count,
+            emitted_vars: BTreeMap::new(),
+            gen_var_index: Base54::new(0),
+            breakable_stack: vec![],
+            gen_label_index: Base54::new(0),
+            destructuring_patterns: BTreeMap::new(),
+            classes: BTreeMap::new(),
+        };
+
+        (ctx, tree)
+    }
+
+    /// get/create a var, and return whether we should create a var decl for it
+    pub fn create_or_assign_to_var(&mut self, variable: usize) -> (bool, String) {
+        if self.forbid_var_decls {
+            self.queue_var_for_later(variable);
+
+            let variable = if self.has_varname_for(variable) {
+                self.get_varname_for(variable)
+            } else {
+                self.create_varname_for(variable)
+            };
+
+            (false, variable)
+        } else if self.has_varname_for(variable) {
+            let variable = self.get_varname_for(variable);
+
+            (false, variable)
+        } else {
+            let varname = self.create_varname_for(variable);
+
+            (true, varname)
+        }
+    }
+
+    /// In a fake IIFE (IE the compiler needs to output an IIFE but it's not encoded in the
+    /// instructions), we need to create a varname later (outside the IIFE)
+    pub fn queue_var_for_later(&mut self, var_idx: usize) {
+        assert!(
+            self.forbid_var_decls,
+            "queueing a var when vars are not forbidden"
+        );
+
+        self.vars_later.insert(var_idx);
+    }
+
+    pub fn dequeue_enqueued_vars(&mut self) -> BTreeSet<usize> {
+        std::mem::take(&mut self.vars_later)
+    }
+
     pub fn get_caught_error(&mut self) -> String {
         let err = self
             .caught_error
@@ -80,6 +171,16 @@ impl ToAstContext<'_> {
         new_pattern
     }
 
+    pub fn register_class(&mut self, varname: usize, extends: Option<usize>) {
+        self.classes.insert(varname, extends);
+    }
+
+    pub fn take_class(&mut self, varname: usize) -> Option<usize> {
+        self.classes
+            .remove(&varname)
+            .expect("taking a class that hasn't been prepared")
+    }
+
     pub(crate) fn get_varname_for_pattern(&self, variable: usize, idx: usize) -> String {
         self.destructuring_patterns
             .get(&variable)
@@ -100,6 +201,10 @@ impl ToAstContext<'_> {
 
     pub fn variable_has_uses(&self, variable: usize) -> bool {
         self.variable_use_count.get(&variable).unwrap_or(&0) > &0
+    }
+
+    pub(crate) fn has_varname_for(&self, var_idx: usize) -> bool {
+        self.emitted_vars.contains_key(&var_idx)
     }
 
     pub(crate) fn get_varname_for(&self, var_idx: usize) -> String {

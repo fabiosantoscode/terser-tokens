@@ -1,5 +1,6 @@
 mod convert;
 mod convert_block;
+mod convert_class;
 mod convert_context;
 mod convert_context_names;
 mod convert_function;
@@ -11,6 +12,7 @@ mod function_like;
 
 pub use convert::*;
 pub use convert_block::*;
+pub use convert_class::*;
 pub use convert_context::*;
 pub use convert_context_names::*;
 pub use convert_function::*;

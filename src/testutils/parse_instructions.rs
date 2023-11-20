@@ -4,7 +4,7 @@ use nom::IResult;
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
-    BasicBlockModule, ExitType, FunctionId, IncrDecr, NonLocalId, ObjectMember, TempExitType, LHS,
+    BasicBlockModule, ExitType, FunctionId, IncrDecr, NonLocalId, ObjectKey, TempExitType, LHS,
 };
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
@@ -528,17 +528,17 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
         let (input, n) = digit1(input)?;
         Ok((input, n.parse().unwrap()))
     }
-    fn parse_member(input: &str) -> IResult<&str, ObjectMember> {
+    fn parse_member(input: &str) -> IResult<&str, ObjectKey> {
         // .name | [$123] | .#private
         alt((
             map(preceded(tag("."), alphanumeric1), |name: &str| {
-                ObjectMember::KeyValue(name.to_string())
+                ObjectKey::KeyValue(name.to_string())
             }),
             map(tuple((tag("["), parse_ref, tag("]"))), |(_, idx, _)| {
-                ObjectMember::Computed(idx)
+                ObjectKey::Computed(idx)
             }),
             map(preceded(tag(".#"), alphanumeric1), |name: &str| {
-                ObjectMember::Private(name.to_string())
+                ObjectKey::Private(name.to_string())
             }),
         ))(input)
     }

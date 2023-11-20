@@ -150,6 +150,7 @@ pub fn interpret(
                 }
             }
         }
+        BasicBlockInstruction::CreateClass(_) => JsType::Any, // TODO: class type
         BasicBlockInstruction::ArrayPattern(from_arr, pieces) => {
             let from_arr = ctx.get_variable(*from_arr)?.as_array()?;
 
@@ -248,6 +249,9 @@ pub fn interpret(
             let args = ctx.get_variables(args).into();
 
             interpret_function(ctx, &func, args)?.into_return()?
+        }
+        BasicBlockInstruction::New(_constructor, _args) => {
+            todo!()
         }
         BasicBlockInstruction::ArgumentRead(n) => ctx.get_argument(*n)?.clone(),
         BasicBlockInstruction::ArgumentRest(n) => match ctx.get_spread_argument(*n) {

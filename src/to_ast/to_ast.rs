@@ -1,32 +1,33 @@
-use std::collections::BTreeMap;
-
 use swc_ecma_ast::{
     AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
     Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp, Lit, Module,
-    ModuleItem, Null, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, ReturnStmt,
+    ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, ReturnStmt,
     SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp,
     WhileStmt, YieldExpr,
 };
 
 use crate::{
-    analyze::count_variable_uses,
     basic_blocks::{
-        ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType, ForInOfKind, IncrDecr,
-        ObjectProp, StructuredFlow, TempExitType, LHS,
+        identifier_needs_quotes, ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType,
+        ForInOfKind, IncrDecr, ObjectProp, StructuredFlow, TempExitType, LHS,
     },
-    block_ops::{block_group_to_structured_flow, remove_phi},
-    to_ast::{build_block, build_empty_var_decl, build_var_assign, build_var_decl},
+    to_ast::{
+        build_block, build_empty_var_decl, build_multivar_decl, build_var_assign, build_var_decl,
+    },
 };
 
 use super::{
-    build_binding_identifier, build_identifier, build_identifier_str, function_to_ast,
-    get_inlined_variables, lhs_to_ast_expr, pattern_to_statement, Base54, ToAstContext,
+    build_binding_identifier, build_identifier, build_identifier_str, class_to_ast,
+    class_to_ast_prepare, function_expr_to_ast, lhs_to_ast_expr, pattern_to_statement,
+    ToAstContext,
 };
 
-pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
+pub fn module_to_ast(mut block_module: BasicBlockModule) -> Module {
+    let (mut ctx, tree) = ToAstContext::new(&mut block_module);
+
     Module {
         span: Default::default(),
-        body: to_ast_inner(block_module)
+        body: to_blockgroup_statements(&mut ctx, &tree)
             .into_iter()
             .map(|stat| ModuleItem::Stmt(stat))
             .collect::<Vec<_>>(),
@@ -34,44 +35,23 @@ pub fn module_to_ast(block_module: BasicBlockModule) -> Module {
     }
 }
 
-fn to_ast_inner(mut block_module: BasicBlockModule) -> Vec<Stmt> {
-    let phied = block_module
-        .iter_all_instructions()
-        .flat_map(|(_, _, varname, ins)| match ins {
-            BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
-                .into_iter()
-                .flatten()
-                .copied()
-                .collect(),
-            _ => vec![],
-        })
-        .collect();
+/// to_statements but it declares any leftover `var` at the end
+pub fn to_blockgroup_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
+    let mut stats = to_statements(ctx, node);
 
-    for (_, block_group) in block_module.iter_mut() {
-        remove_phi(block_group);
+    if let Some(multivar_decl) = build_multivar_decl(
+        ctx.dequeue_enqueued_vars()
+            .into_iter()
+            .map(|var| ctx.get_varname_for(var))
+            .collect(),
+    ) {
+        stats.push(multivar_decl);
     }
 
-    let variable_use_count = count_variable_uses(&block_module);
-    let inlined_variables = get_inlined_variables(&block_module, &variable_use_count, phied);
-
-    let tree = block_group_to_structured_flow(block_module.take_top_level_stats().blocks);
-
-    let mut ctx = ToAstContext {
-        caught_error: None,
-        for_in_of_value: None,
-        module: &mut block_module,
-        inlined_variables,
-        variable_use_count,
-        emitted_vars: BTreeMap::new(),
-        gen_var_index: Base54::new(0),
-        breakable_stack: vec![],
-        gen_label_index: Base54::new(0),
-        destructuring_patterns: BTreeMap::new(),
-    };
-
-    to_statements(&mut ctx, &tree)
+    stats
 }
 
+/// Convert a structured flow into a list of statements
 pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt> {
     let to_stat_vec = |ctx: &mut ToAstContext, stats: &Vec<StructuredFlow>| -> Vec<Stmt> {
         stats
@@ -84,7 +64,13 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
         StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
         StructuredFlow::BasicBlock(ins) => ins
             .iter()
-            .flat_map(|(varname, ins)| instruction_to_statement(ctx, *varname, ins))
+            .flat_map(|(varname, ins)| match ins {
+                BasicBlockInstruction::CreateClass(extends) => {
+                    class_to_ast_prepare(ctx, *varname, extends.clone());
+                    vec![]
+                }
+                _ => instruction_to_statement(ctx, *varname, ins),
+            })
             .collect(),
         StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {
             let return_stmt = Stmt::Return(ReturnStmt {
@@ -217,6 +203,7 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
 
             vec![try_stmt]
         }
+        StructuredFlow::Class(class_var, members) => class_to_ast(ctx, *class_var, members),
         _ => {
             todo!("to_stat: {:?}", node)
         }
@@ -259,18 +246,13 @@ fn instruction_to_statement(
             };
 
         if ctx.variable_has_uses(variable) {
-            if ctx.emitted_vars.contains_key(&variable) {
-                let variable = ctx.get_varname_for(variable);
+            let (should_declare, varname) = ctx.create_or_assign_to_var(variable);
 
-                vec![build_var_assign(&variable, expression)]
+            vec![if should_declare {
+                build_var_decl(build_binding_identifier(&varname), expression)
             } else {
-                let varname = ctx.create_varname_for(variable);
-
-                vec![build_var_decl(
-                    build_binding_identifier(&varname),
-                    expression,
-                )]
-            }
+                build_var_assign(&varname, expression)
+            }]
         } else {
             vec![Stmt::Expr(ExprStmt {
                 span: Default::default(),
@@ -386,10 +368,10 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                         expr: Box::new(ref_or_inlined_expr(ctx, *spread_obj)),
                     }),
                     ObjectProp::KeyValue(key, value) => {
-                        let key = if key.chars().all(|c| c.is_ascii_alphabetic()) {
-                            PropName::Ident(Ident::new(key.as_str().into(), Default::default()))
-                        } else {
+                        let key = if identifier_needs_quotes(&key) {
                             PropName::Str(key.as_str().into())
+                        } else {
+                            PropName::Ident(Ident::new(key.as_str().into(), Default::default()))
                         };
 
                         PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
@@ -417,7 +399,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
         BasicBlockInstruction::Function(id) => {
             let func = ctx.module.take_function(*id).unwrap();
 
-            function_to_ast(ctx, func)
+            function_expr_to_ast(ctx, func)
         }
         BasicBlockInstruction::Call(func_idx, args) => {
             let args = args
@@ -429,6 +411,21 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 span: Default::default(),
                 callee: Callee::Expr(Box::new(ref_or_inlined_expr(ctx, *func_idx))),
                 args,
+                type_args: None,
+            })
+        }
+        BasicBlockInstruction::New(func_idx, args) => {
+            let callee = ref_or_inlined_expr(ctx, *func_idx);
+            let args: Vec<ExprOrSpread> = args
+                .iter()
+                .map(|arg| ExprOrSpread::from(ref_or_inlined_expr(ctx, *arg)))
+                .collect();
+
+            Expr::New(NewExpr {
+                span: Default::default(),
+                callee: Box::new(callee),
+                args: Some(args), // TODO SWC can't dynamically add parens when needed here, maybe
+                // upstream a fix so we can ellide arguments by passing None
                 type_args: None,
             })
         }
@@ -469,6 +466,9 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             left: PatOrExpr::Expr(Box::new(lhs_to_ast_expr(ctx, lhs))),
             right: Box::new(ref_or_inlined_expr(ctx, *assignee)),
         }),
+        BasicBlockInstruction::CreateClass(_optional_extends) => {
+            unreachable!("handled in function_to_ast")
+        }
     }
 }
 

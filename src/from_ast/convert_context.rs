@@ -201,8 +201,6 @@ impl FromAstCtx {
     }
 
     pub(crate) fn wrap_up_module(&mut self, summary: ModuleSummary) -> BasicBlockModule {
-        use std::mem::replace;
-
         let (id, blocks) = self.wrap_up_blocks();
         let module_bg = BasicBlockGroup {
             id,
@@ -214,9 +212,9 @@ impl FromAstCtx {
 
         let mut module = BasicBlockModule {
             summary,
-            functions: replace(&mut self.functions, Default::default()),
-            imports: replace(&mut self.imports, Default::default()),
-            exports: replace(&mut self.exports, Default::default()),
+            functions: std::mem::take(&mut self.functions),
+            imports: std::mem::take(&mut self.imports),
+            exports: std::mem::take(&mut self.exports),
         };
 
         normalize_module(&mut module);
@@ -239,8 +237,8 @@ impl FromAstCtx {
         self.scope_tree.go_into_function_scope();
 
         // functions are shared between contexts
-        let functions = std::mem::replace(&mut self.functions, BTreeMap::new());
-        let scope_tree = std::mem::replace(&mut self.scope_tree, ScopeTree::new());
+        let functions = std::mem::take(&mut self.functions);
+        let scope_tree = std::mem::take(&mut self.scope_tree);
 
         let mut inner_ctx = Self {
             basic_blocks: vec![vec![]],
@@ -271,8 +269,8 @@ impl FromAstCtx {
 
         inner_ctx.functions.insert(id, function_bg);
 
-        self.functions = std::mem::replace(&mut inner_ctx.functions, BTreeMap::new());
-        self.scope_tree = std::mem::replace(&mut inner_ctx.scope_tree, ScopeTree::new());
+        self.functions = std::mem::take(&mut inner_ctx.functions);
+        self.scope_tree = std::mem::take(&mut inner_ctx.scope_tree);
 
         self.scope_tree.leave_scope();
 

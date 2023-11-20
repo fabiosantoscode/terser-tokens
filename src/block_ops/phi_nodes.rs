@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     basic_blocks::{
-        BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, StructuredFlow,
+        BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,
+        StructuredClassMember, StructuredFlow,
     },
     block_ops::{block_group_to_structured_flow, normalize_basic_blocks_tree, normalize_varnames},
 };
@@ -183,6 +184,28 @@ fn generate_phi_nodes_inner(
 
                 out_recursive.push(StructuredFlow::TryCatch(brk, body, catch, fin));
             }
+            StructuredFlow::Class(class_var, members) => {
+                let class_var = ctx.read_name(class_var);
+
+                let members = members
+                    .into_iter()
+                    .map(|member| match member {
+                        StructuredClassMember::Property(code, mut prop) => {
+                            let code = generate_phi_nodes_inner(ctx, code);
+                            for used in prop.used_vars_mut() {
+                                *used = ctx.read_name(*used);
+                            }
+                            StructuredClassMember::Property(code, prop)
+                        }
+                        StructuredClassMember::StaticBlock(contents) => {
+                            let contents = generate_phi_nodes_inner(ctx, contents);
+                            StructuredClassMember::StaticBlock(contents)
+                        }
+                    })
+                    .collect();
+
+                out_recursive.push(StructuredFlow::Class(class_var, members));
+            }
             // Identity - don't need to do anything with these, because they don't read or write vars
             StructuredFlow::Break(_) | StructuredFlow::Continue(_) => out_recursive.push(item),
         }
@@ -249,7 +272,7 @@ fn get_loop_reentry_vars(contents: &Vec<StructuredFlow>) -> BTreeSet<usize> {
 
                 seen_defs.insert(*varname);
             }
-        } else if let Some(used_var) = block.control_flow_var() {
+        } else if let Some(used_var) = block.used_var() {
             if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
                 loop_vars_used_in_loop.insert(used_var);
             }

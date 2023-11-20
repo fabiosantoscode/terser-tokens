@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod classes;
+
+#[cfg(test)]
 mod conditions;
 
 #[cfg(test)]

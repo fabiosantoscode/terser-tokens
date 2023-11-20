@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use swc_common::SourceMap;
 use swc_common::{BytePos, SourceFile};
-use swc_ecma_ast::{ExprStmt, Module, Stmt};
+use swc_ecma_ast::{Expr, ExprStmt, Module, ModuleItem, Stmt};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{parse_file_as_expr, EsConfig};
 
@@ -97,4 +97,17 @@ pub fn module_to_string(stats: &Module) -> String {
     emitter.emit_module(stats).unwrap();
 
     str.take()
+}
+
+pub fn expr_to_string(expr: &Expr) -> String {
+    let m = Module {
+        shebang: None,
+        span: Default::default(),
+        body: vec![ModuleItem::Stmt(Stmt::Expr(ExprStmt {
+            span: Default::default(),
+            expr: Box::new(expr.clone()),
+        }))],
+    };
+
+    module_to_string(&m)
 }

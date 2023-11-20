@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Error, Formatter};
 
-use crate::basic_blocks::{ForInOfKind, ObjectMember, ObjectProp};
+use crate::basic_blocks::{ForInOfKind, ObjectKey, ObjectProp};
 
 use super::{
     ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironment, BasicBlockExit,
@@ -34,12 +34,12 @@ impl Debug for LHS {
     }
 }
 
-impl Debug for ObjectMember {
+impl Debug for ObjectKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ObjectMember::KeyValue(member) => write!(f, ".{}", member),
-            ObjectMember::Private(member) => write!(f, ".#{}", member),
-            ObjectMember::Computed(member) => write!(f, "[${}]", member),
+            ObjectKey::KeyValue(member) => write!(f, ".{}", member),
+            ObjectKey::Private(member) => write!(f, ".#{}", member),
+            ObjectKey::Computed(member) => write!(f, "[${}]", member),
         }
     }
 }
@@ -117,6 +117,16 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
+            BasicBlockInstruction::CreateClass(optional_extends) => {
+                write!(
+                    f,
+                    "class{}",
+                    optional_extends
+                        .as_ref()
+                        .map(|extends| format!(" extends ${}", extends))
+                        .unwrap_or("".to_string())
+                )
+            }
             BasicBlockInstruction::ArrayPattern(input, items) => write!(
                 f,
                 "pack ${} [{}]",
@@ -159,6 +169,17 @@ impl Debug for BasicBlockInstruction {
                     f,
                     "call ${}({})",
                     callee,
+                    args.iter()
+                        .map(|a| format!("${}", a))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            BasicBlockInstruction::New(constructor, args) => {
+                write!(
+                    f,
+                    "new ${}({})",
+                    constructor,
                     args.iter()
                         .map(|a| format!("${}", a))
                         .collect::<Vec<_>>()
@@ -274,6 +295,21 @@ impl Debug for BasicBlockExit {
             BasicBlockExit::EndFinally(after_block) => {
                 write!(f, "end finally after @{}", after_block)
             }
+            BasicBlockExit::ClassStart(class_var, start, end) => {
+                write!(f, "class ${} @{}..@{}", class_var, start, end)
+            }
+            BasicBlockExit::ClassProperty(prop, next) => {
+                write!(f, "class property {:?} after @{}", prop, next)
+            }
+            BasicBlockExit::ClassPushStaticBlock(start, end) => {
+                write!(f, "class static block @{}..@{}", start, end)
+            }
+            BasicBlockExit::ClassPopStaticBlock(next) => {
+                write!(f, "end static block after @{}", next)
+            }
+            BasicBlockExit::ClassEnd(next) => {
+                write!(f, "class end after @{}", next)
+            }
         }
     }
 }
@@ -289,7 +325,9 @@ impl Debug for BasicBlockModule {
 
         let functions: Vec<_> = functions.iter().map(|(_, v)| v).collect();
 
-        let (top_level_stats, functions) = functions.split_first().unwrap();
+        let (top_level_stats, functions) = functions
+            .split_first()
+            .expect("there must be a first element in a module's list of functions");
 
         let mut d = f.debug_struct("BasicBlockModule");
 

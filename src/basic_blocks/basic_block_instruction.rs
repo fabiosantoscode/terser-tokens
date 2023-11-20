@@ -1,4 +1,7 @@
-use super::FunctionId;
+/// A usize that uniquely points to a function.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Hash, PartialOrd, Ord, Eq, Default)]
+pub struct FunctionId(pub usize);
 
 /// A single instruction in a basic block. This can encode basic actions, free of syntatic sugar
 /// and multiple ways of doing the same thing.
@@ -25,6 +28,8 @@ pub enum BasicBlockInstruction {
     Array(Vec<ArrayElement>),
     /// __proto__, object props
     Object(Option<usize>, Vec<ObjectProp>),
+    /// maybe_extends
+    CreateClass(Option<usize>),
     ArrayPattern(usize, Vec<ArrayPatternPiece>),
     ObjectPattern(usize, Vec<ObjectPatternPiece>),
     /// pattern, index
@@ -33,6 +38,7 @@ pub enum BasicBlockInstruction {
     Phi(Vec<usize>),
     Function(FunctionId),
     Call(usize, Vec<usize>),
+    New(usize, Vec<usize>),
     ArgumentRead(usize),
     ArgumentRest(usize),
     Read(LHS),
@@ -80,7 +86,7 @@ pub enum ObjectProp {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum ObjectMember {
+pub enum ObjectKey {
     KeyValue(String),
     Private(String),
     Computed(usize),
@@ -114,7 +120,7 @@ pub enum LHS {
     Local(usize),
     NonLocal(NonLocalId),
     Global(String),
-    Member(Box<LHS>, ObjectMember),
+    Member(Box<LHS>, ObjectKey),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -158,6 +164,9 @@ impl BasicBlockInstruction {
                     ObjectProp::Spread(spread_obj) => vec![*spread_obj],
                 }))
                 .collect(),
+            BasicBlockInstruction::CreateClass(maybe_extends) => {
+                maybe_extends.iter().cloned().collect()
+            }
             BasicBlockInstruction::ArrayPattern(input, _) => vec![*input],
             BasicBlockInstruction::ObjectPattern(input, _) => vec![*input],
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
@@ -165,7 +174,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::CaughtError => vec![],
             BasicBlockInstruction::ForInOfValue => vec![],
             BasicBlockInstruction::Function(_) => vec![],
-            BasicBlockInstruction::Call(callee, args) => {
+            BasicBlockInstruction::Call(callee, args)
+            | BasicBlockInstruction::New(callee, args) => {
                 let mut res = Vec::with_capacity(args.len() + 1);
                 res.push(*callee);
                 res.extend(args);
@@ -215,6 +225,9 @@ impl BasicBlockInstruction {
                     ObjectProp::Spread(spread_obj) => vec![spread_obj],
                 }))
                 .collect(),
+            BasicBlockInstruction::CreateClass(optional_extends) => {
+                optional_extends.iter_mut().collect()
+            }
             BasicBlockInstruction::ArrayPattern(input, _) => vec![input],
             BasicBlockInstruction::ObjectPattern(input, _) => vec![input],
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],
@@ -222,7 +235,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::CaughtError => vec![],
             BasicBlockInstruction::ForInOfValue => vec![],
             BasicBlockInstruction::Function(_) => vec![],
-            BasicBlockInstruction::Call(callee, args) => {
+            BasicBlockInstruction::Call(callee, args)
+            | BasicBlockInstruction::New(callee, args) => {
                 let mut res = Vec::with_capacity(args.len() + 1);
                 res.push(callee);
                 res.extend(args);
@@ -320,20 +334,29 @@ impl LHS {
     }
 }
 
-impl ObjectMember {
+impl ObjectKey {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
-            ObjectMember::KeyValue(_) => vec![],
-            ObjectMember::Private(_) => vec![],
-            ObjectMember::Computed(v) => vec![*v],
+            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::Private(_) => vec![],
+            ObjectKey::Computed(v) => vec![*v],
         }
     }
 
     pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
-            ObjectMember::KeyValue(_) => vec![],
-            ObjectMember::Private(_) => vec![],
-            ObjectMember::Computed(v) => vec![v],
+            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::Private(_) => vec![],
+            ObjectKey::Computed(v) => vec![v],
         }
     }
+}
+
+pub fn identifier_needs_quotes(key: &str) -> bool {
+    // TODO exclude JS keywords
+    key.chars().enumerate().all(|(index, c)| match c {
+        'a'..='z' | 'A'..='Z' | '_' | '$' => true,
+        '0'..='9' if index > 0 => true,
+        _ => false,
+    })
 }

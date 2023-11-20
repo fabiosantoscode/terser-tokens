@@ -1,6 +1,6 @@
 use swc_ecma_ast::{ComputedPropName, Expr, Ident, MemberExpr, MemberProp, PrivateName};
 
-use crate::basic_blocks::{ObjectMember, LHS};
+use crate::basic_blocks::{ObjectKey, LHS};
 
 use super::{build_identifier, build_identifier_str, ref_or_inlined_expr, ToAstContext};
 
@@ -26,14 +26,14 @@ pub fn lhs_to_ast_expr_inner(ctx: &mut ToAstContext, lhs: &LHS, depth: usize) ->
                 span: Default::default(),
                 obj: Box::new(base),
                 prop: match member {
-                    ObjectMember::KeyValue(member) => {
+                    ObjectKey::KeyValue(member) => {
                         MemberProp::Ident(Ident::new(member.as_str().into(), Default::default()))
                     }
-                    ObjectMember::Private(member) => MemberProp::PrivateName(PrivateName {
+                    ObjectKey::Private(member) => MemberProp::PrivateName(PrivateName {
                         span: Default::default(),
                         id: Ident::new(member.as_str().into(), Default::default()),
                     }),
-                    ObjectMember::Computed(member) => MemberProp::Computed(ComputedPropName {
+                    ObjectKey::Computed(member) => MemberProp::Computed(ComputedPropName {
                         span: Default::default(),
                         expr: Box::new(ref_or_inlined_expr(ctx, *member)),
                     }),

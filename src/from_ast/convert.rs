@@ -10,9 +10,9 @@ use crate::basic_blocks::{
 };
 
 use super::{
-    block_to_basic_blocks, function_to_basic_blocks, object_propname_to_string,
-    pat_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx, FunctionLike, NestedIntoStatement,
-    PatType,
+    block_to_basic_blocks, class_to_basic_blocks, function_to_basic_blocks,
+    object_propname_to_string, pat_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx, FunctionLike,
+    NestedIntoStatement, PatType,
 };
 
 /// Turn a statement into basic blocks.
@@ -69,6 +69,10 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         }
         Stmt::Decl(Decl::Fn(_)) => {
             unreachable!("function declarations should be handled by block_to_basic_blocks")
+        }
+        Stmt::Decl(Decl::Class(class)) => {
+            class_to_basic_blocks(ctx, class.class.as_ref(), Some(class.ident.sym.to_string()))
+                .expect("error in class_to_basic_blocks");
         }
         Stmt::DoWhile(_) => todo!(),
         Stmt::For(_) => todo!(),
@@ -519,12 +523,17 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         }
         Expr::SuperProp(_) => todo!(),
         Expr::Arrow(arrow_expr) => {
-            return function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
-                .expect("todo error handling");
+            let (varname, _fn_id) =
+                function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
+                    .expect("todo error handling");
+            return varname;
         }
         Expr::Fn(fn_expr) => {
-            return function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr), None)
-                .expect("todo error handling");
+            let (varname, _fn_id) =
+                function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr), None)
+                    .expect("todo error handling");
+
+            return varname;
         }
         Expr::Call(call) => {
             // TODO non-expr callees (super, import)
@@ -540,10 +549,27 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
 
             return ctx.push_instruction(BasicBlockInstruction::Call(callee, args));
         }
-        Expr::New(_) => todo!(),
+        Expr::New(new_expr) => {
+            let callee = expr_to_basic_blocks(ctx, &new_expr.callee);
+
+            let mut out_args = vec![];
+            if let Some(args) = &new_expr.args {
+                for arg in args {
+                    match arg.spread {
+                        Some(_) => todo!("spread args"),
+                        None => out_args.push(expr_to_basic_blocks(ctx, arg.expr.as_ref())),
+                    }
+                }
+            }
+
+            return ctx.push_instruction(BasicBlockInstruction::New(callee, out_args));
+        }
         Expr::Tpl(_) => todo!(),
         Expr::TaggedTpl(_) => todo!(),
-        Expr::Class(_) => todo!(),
+        Expr::Class(class) => {
+            let class_name = class.ident.as_ref().map(|id| id.sym.to_string());
+            return class_to_basic_blocks(ctx, class.class.as_ref(), class_name).unwrap();
+        }
         Expr::MetaProp(_) => todo!(),
         Expr::Yield(YieldExpr { arg, delegate, .. }) => {
             let typ = if *delegate {

@@ -29,6 +29,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Object(_, props) => {
                 props.iter().any(|p| matches!(p, ObjectProp::Spread(_)))
             }
+            // extending things like "1" or "undefined" can throw
+            BasicBlockInstruction::CreateClass(_) => true,
             // may throw due to unspreadable array items
             BasicBlockInstruction::ArrayPattern(_, _) => true,
             // may throw due to unspreadable object items
@@ -40,6 +42,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Phi(_) => true,
             BasicBlockInstruction::Function(_) => false,
             BasicBlockInstruction::Call(_, _) => true,
+            // may throw but shouldn't
+            BasicBlockInstruction::New(_, _) => true,
             BasicBlockInstruction::ArgumentRead(_) => false,
             BasicBlockInstruction::ArgumentRest(_) => false,
             BasicBlockInstruction::Read(lhs) => lhs.read_may_have_side_effects(),

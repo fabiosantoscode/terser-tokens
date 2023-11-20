@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
-use crate::basic_blocks::{BasicBlockInstruction, ExitType};
+use crate::basic_blocks::{BasicBlockInstruction, ClassProperty, ExitType};
 
 use super::ForInOfKind;
 
@@ -34,6 +34,15 @@ pub enum StructuredFlow {
     Continue(BreakableId),
     Return(ExitType, Option<usize>),
     BasicBlock(Vec<(usize, BasicBlockInstruction)>),
+    /// (class_var, class_members)
+    Class(usize, Vec<StructuredClassMember>),
+}
+
+/// A "thing" inside a class
+#[derive(Clone, Debug)]
+pub enum StructuredClassMember {
+    Property(Vec<StructuredFlow>, ClassProperty),
+    StaticBlock(Vec<StructuredFlow>),
 }
 
 impl Default for StructuredFlow {
@@ -56,6 +65,7 @@ impl StructuredFlow {
             StructuredFlow::Return(_, _) => "Return".to_string(),
             StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
             StructuredFlow::TryCatch(_, _, _, _) => "TryCatch".to_string(),
+            StructuredFlow::Class(_, _) => "Class".to_string(),
         }
     }
     pub fn simplify(self) -> Self {
@@ -108,6 +118,18 @@ impl StructuredFlow {
                 StructuredFlow::TryCatch(id, map(try_), map(catch), map(finally))
             }
             StructuredFlow::Loop(id, items) => StructuredFlow::Loop(id, map(items)),
+            StructuredFlow::Class(class_var, items) => StructuredFlow::Class(
+                class_var,
+                items
+                    .into_iter()
+                    .map(|class_item| match class_item {
+                        StructuredClassMember::StaticBlock(items) => {
+                            StructuredClassMember::StaticBlock(map(items))
+                        }
+                        no_children => no_children,
+                    })
+                    .collect(),
+            ),
             no_children => no_children,
         }
     }
@@ -140,6 +162,15 @@ impl StructuredFlow {
             StructuredFlow::TryCatch(_, t, v, fin) => {
                 vec![t.iter().collect(), v.iter().collect(), fin.iter().collect()]
             }
+            StructuredFlow::Class(_, items) => {
+                vec![items
+                    .iter()
+                    .flat_map(|item| match item {
+                        StructuredClassMember::StaticBlock(items) => items.iter(),
+                        StructuredClassMember::Property(children, _) => children.iter(),
+                    })
+                    .collect()]
+            }
         }
     }
 
@@ -162,6 +193,27 @@ impl StructuredFlow {
                     fin.iter_mut().collect(),
                 ]
             }
+            StructuredFlow::Class(_, items) => {
+                vec![items
+                    .iter_mut()
+                    .flat_map(|item| match item {
+                        StructuredClassMember::StaticBlock(items) => items.iter_mut(),
+                        StructuredClassMember::Property(children, _) => children.iter_mut(),
+                    })
+                    .collect()]
+            }
+        }
+    }
+
+    pub fn count_instructions(&self) -> usize {
+        match self {
+            StructuredFlow::BasicBlock(block) => block.len(),
+            _ => self
+                .children()
+                .into_iter()
+                .flat_map(|children| children.into_iter())
+                .map(|child| child.count_instructions())
+                .sum(),
         }
     }
 
@@ -226,7 +278,7 @@ impl StructuredFlow {
         }
     }
 
-    pub(crate) fn control_flow_var(&self) -> Option<usize> {
+    pub(crate) fn used_var(&self) -> Option<usize> {
         match self {
             StructuredFlow::Branch(_, x, _, _) => Some(*x),
             StructuredFlow::Break(_) => None,
@@ -238,6 +290,7 @@ impl StructuredFlow {
             StructuredFlow::Return(_, None) => unreachable!("we shouldn't see this anymore"),
             StructuredFlow::BasicBlock(_) => None,
             StructuredFlow::TryCatch(_, _, _, _) => None,
+            StructuredFlow::Class(class_var, _) => Some(*class_var),
         }
     }
 }
@@ -300,6 +353,13 @@ impl Debug for StructuredFlow {
                 print_vec_no_eol(f, catch)?;
                 write!(f, " finally ")?;
                 print_vec(f, fin)
+            }
+            StructuredFlow::Class(class_var, body) => {
+                write!(f, "class ${class_var} {{\n")?;
+                for item in body {
+                    writeln!(f, "{}", indent_str_lines(&format!("{:?}", item)))?;
+                }
+                write!(f, "}}\n")
             }
             StructuredFlow::Break(brk) => writeln!(f, "Break{}", print_brk(brk)),
             StructuredFlow::Continue(brk) => writeln!(f, "Continue{}", print_brk(brk)),

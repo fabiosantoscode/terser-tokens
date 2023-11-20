@@ -1,6 +1,8 @@
 use std::{collections::BTreeMap, fmt::Debug};
 
-use crate::basic_blocks::{BasicBlock, BasicBlockExit, BreakableId, StructuredFlow};
+use crate::basic_blocks::{
+    BasicBlock, BasicBlockExit, BreakableId, StructuredClassMember, StructuredFlow,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub struct BreakAndRange(pub BreakableId, pub usize, pub usize);
@@ -104,22 +106,22 @@ fn do_tree_chunk(
             match block.exit {
                 BasicBlockExit::Jump(to) => rest = to,
                 BasicBlockExit::Break(tgt) => {
-                    blocks.extend(vec![StructuredFlow::Break(ctx.break_index(tgt))])
+                    blocks.push(StructuredFlow::Break(ctx.break_index(tgt)))
                 }
                 BasicBlockExit::Continue(tgt) => {
-                    blocks.extend(vec![StructuredFlow::Continue(ctx.continue_index(tgt))])
+                    blocks.push(StructuredFlow::Continue(ctx.continue_index(tgt)))
                 }
                 BasicBlockExit::Cond(cond, cons_start, cons_end, alt_start, alt_end) => {
                     rest = alt_end + 1;
 
                     let brk_id = ctx.get_breakable_id();
                     ctx.push_within(BreakAndRange(brk_id, cons_start, alt_end), |ctx| {
-                        blocks.extend(vec![StructuredFlow::Branch(
+                        blocks.push(StructuredFlow::Branch(
                             brk_id,
                             cond,
                             do_tree_chunk(ctx, func, cons_start, cons_end),
                             do_tree_chunk(ctx, func, alt_start, alt_end),
-                        )])
+                        ))
                     })
                 }
                 BasicBlockExit::Loop(start, end) => {
@@ -127,10 +129,10 @@ fn do_tree_chunk(
 
                     let loop_brk_id = ctx.get_breakable_id();
                     ctx.push_within(BreakAndRange(loop_brk_id, start, end), |ctx| {
-                        blocks.extend(vec![StructuredFlow::Loop(
+                        blocks.push(StructuredFlow::Loop(
                             loop_brk_id,
                             do_tree_chunk(ctx, func, start, end),
-                        )])
+                        ))
                     })
                 }
                 BasicBlockExit::ForInOfLoop(looped_var, loop_type, start, end) => {
@@ -138,19 +140,16 @@ fn do_tree_chunk(
 
                     let loop_brk_id = ctx.get_breakable_id();
                     ctx.push_within(BreakAndRange(loop_brk_id, start, end), |ctx| {
-                        blocks.extend(vec![StructuredFlow::ForInOfLoop(
+                        blocks.push(StructuredFlow::ForInOfLoop(
                             loop_brk_id,
                             looped_var,
                             loop_type,
                             do_tree_chunk(ctx, func, start, end),
-                        )])
+                        ))
                     })
                 }
                 BasicBlockExit::ExitFn(ref exit_type, yielded_val) => {
-                    blocks.extend(vec![StructuredFlow::Return(
-                        exit_type.clone(),
-                        Some(yielded_val),
-                    )])
+                    blocks.push(StructuredFlow::Return(exit_type.clone(), Some(yielded_val)))
                 }
                 BasicBlockExit::SetTryAndCatch(
                     try_block,
@@ -162,20 +161,115 @@ fn do_tree_chunk(
 
                     let brk_id = ctx.get_breakable_id();
                     ctx.push_within(BreakAndRange(brk_id, try_block, end_finally), |ctx| {
-                        blocks.extend(vec![StructuredFlow::TryCatch(
+                        blocks.push(StructuredFlow::TryCatch(
                             brk_id,
                             do_tree_chunk(ctx, func, try_block, catch_block - 1),
                             do_tree_chunk(ctx, func, catch_block, finally_block - 1),
                             do_tree_chunk(ctx, func, finally_block, end_finally),
-                        )])
+                        ))
                     })
                 }
                 BasicBlockExit::PopCatch(catch, _) => rest = catch,
                 BasicBlockExit::PopFinally(finally, _) => rest = finally,
                 BasicBlockExit::EndFinally(after) => rest = after,
+                BasicBlockExit::ClassStart(class_var, start, end) => {
+                    rest = end + 1;
+
+                    blocks.push(StructuredFlow::Class(
+                        class_var,
+                        do_class_members(ctx, func, start, end, vec![]),
+                    ));
+                }
+                BasicBlockExit::ClassPopStaticBlock(to) => {
+                    rest = to;
+                }
+                BasicBlockExit::ClassProperty(_, _) => {
+                    // Pop back to do_class_members
+                    return blocks;
+                }
+                BasicBlockExit::ClassPushStaticBlock(_, _) | BasicBlockExit::ClassEnd(_) => {
+                    assert_eq!(
+                        blocks.iter().fold(0, |acc, x| acc + x.count_instructions()),
+                        0,
+                        "class block should be empty"
+                    );
+                    return blocks;
+                }
             };
 
             blocks.extend(do_tree_chunk(ctx, func, rest, end_blk));
+
+            blocks
+        }
+        None => vec![],
+    }
+}
+
+fn do_class_members(
+    ctx: &mut Ctx,
+    func: &mut BTreeMap<usize, BasicBlock>,
+    start_blk: usize,
+    end_blk: usize,
+    mut preceding_code: Vec<StructuredFlow>,
+) -> Vec<StructuredClassMember> {
+    if end_blk < start_blk {
+        return vec![];
+    }
+
+    let first_member = func.range_mut(start_blk..=end_blk).into_iter().next();
+
+    match first_member {
+        Some((_blk_id, block)) => {
+            let rest;
+
+            let mut blocks = vec![];
+
+            match block.exit {
+                BasicBlockExit::ClassProperty(ref prop, to) => {
+                    rest = to;
+
+                    let preceding_code = std::mem::take(&mut preceding_code);
+
+                    blocks.push(StructuredClassMember::Property(
+                        preceding_code,
+                        prop.clone(),
+                    ));
+                }
+                BasicBlockExit::ClassPushStaticBlock(start, end) => {
+                    rest = end + 1;
+
+                    blocks.push(StructuredClassMember::StaticBlock(do_tree_chunk(
+                        ctx, func, start, end,
+                    )));
+                }
+                BasicBlockExit::ClassEnd(to) => {
+                    rest = to;
+                }
+                BasicBlockExit::ClassPopStaticBlock(_) => {
+                    unreachable!("pop static block should be handled by do_tree_chunk")
+                }
+                _ => {
+                    let index_of_next_prop =
+                        func.range(start_blk..=end_blk)
+                            .into_iter()
+                            .find_map(|(id, block)| match block.exit {
+                                BasicBlockExit::ClassProperty(_, _) => Some(*id),
+                                BasicBlockExit::ClassPushStaticBlock(_, _) => Some(*id),
+                                BasicBlockExit::ClassEnd(_) => Some(*id),
+                                _ => None,
+                            });
+
+                    if let Some(next_prop) = index_of_next_prop {
+                        rest = next_prop;
+
+                        preceding_code.extend(do_tree_chunk(ctx, func, start_blk, next_prop - 1));
+                    } else {
+                        todo!("maybe we found end")
+                    }
+                }
+            };
+
+            blocks.extend(do_class_members(ctx, func, rest, end_blk, preceding_code));
 
             blocks
         }

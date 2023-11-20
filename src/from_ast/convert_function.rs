@@ -1,4 +1,4 @@
-use swc_ecma_ast::{ArrowExpr, FnDecl, FnExpr, Pat};
+use swc_ecma_ast::{ArrowExpr, ClassMethod, FnDecl, FnExpr, Pat, PrivateMethod};
 
 use super::{
     block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
@@ -9,14 +9,21 @@ use crate::basic_blocks::{
     LHS,
 };
 
-/// Convert a function declaration to basic blocks. Function declarations are special because since they're hoisted, we don't want to create any variables here.
+/// Convert a function to basic blocks. Function declarations are special because since they're hoisted, we don't want to create any variables here.
 pub fn function_to_basic_blocks(
     ctx: &mut FromAstCtx,
     function: FunctionLike,
     fn_decl_varname: Option<usize>,
-) -> Result<usize, String> {
+) -> Result<(usize, FunctionId), String> {
+    let fn_id = FunctionId(ctx.function_index.0 + 1); // future function name
+
     // Only a named FnExpr can have two simultaneous bindings. Outside (maybe) and inside.
     let (outer_varname, inner_varname) = match function {
+        FunctionLike::ArrowExpr(_) | FunctionLike::FnExpr(FnExpr { ident: None, .. }) => {
+            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
+
+            (outer_varname, None)
+        }
         FunctionLike::FnExpr(FnExpr {
             ident: Some(ident), ..
         }) => {
@@ -27,9 +34,7 @@ pub fn function_to_basic_blocks(
                 undef,
             ));
 
-            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(FunctionId(
-                ctx.function_index.0 + 1, // future function name
-            )));
+            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
 
             let write_non_local =
                 BasicBlockInstruction::Write(LHS::NonLocal(non_local_id), outer_varname);
@@ -39,24 +44,16 @@ pub fn function_to_basic_blocks(
         }
         FunctionLike::FnDecl(_) => {
             let outer_varname = fn_decl_varname.expect("FnDecl needs a reserved varname");
-            ctx.arbitrarily_set_id(
-                outer_varname,
-                BasicBlockInstruction::Function(FunctionId(
-                    ctx.function_index.0 + 1, // future function name
-                )),
-            );
+            ctx.arbitrarily_set_id(outer_varname, BasicBlockInstruction::Function(fn_id));
             (outer_varname, None)
         }
-        _ => {
-            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(FunctionId(
-                ctx.function_index.0 + 1, // future function name
-            )));
+        FunctionLike::ClassMethod(_) | FunctionLike::PrivateMethod(_) => {
+            let outer_varname = usize::MAX; // unused
 
             (outer_varname, None)
         }
     };
 
-    // count function.length
     let env = match function {
         FunctionLike::ArrowExpr(ArrowExpr {
             is_generator,
@@ -67,7 +64,9 @@ pub fn function_to_basic_blocks(
             BasicBlockEnvironment::Function(*is_generator, *is_async)
         }
         FunctionLike::FnDecl(FnDecl { function, .. })
-        | FunctionLike::FnExpr(FnExpr { function, .. }) => {
+        | FunctionLike::FnExpr(FnExpr { function, .. })
+        | FunctionLike::ClassMethod(ClassMethod { function, .. })
+        | FunctionLike::PrivateMethod(PrivateMethod { function, .. }) => {
             BasicBlockEnvironment::Function(function.is_generator, function.is_async)
         }
     };
@@ -106,7 +105,7 @@ pub fn function_to_basic_blocks(
         Ok(())
     })?;
 
-    Ok(outer_varname)
+    Ok((outer_varname, fn_id))
 }
 
 #[cfg(test)]

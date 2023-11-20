@@ -5,7 +5,7 @@ use swc_ecma_ast::{
 
 use crate::{
     basic_blocks::{
-        ArrayPatternPiece, BasicBlockExit, BasicBlockInstruction, ObjectMember, ObjectPatternPiece,
+        ArrayPatternPiece, BasicBlockExit, BasicBlockInstruction, ObjectKey, ObjectPatternPiece,
         LHS,
     },
     from_ast::expr_to_basic_blocks,
@@ -171,11 +171,11 @@ pub fn pat_like_expr_to_basic_blocks(
         Expr::Member(MemberExpr { obj, prop, .. }) => {
             let base = to_basic_blocks_lhs(ctx, obj.as_ref());
             let prop = match &prop {
-                MemberProp::Ident(ident) => ObjectMember::KeyValue(ident.sym.to_string()),
-                MemberProp::PrivateName(pvt) => ObjectMember::Private(pvt.id.sym.to_string()),
+                MemberProp::Ident(ident) => ObjectKey::KeyValue(ident.sym.to_string()),
+                MemberProp::PrivateName(pvt) => ObjectKey::Private(pvt.id.sym.to_string()),
                 MemberProp::Computed(comp) => {
                     let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());
-                    ObjectMember::Computed(comp)
+                    ObjectKey::Computed(comp)
                 }
             };
 
