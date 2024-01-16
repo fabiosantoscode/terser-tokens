@@ -1,4 +1,4 @@
-use swc_ecma_ast::{ArrowExpr, ClassMethod, Constructor, FnDecl, FnExpr, Pat, PrivateMethod};
+use swc_ecma_ast::{ArrowExpr, ClassMethod, FnDecl, FnExpr, Pat, PrivateMethod};
 
 use super::{
     block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,

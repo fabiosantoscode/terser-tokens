@@ -1,9 +1,8 @@
 use swc_ecma_ast::{
-    AwaitExpr, BlockStmtOrExpr, Callee, Class, ClassMember, ClassMethod, CondExpr, Decl,
-    DoWhileStmt, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt,
-    MemberProp, MethodProp, Module, ModuleItem, ObjectLit, ObjectPatProp, Param, Pat, PatOrExpr,
-    PrivateMethod, Prop, PropName, PropOrSpread, SetterProp, Stmt, VarDecl, VarDeclKind,
-    VarDeclOrExpr, WhileStmt, YieldExpr,
+    AwaitExpr, Callee, Class, ClassMember, CondExpr, Decl, DoWhileStmt, Expr, ExprOrSpread,
+    ForHead, ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt, MemberProp, MethodProp, Module,
+    ModuleItem, ObjectLit, ObjectPatProp, Pat, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
+    Stmt, VarDecl, VarDeclKind, VarDeclOrExpr, WhileStmt, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
