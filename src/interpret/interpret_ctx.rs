@@ -182,8 +182,6 @@ impl<'module> InterpretCtx<'_> {
         let vars = self.variables.last_mut().unwrap();
         let changed_vars: BTreeSet<_> = a_vars.keys().chain(b_vars.keys()).cloned().collect();
 
-        println!("Merging branch mutations: {:?} and {:?}", a_vars, b_vars);
-
         for changed in changed_vars {
             let merged_conds = match (a_vars.remove(&changed), b_vars.remove(&changed)) {
                 (Some(a), Some(b)) => a.union(&b),

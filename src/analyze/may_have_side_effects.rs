@@ -30,7 +30,7 @@ impl BasicBlockInstruction {
                 props.iter().any(|p| matches!(p, ObjectProp::Spread(_)))
             }
             // extending things like "1" or "undefined" can throw
-            BasicBlockInstruction::CreateClass(_) => true,
+            BasicBlockInstruction::CreateClass(extends) => extends.is_some(),
             // may throw due to unspreadable array items
             BasicBlockInstruction::ArrayPattern(_, _) => true,
             // may throw due to unspreadable object items

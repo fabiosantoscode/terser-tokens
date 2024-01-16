@@ -298,6 +298,9 @@ impl Debug for BasicBlockExit {
             BasicBlockExit::ClassStart(class_var, start, end) => {
                 write!(f, "class ${} @{}..@{}", class_var, start, end)
             }
+            BasicBlockExit::ClassConstructor(fn_id, next) => {
+                write!(f, "class constructor {:?} after @{}", fn_id, next)
+            }
             BasicBlockExit::ClassProperty(prop, next) => {
                 write!(f, "class property {:?} after @{}", prop, next)
             }

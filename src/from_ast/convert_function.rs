@@ -1,4 +1,4 @@
-use swc_ecma_ast::{ArrowExpr, ClassMethod, FnDecl, FnExpr, Pat, PrivateMethod};
+use swc_ecma_ast::{ArrowExpr, ClassMethod, Constructor, FnDecl, FnExpr, Pat, PrivateMethod};
 
 use super::{
     block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
@@ -47,7 +47,9 @@ pub fn function_to_basic_blocks(
             ctx.arbitrarily_set_id(outer_varname, BasicBlockInstruction::Function(fn_id));
             (outer_varname, None)
         }
-        FunctionLike::ClassMethod(_) | FunctionLike::PrivateMethod(_) => {
+        FunctionLike::ClassMethod(_)
+        | FunctionLike::PrivateMethod(_)
+        | FunctionLike::ClassConstructor(_) => {
             let outer_varname = usize::MAX; // unused
 
             (outer_varname, None)
@@ -63,6 +65,7 @@ pub fn function_to_basic_blocks(
             assert!(!is_generator);
             BasicBlockEnvironment::Function(*is_generator, *is_async)
         }
+        FunctionLike::ClassConstructor(_) => BasicBlockEnvironment::Function(false, false),
         FunctionLike::FnDecl(FnDecl { function, .. })
         | FunctionLike::FnExpr(FnExpr { function, .. })
         | FunctionLike::ClassMethod(ClassMethod { function, .. })

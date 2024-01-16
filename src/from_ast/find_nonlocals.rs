@@ -8,7 +8,7 @@ use swc_ecma_ast::{
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
 
-use super::FunctionLike;
+use super::{FuncBlockOrRetExpr, FunctionLike};
 
 #[derive(Debug)]
 pub struct NonLocalInfo {
@@ -89,15 +89,9 @@ impl<'a> NonLocalsContext<'a> {
         }
     }
 
-    fn insert_params(&mut self, params: &'a [Param]) {
-        for param in params {
-            pat_nonlocals(self, &param.pat, PatType::FunArg);
-        }
-    }
-
-    fn insert_pats(&mut self, pats: &'a [Pat]) {
-        for pat in pats {
-            pat_nonlocals(self, pat, PatType::FunArg);
+    fn insert_params(&mut self, params: Vec<&'a Pat>) {
+        for pat in params {
+            pat_nonlocals(self, &pat, PatType::FunArg);
         }
     }
 
@@ -119,27 +113,23 @@ impl<'a> NonLocalsContext<'a> {
                 if let Some(name) = function.ident.as_ref() {
                     self.declare_name(name.sym.to_string(), true);
                 }
-                self.insert_params(&function.function.params);
-                block_nonlocals(self, &function.function.body.as_ref().unwrap().stmts);
-            }
-            FunctionLike::ClassMethod(ClassMethod { function, .. })
-            | FunctionLike::PrivateMethod(PrivateMethod { function, .. }) => {
-                self.insert_params(&function.params);
-                block_nonlocals(self, &function.body.as_ref().unwrap().stmts);
-            }
-            FunctionLike::ArrowExpr(arrow) => {
-                self.insert_pats(&arrow.params);
-                match arrow.body.as_ref() {
-                    BlockStmtOrExpr::BlockStmt(b) => block_nonlocals(self, &b.stmts),
-                    BlockStmtOrExpr::Expr(e) => expr_nonlocals(self, &e),
-                }
             }
             FunctionLike::FnDecl(fn_decl) => {
                 // TODO does the function name exist differently inside the function, or is it the same as the symbol defined outside?
                 self.declare_name(fn_decl.ident.sym.to_string(), true);
                 // TODO hoisted fn decls: self.push_fndecl(fn_decl);
-                self.insert_params(&fn_decl.function.params);
-                block_nonlocals(self, &fn_decl.function.body.as_ref().unwrap().stmts);
+            }
+            _ => {}
+        };
+
+        self.insert_params(expr.get_params());
+
+        match expr.get_body() {
+            FuncBlockOrRetExpr::Block(block) => {
+                block_nonlocals(self, &block.stmts);
+            }
+            FuncBlockOrRetExpr::RetExpr(ret_expr) => {
+                expr_nonlocals(self, &ret_expr);
             }
         }
     }
@@ -518,7 +508,9 @@ fn class_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, class: &'a Class) {
 
     for member in &class.body {
         match member {
-            ClassMember::Constructor(_constructor) => todo!(),
+            ClassMember::Constructor(constructor) => {
+                ctx.defer(FunctionLike::ClassConstructor(&constructor));
+            }
             ClassMember::Method(method) => {
                 if let PropName::Computed(ident) = &method.key {
                     expr_nonlocals(ctx, &ident.expr);

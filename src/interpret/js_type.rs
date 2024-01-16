@@ -40,7 +40,6 @@ impl JsType {
     ///
     /// Usable for "if" statements, "||", "&&", etc.
     pub fn is_truthy(&self) -> Option<bool> {
-        println!("is_truthy: {:?}", self);
         match self {
             JsType::Undefined => Some(false),
             JsType::Null => Some(false),

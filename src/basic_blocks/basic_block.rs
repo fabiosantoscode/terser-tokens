@@ -59,6 +59,8 @@ pub enum BasicBlockExit {
     ClassStart(usize, usize, usize),
     /// (Class only): (prop, next). Create a property
     ClassProperty(ClassProperty, usize),
+    /// (Class only): (fn_id, next). Create a constructor
+    ClassConstructor(FunctionId, usize),
     /// (Class only): (start, end). Start a static block
     ClassPushStaticBlock(usize, usize),
     /// (Class only): (next_member) End a static block.
@@ -82,6 +84,7 @@ impl BasicBlockExit {
             | BasicBlockExit::PopCatch(_, _)
             | BasicBlockExit::PopFinally(_, _)
             | BasicBlockExit::EndFinally(_)
+            | BasicBlockExit::ClassConstructor(_, _)
             | BasicBlockExit::ClassPushStaticBlock(_, _)
             | BasicBlockExit::ClassPopStaticBlock(_)
             | BasicBlockExit::ClassEnd(_)
@@ -103,6 +106,7 @@ impl BasicBlockExit {
             | BasicBlockExit::PopCatch(_, _)
             | BasicBlockExit::PopFinally(_, _)
             | BasicBlockExit::EndFinally(_)
+            | BasicBlockExit::ClassConstructor(_, _)
             | BasicBlockExit::ClassPushStaticBlock(_, _)
             | BasicBlockExit::ClassPopStaticBlock(_)
             | BasicBlockExit::ClassEnd(_)

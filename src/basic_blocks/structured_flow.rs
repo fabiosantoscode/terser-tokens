@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
-use crate::basic_blocks::{BasicBlockInstruction, ClassProperty, ExitType};
+use crate::basic_blocks::{BasicBlockInstruction, ClassProperty, ExitType, FunctionId};
 
 use super::ForInOfKind;
 
@@ -41,6 +41,7 @@ pub enum StructuredFlow {
 /// A "thing" inside a class
 #[derive(Clone, Debug)]
 pub enum StructuredClassMember {
+    Constructor(FunctionId),
     Property(Vec<StructuredFlow>, ClassProperty),
     StaticBlock(Vec<StructuredFlow>),
 }
@@ -166,9 +167,11 @@ impl StructuredFlow {
                 vec![items
                     .iter()
                     .flat_map(|item| match item {
-                        StructuredClassMember::StaticBlock(items) => items.iter(),
-                        StructuredClassMember::Property(children, _) => children.iter(),
+                        StructuredClassMember::StaticBlock(items) => Some(items.iter()),
+                        StructuredClassMember::Property(children, _) => Some(children.iter()),
+                        StructuredClassMember::Constructor(_) => None,
                     })
+                    .flatten()
                     .collect()]
             }
         }
@@ -197,9 +200,11 @@ impl StructuredFlow {
                 vec![items
                     .iter_mut()
                     .flat_map(|item| match item {
-                        StructuredClassMember::StaticBlock(items) => items.iter_mut(),
-                        StructuredClassMember::Property(children, _) => children.iter_mut(),
+                        StructuredClassMember::StaticBlock(items) => Some(items.iter_mut()),
+                        StructuredClassMember::Property(children, _) => Some(children.iter_mut()),
+                        StructuredClassMember::Constructor(_) => None,
                     })
+                    .flatten()
                     .collect()]
             }
         }

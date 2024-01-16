@@ -183,7 +183,7 @@ fn do_tree_chunk(
                 BasicBlockExit::ClassPopStaticBlock(to) => {
                     rest = to;
                 }
-                BasicBlockExit::ClassProperty(_, _) => {
+                BasicBlockExit::ClassProperty(_, _) | BasicBlockExit::ClassConstructor(_, _) => {
                     // Pop back to do_class_members
                     return blocks;
                 }
@@ -225,8 +225,8 @@ fn do_class_members(
             let mut blocks = vec![];
 
             match block.exit {
-                BasicBlockExit::ClassProperty(ref prop, to) => {
-                    rest = to;
+                BasicBlockExit::ClassProperty(ref prop, after) => {
+                    rest = after;
 
                     let preceding_code = std::mem::take(&mut preceding_code);
 
@@ -234,6 +234,11 @@ fn do_class_members(
                         preceding_code,
                         prop.clone(),
                     ));
+                }
+                BasicBlockExit::ClassConstructor(fn_id, after) => {
+                    rest = after;
+
+                    blocks.push(StructuredClassMember::Constructor(fn_id));
                 }
                 BasicBlockExit::ClassPushStaticBlock(start, end) => {
                     rest = end + 1;
@@ -254,6 +259,7 @@ fn do_class_members(
                             .into_iter()
                             .find_map(|(id, block)| match block.exit {
                                 BasicBlockExit::ClassProperty(_, _) => Some(*id),
+                                BasicBlockExit::ClassConstructor(_, _) => Some(*id),
                                 BasicBlockExit::ClassPushStaticBlock(_, _) => Some(*id),
                                 BasicBlockExit::ClassEnd(_) => Some(*id),
                                 _ => None,

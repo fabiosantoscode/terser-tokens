@@ -18,7 +18,6 @@ pub fn normalize_module(module: &mut BasicBlockModule) {
 
 /// make names start at zero and increase one by one
 pub fn normalize_varnames(module: &mut BasicBlockModule) {
-    println!("normalize_varnames {:?}", module);
     let mut renamed_vars = BTreeMap::new();
     let mut varname = 0usize;
 

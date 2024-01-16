@@ -91,3 +91,14 @@ fn class_inheritance() {
     );
     insta::assert_display_snapshot!(res, @"[2, 1]");
 }
+
+#[test]
+fn class_constructor() {
+    let res = run_checks(
+        "class X {
+            constructor() { this.prop = 2; }
+        }
+        return new X().prop",
+    );
+    insta::assert_display_snapshot!(res, @"2");
+}

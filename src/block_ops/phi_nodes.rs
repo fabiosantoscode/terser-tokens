@@ -197,6 +197,9 @@ fn generate_phi_nodes_inner(
                             }
                             StructuredClassMember::Property(code, prop)
                         }
+                        StructuredClassMember::Constructor(fn_id) => {
+                            StructuredClassMember::Constructor(fn_id)
+                        }
                         StructuredClassMember::StaticBlock(contents) => {
                             let contents = generate_phi_nodes_inner(ctx, contents);
                             StructuredClassMember::StaticBlock(contents)

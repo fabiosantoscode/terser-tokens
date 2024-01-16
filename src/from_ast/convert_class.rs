@@ -178,6 +178,22 @@ pub fn class_to_basic_blocks(
                             ),
                         );
                     }
+                    ClassMember::Constructor(method) => {
+                        ctx.wrap_up_block();
+
+                        let (_fn_varname, fn_id) = function_to_basic_blocks(
+                            ctx,
+                            FunctionLike::ClassConstructor(&method),
+                            None,
+                        )?;
+
+                        // the above function pushes no instructions, but we stay on the safe side
+                        let value = ctx.wrap_up_block();
+
+                        let after = ctx.wrap_up_block();
+
+                        ctx.set_exit(value, BasicBlockExit::ClassConstructor(fn_id, after));
+                    }
                     other => todo!("class member {:?}", other),
                 }
             }
@@ -212,8 +228,6 @@ mod tests {
             .expect_class();
 
         class_to_basic_blocks(&mut ctx, &*decl.class, Some(decl.ident.sym.to_string())).unwrap();
-
-        println!("{:#?}", ctx);
 
         ctx.wrap_up_module(Default::default())
             .take_top_level_stats()
@@ -293,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn conv_class_static_fields() {
+    fn conv_class_static_block() {
         let func = conv_class(
             "class Foo {
                 static {
@@ -319,6 +333,33 @@ mod tests {
         @4: {
             $2 = undefined
             exit = return $2
+        }
+        "###);
+    }
+
+    #[test]
+    fn conv_class_constructor() {
+        let func = conv_class(
+            "class Foo {
+                constructor() {
+                    var x = 1;
+                }
+            }",
+        );
+        insta::assert_debug_snapshot!(func, @r###"
+        @0: {
+            $0 = class
+            exit = class $0 @1..@2
+        }
+        @1: {
+            exit = class constructor FunctionId(1) after @2
+        }
+        @2: {
+            exit = class end after @3
+        }
+        @3: {
+            $1 = undefined
+            exit = return $1
         }
         "###);
     }

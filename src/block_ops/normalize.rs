@@ -284,6 +284,13 @@ fn fold_blocks(
                                 exit: BasicBlockExit::ClassProperty(prop.clone(), prop_end + 1),
                             });
                         }
+                        StructuredClassMember::Constructor(func_id) => {
+                            let after_constructor = out_blocks.len() + 1;
+                            out_blocks.push(BasicBlock {
+                                instructions: vec![],
+                                exit: BasicBlockExit::ClassConstructor(func_id, after_constructor),
+                            });
+                        }
                         StructuredClassMember::StaticBlock(block) => {
                             out_blocks.push(BasicBlock {
                                 instructions: vec![],

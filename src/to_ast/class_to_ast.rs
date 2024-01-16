@@ -4,9 +4,9 @@ use super::{
 };
 use crate::basic_blocks::{ClassPropertyValue, ObjectKey, StructuredClassMember};
 use swc_ecma_ast::{
-    BlockStmt, Class, ClassDecl, ClassMember, ClassMethod, ClassProp, ComputedPropName, Decl, Expr,
-    Function, Ident, MethodKind, PrivateMethod, PrivateName, PrivateProp, PropName, StaticBlock,
-    Stmt,
+    BlockStmt, Class, ClassDecl, ClassMember, ClassMethod, ClassProp, ComputedPropName,
+    Constructor, Decl, Expr, Function, Ident, MethodKind, ParamOrTsParamProp, PrivateMethod,
+    PrivateName, PrivateProp, PropName, StaticBlock, Stmt,
 };
 
 /// Called when we see the CreateClass instruction
@@ -28,7 +28,7 @@ pub fn class_to_ast(
     let mut body: Vec<ClassMember> = Vec::with_capacity(members.len());
 
     for member in members {
-        match member {
+        let member_ast = match member {
             StructuredClassMember::Property(block, prop) => {
                 match prop.value {
                     ClassPropertyValue::Property(value) => {
@@ -89,19 +89,19 @@ pub fn class_to_ast(
                                     expr: Box::new(expr),
                                 });
 
-                                body.push(class_prop(prop_name, value_expr(ctx, false)))
+                                class_prop(prop_name, value_expr(ctx, false))
                             }
                             ObjectKey::KeyValue(key) => {
                                 let prop_name = build_propname_str_or_ident(&key);
 
-                                body.push(class_prop(prop_name, value_expr(ctx, true)))
+                                class_prop(prop_name, value_expr(ctx, true))
                             }
                             ObjectKey::Private(name) => {
                                 let priv_name = build_privatename(name);
 
-                                body.push(class_private_prop(priv_name, value_expr(ctx, true)))
+                                class_private_prop(priv_name, value_expr(ctx, true))
                             }
-                        };
+                        }
                     }
                     ClassPropertyValue::Method(fn_id) => {
                         let function = ctx.module.take_function(fn_id).unwrap();
@@ -144,21 +144,40 @@ pub fn class_to_ast(
                                     expr: Box::new(expr),
                                 });
 
-                                body.push(class_method(prop_name, function));
+                                class_method(prop_name, function)
                             }
                             ObjectKey::KeyValue(key) => {
                                 let prop_name = build_propname_str_or_ident(&key);
 
-                                body.push(class_method(prop_name, function));
+                                class_method(prop_name, function)
                             }
                             ObjectKey::Private(name) => {
                                 let priv_name = build_privatename(name);
 
-                                body.push(private_class_method(priv_name, function));
+                                private_class_method(priv_name, function)
                             }
-                        };
+                        }
                     }
                 }
+            }
+            StructuredClassMember::Constructor(fn_id) => {
+                let function = ctx.module.take_function(*fn_id).unwrap();
+                let function = function_to_ast(ctx, function);
+
+                ClassMember::Constructor(Constructor {
+                    key: PropName::Ident(Ident::new("constructor".into(), Default::default())),
+                    params: function
+                        .params
+                        .into_iter()
+                        .map(|param| ParamOrTsParamProp::Param(param))
+                        .collect(),
+
+                    body: function.body,
+
+                    accessibility: None,
+                    is_optional: false,
+                    span: Default::default(),
+                })
             }
             StructuredClassMember::StaticBlock(stmts) => {
                 let blk = StaticBlock {
@@ -172,9 +191,11 @@ pub fn class_to_ast(
                     },
                 };
 
-                body.push(ClassMember::StaticBlock(blk));
+                ClassMember::StaticBlock(blk)
             }
-        }
+        };
+
+        body.push(member_ast);
     }
 
     let ident = Ident::new(ctx.get_varname_for(varname).into(), Default::default());
