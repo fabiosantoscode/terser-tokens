@@ -1,7 +1,7 @@
 use swc_ecma_ast::{
     AwaitExpr, Decl, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, GetterProp, IfStmt,
     LabeledStmt, Lit, MethodProp, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
-    Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDeclKind, YieldExpr,
+    Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDecl, VarDeclKind, VarDeclOrExpr, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -59,13 +59,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             ctx.wrap_up_block();
         }
         Stmt::Decl(Decl::Var(var)) => {
-            for decl in &var.decls {
-                let init = match decl.init.as_ref() {
-                    Some(init) => expr_to_basic_blocks(ctx, &init.as_ref()),
-                    None => ctx.push_instruction(BasicBlockInstruction::Undefined),
-                };
-                pat_to_basic_blocks(ctx, PatType::VarDecl, &decl.name, init);
-            }
+            var_decl_to_basic_blocks(ctx, var);
         }
         Stmt::Decl(Decl::Fn(_)) => {
             unreachable!("function declarations should be handled by block_to_basic_blocks")
@@ -74,8 +68,6 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             class_to_basic_blocks(ctx, class.class.as_ref(), Some(class.ident.sym.to_string()))
                 .expect("error in class_to_basic_blocks");
         }
-        Stmt::DoWhile(_) => todo!(),
-        Stmt::For(_) => todo!(),
         // https://262.ecma-international.org/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
         Stmt::ForOf(ForOfStmt {
             left, right, body, ..
@@ -144,6 +136,117 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 BasicBlockExit::Continue(blockidx_bind_start),
             );
         }
+        Stmt::For(for_loop) => {
+            // -1: $init
+            // 0: Loop(1, 4)
+            // 1: Cond($test, 2, 4)
+            // 2:   then: $body, $update
+            // 3:         Continue(1)
+            // 4:   else: Break(5)
+            // 5: (outside now)
+
+            match &for_loop.init {
+                Some(VarDeclOrExpr::VarDecl(decl)) => {
+                    var_decl_to_basic_blocks(ctx, decl);
+                }
+                Some(VarDeclOrExpr::Expr(expr)) => {
+                    expr_to_basic_blocks(ctx, &expr);
+                }
+                None => {}
+            };
+
+            let blockidx_loop = ctx.wrap_up_block(); // '0 Loop(1..4)
+
+            ctx.enter_conditional_branch();
+
+            let blockidx_cond = ctx.wrap_up_block(); // '1 Cond(2..3, 4..4)
+
+            let test = if let Some(test) = &for_loop.test {
+                expr_to_basic_blocks(ctx, test)
+            } else {
+                ctx.push_instruction(BasicBlockInstruction::LitBool(true))
+            };
+
+            let blockidx_body_start = ctx.wrap_up_block(); // '2 $body, $update
+
+            stat_to_basic_blocks(ctx, &for_loop.body);
+            if let Some(update) = &for_loop.update {
+                expr_to_basic_blocks(ctx, update);
+            }
+
+            let blockidx_loop_back = ctx.wrap_up_block(); // '3
+
+            let blockidx_cond_else = ctx.wrap_up_block(); // '4
+
+            let blockidx_outside = ctx.wrap_up_block(); // '5
+
+            ctx.leave_conditional_branch(); // insert phi nodes in '5
+
+            ctx.set_exit(
+                blockidx_loop,
+                BasicBlockExit::Loop(blockidx_cond, blockidx_cond_else),
+            );
+            ctx.set_exit(
+                blockidx_cond,
+                BasicBlockExit::Cond(
+                    test,
+                    blockidx_body_start,
+                    blockidx_loop_back,
+                    blockidx_cond_else,
+                    blockidx_cond_else,
+                ),
+            );
+            ctx.set_exit(blockidx_loop_back, BasicBlockExit::Continue(blockidx_cond));
+            ctx.set_exit(blockidx_cond_else, BasicBlockExit::Break(blockidx_outside));
+        }
+        Stmt::DoWhile(dowhil) => {
+            // Loop(1, 4)
+            // 1: $body
+            // 2: Cond($test, 3, 4)
+            // 3:   then: Continue(1)
+            // 4:   else: Break(5)
+            // 5: (outside now)
+
+            let blockidx_loop = ctx.wrap_up_block(); // '0 Loop(1..4)
+
+            let blockidx_body_start = ctx.wrap_up_block(); // '1 $body
+
+            stat_to_basic_blocks(ctx, &dowhil.body);
+
+            ctx.enter_conditional_branch();
+
+            let blockidx_cond = ctx.wrap_up_block(); // '2 Cond(3..3, 4..4)
+
+            let test = expr_to_basic_blocks(ctx, &dowhil.test);
+
+            let blockidx_loop_back = ctx.wrap_up_block(); // '3
+
+            let blockidx_cond_else = ctx.wrap_up_block(); // '4
+
+            let blockidx_outside = ctx.wrap_up_block(); // '5
+
+            ctx.leave_conditional_branch(); // insert phi nodes in '5
+
+            ctx.set_exit(
+                blockidx_loop,
+                BasicBlockExit::Loop(blockidx_body_start, blockidx_cond_else),
+            );
+            ctx.set_exit(
+                blockidx_cond,
+                BasicBlockExit::Cond(
+                    test,
+                    blockidx_loop_back,
+                    blockidx_loop_back,
+                    blockidx_cond_else,
+                    blockidx_cond_else,
+                ),
+            );
+            ctx.set_exit(
+                blockidx_loop_back,
+                BasicBlockExit::Continue(blockidx_body_start),
+            );
+            ctx.set_exit(blockidx_cond_else, BasicBlockExit::Break(blockidx_outside));
+        }
         Stmt::While(whil) => {
             // Loop(1, 4)
             // 1: Cond($test, 2, 4)
@@ -164,7 +267,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
             stat_to_basic_blocks(ctx, &whil.body);
 
-            let loop_back = ctx.wrap_up_block(); // '3
+            let blockidx_loop_back = ctx.wrap_up_block(); // '3
 
             let blockidx_cond_else = ctx.wrap_up_block(); // '4
 
@@ -181,12 +284,12 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 BasicBlockExit::Cond(
                     test,
                     blockidx_body_start,
-                    loop_back,
+                    blockidx_loop_back,
                     blockidx_cond_else,
                     blockidx_cond_else,
                 ),
             );
-            ctx.set_exit(loop_back, BasicBlockExit::Continue(blockidx_cond));
+            ctx.set_exit(blockidx_loop_back, BasicBlockExit::Continue(blockidx_cond));
             ctx.set_exit(blockidx_cond_else, BasicBlockExit::Break(blockidx_outside));
         }
         Stmt::If(IfStmt {
@@ -322,6 +425,16 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         Stmt::Decl(
             Decl::TsInterface(_) | Decl::TsTypeAlias(_) | Decl::TsEnum(_) | Decl::TsModule(_),
         ) => unreachable!("typescript features"),
+    }
+}
+
+fn var_decl_to_basic_blocks(ctx: &mut FromAstCtx, var: &VarDecl) {
+    for decl in &var.decls {
+        let init = match decl.init.as_ref() {
+            Some(init) => expr_to_basic_blocks(ctx, &init.as_ref()),
+            None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+        };
+        pat_to_basic_blocks(ctx, PatType::VarDecl, &decl.name, init);
     }
 }
 
@@ -1170,6 +1283,79 @@ mod tests {
             $16 = either($0, $1, $15)
             $17 = $16
             exit = return $17
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_dw_loop() {
+        let s = test_basic_blocks(
+            r###"do {
+                123;
+            } while (456);"###,
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            exit = loop @1..@3
+        }
+        @1: {
+            $0 = 123
+            $1 = 456
+            exit = cond $1 ? @2..@2 : @3..@3
+        }
+        @2: {
+            exit = continue @1
+        }
+        @3: {
+            exit = break @4
+        }
+        @4: {
+            $2 = undefined
+            exit = return $2
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_for_loop() {
+        let s = test_basic_blocks(
+            r###"
+            for (var i = 123; i < 456; i = i + 1) {
+                789;
+            }
+            "###,
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 123
+            exit = loop @1..@4
+        }
+        @1: {
+            $1 = either($0, $10)
+            $2 = $1
+            $3 = 456
+            $4 = $2 < $3
+            exit = cond $4 ? @2..@2 : @3..@3
+        }
+        @2: {
+            $5 = 789
+            $6 = $1
+            $7 = 1
+            $8 = $6 + $7
+            $9 = $8
+            exit = continue @1
+        }
+        @3: {
+            exit = break @5
+        }
+        @4: {
+            $10 = either($0, $1, $8)
+            exit = jump @5
+        }
+        @5: {
+            $11 = either($0, $1, $10)
+            $12 = undefined
+            exit = return $12
         }
         "###);
     }
