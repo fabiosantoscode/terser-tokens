@@ -30,6 +30,7 @@ pub enum BasicBlockInstruction {
     Object(Option<usize>, Vec<ObjectProp>),
     /// maybe_extends
     CreateClass(Option<usize>),
+    Super,
     ArrayPattern(usize, Vec<ArrayPatternPiece>),
     ObjectPattern(usize, Vec<ObjectPatternPiece>),
     /// pattern, index
@@ -167,6 +168,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::CreateClass(maybe_extends) => {
                 maybe_extends.iter().cloned().collect()
             }
+            BasicBlockInstruction::Super => vec![],
             BasicBlockInstruction::ArrayPattern(input, _) => vec![*input],
             BasicBlockInstruction::ObjectPattern(input, _) => vec![*input],
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
@@ -228,6 +230,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::CreateClass(optional_extends) => {
                 optional_extends.iter_mut().collect()
             }
+            BasicBlockInstruction::Super => vec![],
             BasicBlockInstruction::ArrayPattern(input, _) => vec![input],
             BasicBlockInstruction::ObjectPattern(input, _) => vec![input],
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],

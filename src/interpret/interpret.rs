@@ -150,6 +150,7 @@ pub fn interpret(
                 }
             }
         }
+        BasicBlockInstruction::Super => None?, // TODO: grab from context?
         BasicBlockInstruction::CreateClass(_) => JsType::Any, // TODO: class type
         BasicBlockInstruction::ArrayPattern(from_arr, pieces) => {
             let from_arr = ctx.get_variable(*from_arr)?.as_array()?;

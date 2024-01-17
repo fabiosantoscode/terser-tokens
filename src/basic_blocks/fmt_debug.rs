@@ -117,6 +117,9 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
+            BasicBlockInstruction::Super => {
+                write!(f, "super")
+            }
             BasicBlockInstruction::CreateClass(optional_extends) => {
                 write!(
                     f,

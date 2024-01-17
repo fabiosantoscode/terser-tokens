@@ -60,11 +60,15 @@ fn run_code_for_logs(scope: &mut v8::HandleScope<'_, ()>, s: &str) -> Option<Str
                     s == null ? String(s) :
                     JSON.stringify(s);
 
-                (async function () {{
+                ;(async function () {{
                     {s}
-                }})().then(result => {{
-                    globalThis.RESULT = __str(result);
-                }});
+                }})()
+                    .then(result => {{
+                        globalThis.RESULT = __str(result);
+                    }})
+                    .catch(error => {{
+                        globalThis.RESULT = error ? error.message : __str(error);
+                    }});
             "###
         );
 

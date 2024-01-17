@@ -2,7 +2,7 @@ use swc_ecma_ast::{
     AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
     Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp, Lit, Module,
     ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, ReturnStmt,
-    SpreadElement, Stmt, Str, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp,
+    SpreadElement, Stmt, Str, Super, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp,
     WhileStmt, YieldExpr,
 };
 
@@ -391,6 +391,12 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 }))
                 .collect::<Vec<PropOrSpread>>(),
         }),
+        BasicBlockInstruction::Super => {
+            // Cannot appear on its own, but an optimizer may lead us here.
+            Expr::Lit(Lit::Null(Null {
+                span: Default::default(),
+            }))
+        }
         BasicBlockInstruction::ArrayPattern(_, _) => unreachable!(),
         BasicBlockInstruction::ObjectPattern(_, _) => unreachable!(),
         BasicBlockInstruction::PatternUnpack(pat_var, idx) => {
@@ -402,6 +408,15 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             function_expr_to_ast(ctx, func)
         }
         BasicBlockInstruction::Call(func_idx, args) => {
+            let callee = match ctx.peek_inlined_expression(*func_idx) {
+                Some(BasicBlockInstruction::Super) => {
+                    // Super call!
+                    Callee::Super(Super {
+                        span: Default::default(),
+                    })
+                }
+                _ => Callee::Expr(Box::new(ref_or_inlined_expr(ctx, *func_idx))),
+            };
             let args = args
                 .iter()
                 .map(|arg| ExprOrSpread::from(ref_or_inlined_expr(ctx, *arg)))
@@ -409,7 +424,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
 
             Expr::Call(CallExpr {
                 span: Default::default(),
-                callee: Callee::Expr(Box::new(ref_or_inlined_expr(ctx, *func_idx))),
+                callee,
                 args,
                 type_args: None,
             })

@@ -199,6 +199,10 @@ impl<'a> ToAstContext<'a> {
         self.inlined_variables.remove(&var_idx)
     }
 
+    pub fn peek_inlined_expression(&mut self, var_idx: usize) -> Option<&BasicBlockInstruction> {
+        self.inlined_variables.get(&var_idx)
+    }
+
     pub fn variable_has_uses(&self, variable: usize) -> bool {
         self.variable_use_count.get(&variable).unwrap_or(&0) > &0
     }

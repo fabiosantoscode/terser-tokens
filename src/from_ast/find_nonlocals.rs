@@ -2,7 +2,7 @@ use swc_ecma_ast::{
     AwaitExpr, Callee, Class, ClassMember, CondExpr, Decl, DoWhileStmt, Expr, ExprOrSpread,
     ForHead, ForInStmt, ForOfStmt, ForStmt, GetterProp, IfStmt, MemberProp, MethodProp, Module,
     ModuleItem, ObjectLit, ObjectPatProp, Pat, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
-    Stmt, VarDecl, VarDeclKind, VarDeclOrExpr, WhileStmt, YieldExpr,
+    Stmt, SuperProp, VarDecl, VarDeclKind, VarDeclOrExpr, WhileStmt, YieldExpr,
 };
 
 use crate::scope::{ScopeTree, ScopeTreeHandle};
@@ -443,11 +443,14 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
                 expr_nonlocals(ctx, &computed_prop.expr)
             }
         }
-        Expr::SuperProp(_) => todo!(),
+        Expr::SuperProp(sp) => match &sp.prop {
+            SuperProp::Ident(ident) => ctx.use_name(ident.sym.to_string()),
+            SuperProp::Computed(expr) => expr_nonlocals(ctx, &expr.expr),
+        },
         Expr::Call(call) => {
             match call.callee {
                 Callee::Expr(ref expr) => expr_nonlocals(ctx, expr),
-                _ => todo!("non-expr callees (super, import)"),
+                Callee::Super(_) | Callee::Import(_) => {}
             };
 
             for arg in &call.args {

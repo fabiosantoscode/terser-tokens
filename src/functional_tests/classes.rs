@@ -102,3 +102,18 @@ fn class_constructor() {
     );
     insta::assert_display_snapshot!(res, @"2");
 }
+
+#[test]
+fn class_super() {
+    let res = run_checks(
+        "class Base {
+            get1() { return 1; }
+        }
+
+        class X extends Base {
+            get2() { return super.get1() + 1; }
+        }
+        return new X().get2()",
+    );
+    insta::assert_display_snapshot!(res, @"2");
+}

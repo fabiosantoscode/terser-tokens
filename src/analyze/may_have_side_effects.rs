@@ -29,6 +29,8 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Object(_, props) => {
                 props.iter().any(|p| matches!(p, ObjectProp::Spread(_)))
             }
+            // Moving super around is dangerous but it doesn't have side effects itself
+            BasicBlockInstruction::Super => false,
             // extending things like "1" or "undefined" can throw
             BasicBlockInstruction::CreateClass(extends) => extends.is_some(),
             // may throw due to unspreadable array items

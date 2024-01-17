@@ -6,7 +6,7 @@ use swc_ecma_ast::{
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, IncrDecr,
-    ObjectProp, TempExitType, LHS,
+    ObjectKey, ObjectProp, TempExitType, LHS,
 };
 
 use super::{
@@ -521,7 +521,22 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
 
             return ctx.push_instruction(BasicBlockInstruction::Read(lhs));
         }
-        Expr::SuperProp(_) => todo!(),
+        Expr::SuperProp(sp) => {
+            let sup = ctx.push_instruction(BasicBlockInstruction::Super);
+
+            let lhs = match &sp.prop {
+                swc_ecma_ast::SuperProp::Ident(ident) => {
+                    let prop = ident.sym.to_string();
+                    LHS::Member(Box::new(LHS::Local(sup)), ObjectKey::KeyValue(prop))
+                }
+                swc_ecma_ast::SuperProp::Computed(computed) => {
+                    let expr = expr_to_basic_blocks(ctx, &computed.expr);
+                    LHS::Member(Box::new(LHS::Local(expr)), ObjectKey::Computed(expr))
+                }
+            };
+
+            return ctx.push_instruction(BasicBlockInstruction::Read(lhs));
+        }
         Expr::Arrow(arrow_expr) => {
             let (varname, _fn_id) =
                 function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
@@ -537,7 +552,13 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         }
         Expr::Call(call) => {
             // TODO non-expr callees (super, import)
-            let callee = expr_to_basic_blocks(ctx, &call.callee.clone().expect_expr());
+            let callee = match &call.callee {
+                swc_ecma_ast::Callee::Super(_) => {
+                    ctx.push_instruction(BasicBlockInstruction::Super)
+                }
+                swc_ecma_ast::Callee::Import(imp) => todo!("import()"),
+                swc_ecma_ast::Callee::Expr(expr) => expr_to_basic_blocks(ctx, &expr),
+            };
 
             let mut args = Vec::with_capacity(call.args.len());
             for arg in &call.args {
