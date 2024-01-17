@@ -1,8 +1,8 @@
-use swc_ecma_ast::{Class, ClassMember, PropName, StaticBlock};
+use swc_ecma_ast::{Class, ClassMember, StaticBlock};
 
 use super::{
-    block_to_basic_blocks, expr_to_basic_blocks, function_to_basic_blocks,
-    object_propname_to_string, FromAstCtx, FunctionLike,
+    block_to_basic_blocks, convert_object_propname, expr_to_basic_blocks, function_to_basic_blocks,
+    FromAstCtx, FunctionLike,
 };
 use crate::basic_blocks::{
     BasicBlockExit, BasicBlockInstruction, ClassProperty, MethodKind, ObjectKey, ObjectValue,
@@ -38,13 +38,7 @@ pub fn class_to_basic_blocks(
                     ClassMember::ClassProp(class_prop) => {
                         ctx.wrap_up_block();
 
-                        let key = match &class_prop.key {
-                            PropName::Computed(computed) => {
-                                let expr = expr_to_basic_blocks(ctx, &*&computed.expr);
-                                ObjectKey::Computed(expr)
-                            }
-                            p_name => ObjectKey::NormalKey(object_propname_to_string(p_name)),
-                        };
+                        let key = convert_object_propname(ctx, &class_prop.key);
 
                         let value = match &class_prop.value {
                             Some(value) => expr_to_basic_blocks(ctx, &*value),
@@ -114,13 +108,7 @@ pub fn class_to_basic_blocks(
                     ClassMember::Method(method) => {
                         ctx.wrap_up_block();
 
-                        let key = match &method.key {
-                            PropName::Computed(computed) => {
-                                let expr = expr_to_basic_blocks(ctx, &*&computed.expr);
-                                ObjectKey::Computed(expr)
-                            }
-                            p_name => ObjectKey::NormalKey(object_propname_to_string(p_name)),
-                        };
+                        let key = convert_object_propname(ctx, &method.key);
 
                         let (_fn_varname, fn_id) = function_to_basic_blocks(
                             ctx,

@@ -53,3 +53,15 @@ fn object_patterns() {
 
 // TODO this should log 1 2 3 4
 // var {a: {[log(3)]: a} = (log(2), {}), [log(4)]: b, x } = {x: log(1)};
+
+#[test]
+fn object_getset() {
+    let res = run_checks(
+        "let o = {
+            get a() { return 1; },
+            set b(v) { this._a = v + 1 },
+        };
+        return [o.a, o.b = 2, o._a];",
+    );
+    insta::assert_display_snapshot!(res, @"[1, 2, 3]");
+}

@@ -1,4 +1,4 @@
-use swc_ecma_ast::{ArrowExpr, ClassMethod, FnDecl, FnExpr, Pat, PrivateMethod};
+use swc_ecma_ast::{ArrowExpr, ClassMethod, FnDecl, FnExpr, MethodProp, Pat, PrivateMethod};
 
 use super::{
     block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
@@ -49,7 +49,10 @@ pub fn function_to_basic_blocks(
         }
         FunctionLike::ClassMethod(_)
         | FunctionLike::PrivateMethod(_)
-        | FunctionLike::ClassConstructor(_) => {
+        | FunctionLike::ClassConstructor(_)
+        | FunctionLike::ObjectMethod(_)
+        | FunctionLike::ObjectGetter(_)
+        | FunctionLike::ObjectSetter(_) => {
             let outer_varname = usize::MAX; // unused
 
             (outer_varname, None)
@@ -65,10 +68,13 @@ pub fn function_to_basic_blocks(
             assert!(!is_generator);
             BasicBlockEnvironment::Function(*is_generator, *is_async)
         }
-        FunctionLike::ClassConstructor(_) => BasicBlockEnvironment::Function(false, false),
+        FunctionLike::ClassConstructor(_)
+        | FunctionLike::ObjectGetter(_)
+        | FunctionLike::ObjectSetter(_) => BasicBlockEnvironment::Function(false, false),
         FunctionLike::FnDecl(FnDecl { function, .. })
         | FunctionLike::FnExpr(FnExpr { function, .. })
         | FunctionLike::ClassMethod(ClassMethod { function, .. })
+        | FunctionLike::ObjectMethod(MethodProp { function, .. })
         | FunctionLike::PrivateMethod(PrivateMethod { function, .. }) => {
             BasicBlockEnvironment::Function(function.is_generator, function.is_async)
         }

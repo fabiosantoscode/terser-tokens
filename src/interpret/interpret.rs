@@ -147,7 +147,7 @@ pub fn interpret(
                                     ctx.get_variable(*prop)?
                                 }
                                 crate::basic_blocks::ObjectValue::Method(_, _) => {
-                                    todo!()
+                                    return Some(JsCompletion::Normal(JsType::Object))
                                 }
                             };
 

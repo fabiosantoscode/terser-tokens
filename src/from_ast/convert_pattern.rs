@@ -95,7 +95,7 @@ pub fn pat_to_basic_blocks(
                             let key = expr_to_basic_blocks(ctx, computed.expr.as_ref());
                             ObjectPatternPiece::TakeComputedKey(key)
                         }
-                        _ => ObjectPatternPiece::TakeKey(object_propname_to_string(&kv.key)),
+                        _ => ObjectPatternPiece::TakeKey(get_propname_normal_key(&kv.key)),
                     },
                     ObjectPatProp::Assign(a) => ObjectPatternPiece::TakeKey(a.key.sym.to_string()),
                     ObjectPatProp::Rest(_r) => ObjectPatternPiece::Spread,
@@ -207,7 +207,7 @@ fn ident_pat(ctx: &mut FromAstCtx, pat_type: PatType, name: &str, input: usize) 
     }
 }
 
-pub fn object_propname_to_string(propname: &PropName) -> String {
+pub fn get_propname_normal_key(propname: &PropName) -> String {
     match propname {
         PropName::Ident(ref ident) => ident.sym.to_string(),
         PropName::BigInt(big_int) => big_int.value.to_string(),
@@ -218,6 +218,16 @@ pub fn object_propname_to_string(propname: &PropName) -> String {
             printed.to_string()
         }
         PropName::Computed(_) => unreachable!("handled by the caller"),
+    }
+}
+
+pub fn convert_object_propname(ctx: &mut FromAstCtx, propname: &PropName) -> ObjectKey {
+    match propname {
+        PropName::Computed(comp) => {
+            let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());
+            ObjectKey::Computed(comp)
+        }
+        other => ObjectKey::NormalKey(get_propname_normal_key(other)),
     }
 }
 

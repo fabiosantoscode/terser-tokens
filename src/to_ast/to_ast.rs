@@ -9,7 +9,7 @@ use swc_ecma_ast::{
 use crate::{
     basic_blocks::{
         identifier_needs_quotes, ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType,
-        ForInOfKind, IncrDecr, ObjectProperty, StructuredFlow, TempExitType, LHS,
+        ForInOfKind, IncrDecr, MethodKind, ObjectProperty, StructuredFlow, TempExitType, LHS,
     },
     to_ast::{
         build_block, build_empty_var_decl, build_multivar_decl, build_var_assign, build_var_decl,
@@ -18,8 +18,8 @@ use crate::{
 
 use super::{
     build_binding_identifier, build_identifier, build_identifier_str, class_to_ast,
-    class_to_ast_prepare, function_expr_to_ast, lhs_to_ast_expr, pattern_to_statement,
-    ToAstContext,
+    class_to_ast_prepare, function_expr_to_ast, function_to_ast, lhs_to_ast_expr,
+    pattern_to_statement, ToAstContext,
 };
 
 pub fn module_to_ast(mut block_module: BasicBlockModule) -> Module {
@@ -390,19 +390,45 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                             }
                         };
 
-                        let value = match obj_val {
+                        PropOrSpread::Prop(Box::new(match obj_val {
                             crate::basic_blocks::ObjectValue::Property(prop) => {
-                                ref_or_inlined_expr(ctx, *prop)
+                                Prop::KeyValue(KeyValueProp {
+                                    key,
+                                    value: Box::new(ref_or_inlined_expr(ctx, *prop)),
+                                })
                             }
-                            crate::basic_blocks::ObjectValue::Method(_, _) => {
-                                todo!("object methods")
-                            }
-                        };
+                            crate::basic_blocks::ObjectValue::Method(kind, fn_id) => {
+                                let function = ctx.module.take_function(*fn_id).unwrap();
+                                let function = function_to_ast(ctx, function);
 
-                        PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
-                            key,
-                            value: Box::new(value),
-                        })))
+                                match kind {
+                                    MethodKind::Method => {
+                                        swc_ecma_ast::Prop::Method(swc_ecma_ast::MethodProp {
+                                            key,
+                                            function: Box::new(function),
+                                        })
+                                    }
+                                    MethodKind::Getter => {
+                                        swc_ecma_ast::Prop::Getter(swc_ecma_ast::GetterProp {
+                                            span: Default::default(),
+                                            key,
+                                            type_ann: None,
+                                            body: function.body,
+                                        })
+                                    }
+                                    MethodKind::Setter => {
+                                        swc_ecma_ast::Prop::Setter(swc_ecma_ast::SetterProp {
+                                            span: Default::default(),
+                                            key,
+                                            param: Box::new(
+                                                function.params.into_iter().next().unwrap().pat,
+                                            ),
+                                            body: function.body,
+                                        })
+                                    }
+                                }
+                            }
+                        }))
                     }
                 }))
                 .collect::<Vec<PropOrSpread>>(),

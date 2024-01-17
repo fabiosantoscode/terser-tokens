@@ -6,13 +6,13 @@ use swc_ecma_ast::{
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, IncrDecr,
-    ObjectKey, ObjectProperty, ObjectValue, TempExitType, LHS,
+    MethodKind, ObjectKey, ObjectProperty, ObjectValue, TempExitType, LHS,
 };
 
 use super::{
-    block_to_basic_blocks, class_to_basic_blocks, function_to_basic_blocks,
-    object_propname_to_string, pat_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx, FunctionLike,
-    NestedIntoStatement, PatType,
+    block_to_basic_blocks, class_to_basic_blocks, convert_object_propname,
+    function_to_basic_blocks, get_propname_normal_key, pat_to_basic_blocks, to_basic_blocks_lhs,
+    FromAstCtx, FunctionLike, NestedIntoStatement, PatType,
 };
 
 /// Turn a statement into basic blocks.
@@ -318,9 +318,10 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         Stmt::Empty(_) => {
             ctx.wrap_up_block();
         }
-        _ => {
-            todo!("statements_to_ssa: stat_to_ssa: {:?} not implemented", stat)
-        }
+        Stmt::Decl(Decl::Using(_)) => unreachable!("using decl"),
+        Stmt::Decl(
+            Decl::TsInterface(_) | Decl::TsTypeAlias(_) | Decl::TsEnum(_) | Decl::TsModule(_),
+        ) => unreachable!("typescript features"),
     }
 }
 
@@ -462,7 +463,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                                 ObjectValue::Property(expr_to_basic_blocks(ctx, &kv.value)),
                             )),
                             _ => {
-                                let prop_name = object_propname_to_string(&kv.key);
+                                let prop_name = get_propname_normal_key(&kv.key);
                                 if &prop_name == "__proto__" {
                                     proto = Some(expr_to_basic_blocks(ctx, &kv.value));
                                 } else {
@@ -473,9 +474,31 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                                 }
                             }
                         },
-                        Prop::Getter(GetterProp { key: _, .. }) => todo!(),
-                        Prop::Setter(SetterProp { key: _, .. }) => todo!(),
-                        Prop::Method(MethodProp { key: _, .. }) => todo!(),
+                        Prop::Getter(GetterProp { key, .. })
+                        | Prop::Setter(SetterProp { key, .. })
+                        | Prop::Method(MethodProp { key, .. }) => {
+                            let key = convert_object_propname(ctx, key);
+                            let (method_kind, func) = match prop.as_ref() {
+                                Prop::Getter(getter) => {
+                                    (MethodKind::Getter, FunctionLike::ObjectGetter(&getter))
+                                }
+                                Prop::Setter(setter) => {
+                                    (MethodKind::Setter, FunctionLike::ObjectSetter(&setter))
+                                }
+                                Prop::Method(meth) => {
+                                    (MethodKind::Method, FunctionLike::ObjectMethod(&meth))
+                                }
+                                _ => unreachable!(),
+                            };
+
+                            let (_varname, fn_id) = function_to_basic_blocks(ctx, func, None)
+                                .expect("todo error handling");
+
+                            kvs.push(ObjectProperty::KeyValue(
+                                key,
+                                ObjectValue::Method(method_kind, fn_id),
+                            ));
+                        }
                         Prop::Assign(_) => unreachable!(),
                     },
                 }
