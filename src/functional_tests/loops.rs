@@ -31,6 +31,34 @@ fn nested_labelled_break_loop() {
 }
 
 #[test]
+fn do_while_loop() {
+    let res = run_checks(
+        r###"
+        var items = [];
+        do {
+            items.push(items.length);
+        } while (items.length < 3);
+        return items;
+        "###,
+    );
+    insta::assert_display_snapshot!(res, @"[0, 1, 2]");
+}
+
+#[test]
+fn for_loop() {
+    let res = run_checks(
+        r###"
+        var items = [];
+        for (var x = 1; x < 4; x = x + 1) {
+            items.push(x);
+        }
+        return [items, x];
+        "###,
+    );
+    insta::assert_display_snapshot!(res, @"[[1, 2, 3], 4]");
+}
+
+#[test]
 fn functional_for_in_loop() {
     let res = run_checks(
         r###"
