@@ -1,7 +1,8 @@
 use swc_ecma_ast::{Class, ClassMember, PropName, StaticBlock};
 
 use super::{
-    block_to_basic_blocks, expr_to_basic_blocks, function_to_basic_blocks, FromAstCtx, FunctionLike,
+    block_to_basic_blocks, expr_to_basic_blocks, function_to_basic_blocks,
+    object_propname_to_string, FromAstCtx, FunctionLike,
 };
 use crate::basic_blocks::{
     BasicBlockExit, BasicBlockInstruction, ClassProperty, ClassPropertyValue, ObjectKey,
@@ -33,17 +34,16 @@ pub fn class_to_basic_blocks(
         _ => {
             for member in &class.body {
                 match member {
-                    ClassMember::Empty(_) => todo!("some members don't create"),
+                    ClassMember::Empty(_) => continue,
                     ClassMember::ClassProp(class_prop) => {
                         ctx.wrap_up_block();
 
                         let key = match &class_prop.key {
-                            PropName::Ident(ident) => ObjectKey::KeyValue(ident.sym.to_string()),
                             PropName::Computed(computed) => {
                                 let expr = expr_to_basic_blocks(ctx, &*&computed.expr);
                                 ObjectKey::Computed(expr)
                             }
-                            memb => todo!("class member {:?}", memb),
+                            p_name => ObjectKey::KeyValue(object_propname_to_string(p_name)),
                         };
 
                         let value = match &class_prop.value {
@@ -117,12 +117,11 @@ pub fn class_to_basic_blocks(
                         ctx.wrap_up_block();
 
                         let key = match &method.key {
-                            PropName::Ident(ident) => ObjectKey::KeyValue(ident.sym.to_string()),
                             PropName::Computed(computed) => {
                                 let expr = expr_to_basic_blocks(ctx, &*&computed.expr);
                                 ObjectKey::Computed(expr)
                             }
-                            memb => todo!("class member {:?}", memb),
+                            p_name => ObjectKey::KeyValue(object_propname_to_string(p_name)),
                         };
 
                         let (_fn_varname, fn_id) = function_to_basic_blocks(
@@ -259,12 +258,13 @@ mod tests {
                 static prop2 = 2;
                 ['prop3'] = 3;
                 static ['prop4'] = 4;
+                123 = 5;
             }",
         );
         insta::assert_debug_snapshot!(func, @r###"
         @0: {
             $0 = class
-            exit = class $0 @1..@9
+            exit = class $0 @1..@11
         }
         @1: {
             $1 = 1
@@ -297,11 +297,18 @@ mod tests {
             exit = class property ClassProperty { is_static: true, is_private: false, key: [$5], value: Property(6) } after @9
         }
         @9: {
-            exit = class end after @10
+            $7 = 5
+            exit = jump @10
         }
         @10: {
-            $7 = undefined
-            exit = return $7
+            exit = class property ClassProperty { is_static: false, is_private: false, key: .123, value: Property(7) } after @11
+        }
+        @11: {
+            exit = class end after @12
+        }
+        @12: {
+            $8 = undefined
+            exit = return $8
         }
         "###);
     }
