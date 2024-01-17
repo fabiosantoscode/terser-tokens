@@ -103,7 +103,7 @@ pub fn class_to_ast(
                             }
                         }
                     }
-                    ClassPropertyValue::Method(fn_id) => {
+                    ClassPropertyValue::Method(kind, fn_id) => {
                         let function = ctx.module.take_function(fn_id).unwrap();
                         let function = function_to_ast(ctx, function);
 
@@ -111,7 +111,7 @@ pub fn class_to_ast(
                             ClassMember::Method(ClassMethod {
                                 key,
                                 function: Box::new(function),
-                                kind: MethodKind::Method,
+                                kind: kind.into(),
 
                                 is_static: prop.is_static,
                                 is_abstract: false,
@@ -125,7 +125,7 @@ pub fn class_to_ast(
                             ClassMember::PrivateMethod(PrivateMethod {
                                 key,
                                 function: Box::new(function),
-                                kind: MethodKind::Method,
+                                kind: kind.into(),
 
                                 is_static: prop.is_static,
                                 is_abstract: false,

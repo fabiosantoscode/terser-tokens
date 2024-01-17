@@ -129,10 +129,36 @@ pub struct ClassProperty {
     pub value: ClassPropertyValue,
 }
 
+#[derive(Clone, Debug, PartialEq, Copy)]
+pub enum MethodKind {
+    Method,
+    Getter,
+    Setter,
+}
+
+impl From<swc_ecma_ast::MethodKind> for MethodKind {
+    fn from(kind: swc_ecma_ast::MethodKind) -> Self {
+        match kind {
+            swc_ecma_ast::MethodKind::Method => MethodKind::Method,
+            swc_ecma_ast::MethodKind::Getter => MethodKind::Getter,
+            swc_ecma_ast::MethodKind::Setter => MethodKind::Setter,
+        }
+    }
+}
+impl Into<swc_ecma_ast::MethodKind> for MethodKind {
+    fn into(self) -> swc_ecma_ast::MethodKind {
+        match self {
+            MethodKind::Method => swc_ecma_ast::MethodKind::Method,
+            MethodKind::Getter => swc_ecma_ast::MethodKind::Getter,
+            MethodKind::Setter => swc_ecma_ast::MethodKind::Setter,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClassPropertyValue {
     Property(usize),
-    Method(FunctionId),
+    Method(MethodKind, FunctionId),
 }
 
 impl ClassProperty {
@@ -144,7 +170,7 @@ impl ClassProperty {
         };
         let value = match &self.value {
             ClassPropertyValue::Property(var) => vec![*var],
-            ClassPropertyValue::Method(_fn) => vec![],
+            ClassPropertyValue::Method(kind, _fn) => vec![],
         };
 
         key.into_iter().chain(value.into_iter()).collect()
@@ -158,7 +184,7 @@ impl ClassProperty {
         };
         let value = match &mut self.value {
             ClassPropertyValue::Property(var) => vec![var],
-            ClassPropertyValue::Method(_fn) => vec![],
+            ClassPropertyValue::Method(kind, _fn) => vec![],
         };
 
         key.into_iter().chain(value.into_iter()).collect()

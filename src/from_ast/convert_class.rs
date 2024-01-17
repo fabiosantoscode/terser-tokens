@@ -5,7 +5,7 @@ use super::{
     object_propname_to_string, FromAstCtx, FunctionLike,
 };
 use crate::basic_blocks::{
-    BasicBlockExit, BasicBlockInstruction, ClassProperty, ClassPropertyValue, ObjectKey,
+    BasicBlockExit, BasicBlockInstruction, ClassProperty, ClassPropertyValue, MethodKind, ObjectKey,
 };
 
 /// Convert a class to basic blocks.
@@ -142,7 +142,10 @@ pub fn class_to_basic_blocks(
                                     is_static: method.is_static,
                                     is_private: false,
                                     key,
-                                    value: ClassPropertyValue::Method(fn_id),
+                                    value: ClassPropertyValue::Method(
+                                        MethodKind::from(method.kind),
+                                        fn_id,
+                                    ),
                                 },
                                 after,
                             ),
@@ -171,7 +174,10 @@ pub fn class_to_basic_blocks(
                                     is_static: method.is_static,
                                     is_private: true,
                                     key,
-                                    value: ClassPropertyValue::Method(fn_id),
+                                    value: ClassPropertyValue::Method(
+                                        MethodKind::from(method.kind),
+                                        fn_id,
+                                    ),
                                 },
                                 after,
                             ),
@@ -365,6 +371,41 @@ mod tests {
             exit = class end after @3
         }
         @3: {
+            $1 = undefined
+            exit = return $1
+        }
+        "###);
+    }
+
+    #[test]
+    fn conv_class_getset() {
+        let func = conv_class(
+            "class Foo {
+                get prop() { return 1; }
+                set prop(x) { }
+            }",
+        );
+        insta::assert_debug_snapshot!(func, @r###"
+        @0: {
+            $0 = class
+            exit = class $0 @1..@5
+        }
+        @1: {
+            exit = jump @2
+        }
+        @2: {
+            exit = class property ClassProperty { is_static: false, is_private: false, key: .prop, value: Method(Getter, FunctionId(1)) } after @3
+        }
+        @3: {
+            exit = jump @4
+        }
+        @4: {
+            exit = class property ClassProperty { is_static: false, is_private: false, key: .prop, value: Method(Setter, FunctionId(2)) } after @5
+        }
+        @5: {
+            exit = class end after @6
+        }
+        @6: {
             $1 = undefined
             exit = return $1
         }
