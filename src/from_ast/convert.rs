@@ -6,7 +6,7 @@ use swc_ecma_ast::{
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, IncrDecr,
-    ObjectKey, ObjectProperty, TempExitType, LHS,
+    ObjectKey, ObjectProperty, ObjectValue, TempExitType, LHS,
 };
 
 use super::{
@@ -451,12 +451,15 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                     PropOrSpread::Prop(prop) => match prop.as_ref() {
                         Prop::Shorthand(ident) => {
                             let value = expr_to_basic_blocks(ctx, &Expr::Ident(ident.clone()));
-                            kvs.push(ObjectProperty::KeyValue(ident.sym.to_string(), value));
+                            kvs.push(ObjectProperty::KeyValue(
+                                ObjectKey::NormalKey(ident.sym.to_string()),
+                                ObjectValue::Property(value),
+                            ));
                         }
                         Prop::KeyValue(kv) => match &kv.key {
-                            PropName::Computed(expr) => kvs.push(ObjectProperty::Computed(
-                                expr_to_basic_blocks(ctx, &expr.expr),
-                                expr_to_basic_blocks(ctx, &kv.value),
+                            PropName::Computed(expr) => kvs.push(ObjectProperty::KeyValue(
+                                ObjectKey::Computed(expr_to_basic_blocks(ctx, &expr.expr)),
+                                ObjectValue::Property(expr_to_basic_blocks(ctx, &kv.value)),
                             )),
                             _ => {
                                 let prop_name = object_propname_to_string(&kv.key);
@@ -464,8 +467,8 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                                     proto = Some(expr_to_basic_blocks(ctx, &kv.value));
                                 } else {
                                     kvs.push(ObjectProperty::KeyValue(
-                                        prop_name,
-                                        expr_to_basic_blocks(ctx, &kv.value),
+                                        ObjectKey::NormalKey(prop_name),
+                                        ObjectValue::Property(expr_to_basic_blocks(ctx, &kv.value)),
                                     ));
                                 }
                             }
@@ -527,7 +530,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             let lhs = match &sp.prop {
                 swc_ecma_ast::SuperProp::Ident(ident) => {
                     let prop = ident.sym.to_string();
-                    LHS::Member(Box::new(LHS::Local(sup)), ObjectKey::KeyValue(prop))
+                    LHS::Member(Box::new(LHS::Local(sup)), ObjectKey::NormalKey(prop))
                 }
                 swc_ecma_ast::SuperProp::Computed(computed) => {
                     let expr = expr_to_basic_blocks(ctx, &computed.expr);
@@ -1627,7 +1630,7 @@ mod tests {
             $6 = $4 + $5
             $7 = "computed"
             $8 = "bignum"
-            $9 = {key: $1, ...2, other: $3, [$6]: $7, 1000000000000000000000000000000: $8}
+            $9 = {key: $1, ...$2, other: $3, [$6]: $7, 1000000000000000000000000000000: $8}
             $10 = undefined
             exit = return $10
         }

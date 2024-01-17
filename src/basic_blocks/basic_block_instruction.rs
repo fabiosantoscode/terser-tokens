@@ -118,11 +118,15 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Object(proto, props) => proto
                 .iter()
                 .cloned()
-                .chain(props.iter().flat_map(|prop| match prop {
-                    ObjectProperty::KeyValue(_, val) => vec![*val],
-                    ObjectProperty::Computed(key, val) => vec![*key, *val],
-                    ObjectProperty::Spread(spread_obj) => vec![*spread_obj],
-                }))
+                .chain(
+                    props
+                        .iter()
+                        .flat_map(|prop| match prop {
+                            ObjectProperty::KeyValue(k, v) => vec![k.used_vars(), v.used_vars()],
+                            ObjectProperty::Spread(spread_obj) => vec![vec![*spread_obj], vec![]],
+                        })
+                        .flatten(),
+                )
                 .collect(),
             BasicBlockInstruction::CreateClass(maybe_extends) => {
                 maybe_extends.iter().cloned().collect()
@@ -180,11 +184,17 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Object(proto, props) => proto
                 .iter_mut()
                 .map(|proto| proto)
-                .chain(props.iter_mut().flat_map(|e| match e {
-                    ObjectProperty::KeyValue(_, val) => vec![val],
-                    ObjectProperty::Computed(key, val) => vec![key, val],
-                    ObjectProperty::Spread(spread_obj) => vec![spread_obj],
-                }))
+                .chain(
+                    props
+                        .iter_mut()
+                        .flat_map(|e| match e {
+                            ObjectProperty::KeyValue(k, v) => {
+                                vec![k.used_vars_mut(), v.used_vars_mut()]
+                            }
+                            ObjectProperty::Spread(spread_obj) => vec![vec![spread_obj], vec![]],
+                        })
+                        .flatten(),
+                )
                 .collect(),
             BasicBlockInstruction::CreateClass(optional_extends) => {
                 optional_extends.iter_mut().collect()

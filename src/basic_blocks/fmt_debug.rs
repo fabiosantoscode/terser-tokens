@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Error, Formatter};
 
-use crate::basic_blocks::{ForInOfKind, ObjectKey, ObjectProperty};
+use crate::basic_blocks::{ForInOfKind, MethodKind, ObjectKey, ObjectProperty, ObjectValue};
 
 use super::{
     ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironment, BasicBlockExit,
@@ -37,9 +37,22 @@ impl Debug for LHS {
 impl Debug for ObjectKey {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ObjectKey::KeyValue(member) => write!(f, ".{}", member),
+            ObjectKey::NormalKey(member) => write!(f, ".{}", member),
             ObjectKey::Private(member) => write!(f, ".#{}", member),
             ObjectKey::Computed(member) => write!(f, "[${}]", member),
+        }
+    }
+}
+
+impl Debug for ObjectValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ObjectValue::Property(varname) => write!(f, "${:?}", varname),
+            ObjectValue::Method(kind, fn_id) => match kind {
+                MethodKind::Method => write!(f, "method {:?}", fn_id),
+                MethodKind::Getter => write!(f, "getter {:?}", fn_id),
+                MethodKind::Setter => write!(f, "setter {:?}", fn_id),
+            },
         }
     }
 }
@@ -102,21 +115,23 @@ impl Debug for BasicBlockInstruction {
                 )
             }
             BasicBlockInstruction::Object(proto, props) => {
-                write!(
-                    f,
-                    "{{{}}}",
-                    proto
-                        .iter()
-                        .map(|proto| { format!("__proto__: ${}", proto) })
-                        .chain(props.iter().map(|e| match e {
-                            ObjectProperty::KeyValue(key, value) => format!("{}: ${}", key, value),
-                            ObjectProperty::Computed(key, value) =>
-                                format!("[${}]: ${}", key, value),
-                            ObjectProperty::Spread(spread_obj) => format!("...{}", spread_obj),
-                        }))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
+                let keys = proto
+                    .iter()
+                    .map(|proto| format!("__proto__: ${}", proto))
+                    .chain(props.iter().map(|e| match e {
+                        ObjectProperty::KeyValue(key, value) => {
+                            let key = match key {
+                                ObjectKey::NormalKey(key) => format!("{}", key),
+                                ObjectKey::Computed(key) => format!("[${}]", key),
+                                ObjectKey::Private(_) => unreachable!(),
+                            };
+                            format!("{}: {:?}", key, value)
+                        }
+                        ObjectProperty::Spread(spread_obj) => format!("...${}", spread_obj),
+                    }))
+                    .collect::<Vec<_>>();
+
+                write!(f, "{{{}}}", keys.join(", "))
             }
             BasicBlockInstruction::Super => {
                 write!(f, "super")

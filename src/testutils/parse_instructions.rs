@@ -532,7 +532,7 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
         // .name | [$123] | .#private
         alt((
             map(preceded(tag("."), alphanumeric1), |name: &str| {
-                ObjectKey::KeyValue(name.to_string())
+                ObjectKey::NormalKey(name.to_string())
             }),
             map(tuple((tag("["), parse_ref, tag("]"))), |(_, idx, _)| {
                 ObjectKey::Computed(idx)

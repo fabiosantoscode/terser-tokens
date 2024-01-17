@@ -14,32 +14,30 @@ pub enum MethodKind {
     Setter,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ObjectProperty {
-    KeyValue(String, usize),
-    Computed(usize, usize),
+    KeyValue(ObjectKey, ObjectValue),
     Spread(usize),
 }
 
 #[derive(Clone, PartialEq)]
 pub enum ObjectKey {
-    KeyValue(String),
+    NormalKey(String),
     Private(String),
     Computed(usize),
+}
+
+#[derive(Clone, PartialEq)]
+pub enum ObjectValue {
+    Property(usize),
+    Method(MethodKind, FunctionId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassProperty {
     pub is_static: bool,
-    pub is_private: bool,
     pub key: ObjectKey,
-    pub value: ClassPropertyValue,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ClassPropertyValue {
-    Property(usize),
-    Method(MethodKind, FunctionId),
+    pub value: ObjectValue,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -67,7 +65,7 @@ impl ArrayElement {
 impl ObjectKey {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
-            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::NormalKey(_) => vec![],
             ObjectKey::Private(_) => vec![],
             ObjectKey::Computed(v) => vec![*v],
         }
@@ -75,9 +73,25 @@ impl ObjectKey {
 
     pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
-            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::NormalKey(_) => vec![],
             ObjectKey::Private(_) => vec![],
             ObjectKey::Computed(v) => vec![v],
+        }
+    }
+}
+
+impl ObjectValue {
+    pub fn used_vars(&self) -> Vec<usize> {
+        match self {
+            ObjectValue::Property(v) => vec![*v],
+            ObjectValue::Method(_kind, _fn) => vec![],
+        }
+    }
+
+    pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
+        match self {
+            ObjectValue::Property(v) => vec![v],
+            ObjectValue::Method(_kind, _fn) => vec![],
         }
     }
 }
@@ -105,13 +119,13 @@ impl Into<swc_ecma_ast::MethodKind> for MethodKind {
 impl ClassProperty {
     pub fn used_vars(&self) -> Vec<usize> {
         let key = match &self.key {
-            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::NormalKey(_) => vec![],
             ObjectKey::Private(_) => vec![],
             ObjectKey::Computed(var) => vec![*var],
         };
         let value = match &self.value {
-            ClassPropertyValue::Property(var) => vec![*var],
-            ClassPropertyValue::Method(_kind, _fn) => vec![],
+            ObjectValue::Property(var) => vec![*var],
+            ObjectValue::Method(_kind, _fn) => vec![],
         };
 
         key.into_iter().chain(value.into_iter()).collect()
@@ -119,13 +133,13 @@ impl ClassProperty {
 
     pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         let key = match &mut self.key {
-            ObjectKey::KeyValue(_) => vec![],
+            ObjectKey::NormalKey(_) => vec![],
             ObjectKey::Private(_) => vec![],
             ObjectKey::Computed(var) => vec![var],
         };
         let value = match &mut self.value {
-            ClassPropertyValue::Property(var) => vec![var],
-            ClassPropertyValue::Method(_kind, _fn) => vec![],
+            ObjectValue::Property(var) => vec![var],
+            ObjectValue::Method(_kind, _fn) => vec![],
         };
 
         key.into_iter().chain(value.into_iter()).collect()

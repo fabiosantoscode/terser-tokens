@@ -2,7 +2,7 @@ use super::{
     build_privatename, build_propname_str_or_ident, function_to_ast, ref_or_inlined_expr,
     statements_forced_to_expr_ast, to_statements, ToAstContext,
 };
-use crate::basic_blocks::{ClassPropertyValue, ObjectKey, StructuredClassMember};
+use crate::basic_blocks::{ObjectKey, ObjectValue, StructuredClassMember};
 use swc_ecma_ast::{
     BlockStmt, Class, ClassDecl, ClassMember, ClassMethod, ClassProp, ComputedPropName,
     Constructor, Decl, Expr, Function, Ident, ParamOrTsParamProp, PrivateMethod, PrivateName,
@@ -31,7 +31,7 @@ pub fn class_to_ast(
         let member_ast = match member {
             StructuredClassMember::Property(block, prop) => {
                 match prop.value {
-                    ClassPropertyValue::Property(value) => {
+                    ObjectValue::Property(value) => {
                         let value_expr =
                             |ctx: &mut ToAstContext<'_>, needs_forced_statement: bool| {
                                 if !needs_forced_statement {
@@ -91,7 +91,7 @@ pub fn class_to_ast(
 
                                 class_prop(prop_name, value_expr(ctx, false))
                             }
-                            ObjectKey::KeyValue(key) => {
+                            ObjectKey::NormalKey(key) => {
                                 let prop_name = build_propname_str_or_ident(&key);
 
                                 class_prop(prop_name, value_expr(ctx, true))
@@ -103,7 +103,7 @@ pub fn class_to_ast(
                             }
                         }
                     }
-                    ClassPropertyValue::Method(kind, fn_id) => {
+                    ObjectValue::Method(kind, fn_id) => {
                         let function = ctx.module.take_function(fn_id).unwrap();
                         let function = function_to_ast(ctx, function);
 
@@ -146,7 +146,7 @@ pub fn class_to_ast(
 
                                 class_method(prop_name, function)
                             }
-                            ObjectKey::KeyValue(key) => {
+                            ObjectKey::NormalKey(key) => {
                                 let prop_name = build_propname_str_or_ident(&key);
 
                                 class_method(prop_name, function)

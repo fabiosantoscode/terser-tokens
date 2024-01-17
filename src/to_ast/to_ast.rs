@@ -367,25 +367,41 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                         dot3_token: Default::default(),
                         expr: Box::new(ref_or_inlined_expr(ctx, *spread_obj)),
                     }),
-                    ObjectProperty::KeyValue(key, value) => {
-                        let key = if identifier_needs_quotes(&key) {
-                            PropName::Str(key.as_str().into())
-                        } else {
-                            PropName::Ident(Ident::new(key.as_str().into(), Default::default()))
+                    ObjectProperty::KeyValue(obj_key, obj_val) => {
+                        let key = match obj_key {
+                            crate::basic_blocks::ObjectKey::NormalKey(k) => {
+                                if identifier_needs_quotes(&k) {
+                                    PropName::Str(k.as_str().into())
+                                } else {
+                                    PropName::Ident(Ident::new(
+                                        k.as_str().into(),
+                                        Default::default(),
+                                    ))
+                                }
+                            }
+                            crate::basic_blocks::ObjectKey::Private(_) => {
+                                unreachable!("objects cannot have private props")
+                            }
+                            crate::basic_blocks::ObjectKey::Computed(expr) => {
+                                PropName::Computed(ComputedPropName {
+                                    span: Default::default(),
+                                    expr: Box::new(ref_or_inlined_expr(ctx, *expr)),
+                                })
+                            }
+                        };
+
+                        let value = match obj_val {
+                            crate::basic_blocks::ObjectValue::Property(prop) => {
+                                ref_or_inlined_expr(ctx, *prop)
+                            }
+                            crate::basic_blocks::ObjectValue::Method(_, _) => {
+                                todo!("object methods")
+                            }
                         };
 
                         PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
                             key,
-                            value: Box::new(ref_or_inlined_expr(ctx, *value)),
-                        })))
-                    }
-                    ObjectProperty::Computed(key, value) => {
-                        PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
-                            key: PropName::Computed(ComputedPropName {
-                                span: Default::default(),
-                                expr: Box::new(ref_or_inlined_expr(ctx, *key)),
-                            }),
-                            value: Box::new(ref_or_inlined_expr(ctx, *value)),
+                            value: Box::new(value),
                         })))
                     }
                 }))

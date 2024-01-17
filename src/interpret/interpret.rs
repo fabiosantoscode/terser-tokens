@@ -126,18 +126,32 @@ pub fn interpret(
             } else {
                 let mut out_props = BTreeMap::new();
                 for prop in props.iter() {
-                    match prop {
+                    match &prop {
                         ObjectProperty::KeyValue(key, value) => {
-                            let value = ctx.get_variable(*value)?.clone();
-                            out_props.insert(key.clone(), value);
-                        }
-                        ObjectProperty::Computed(key_varname, value) => {
-                            if let Some(key) = ctx.get_variable(*key_varname)?.to_string() {
-                                let value = ctx.get_variable(*value)?.clone();
-                                out_props.insert(key, value);
-                            } else {
-                                return Some(JsCompletion::Normal(JsType::Object));
-                            }
+                            let key = match key {
+                                crate::basic_blocks::ObjectKey::Computed(expr) => {
+                                    if let Some(key) = ctx.get_variable(*expr)?.to_string() {
+                                        key
+                                    } else {
+                                        return Some(JsCompletion::Normal(JsType::Object));
+                                    }
+                                }
+                                crate::basic_blocks::ObjectKey::NormalKey(key) => key.clone(),
+                                crate::basic_blocks::ObjectKey::Private(_) => {
+                                    unreachable!("objects cannot have private props")
+                                }
+                            };
+
+                            let value = match value {
+                                crate::basic_blocks::ObjectValue::Property(prop) => {
+                                    ctx.get_variable(*prop)?
+                                }
+                                crate::basic_blocks::ObjectValue::Method(_, _) => {
+                                    todo!()
+                                }
+                            };
+
+                            out_props.insert(key, value.clone());
                         }
                         ObjectProperty::Spread(_) => todo!(),
                     }

@@ -5,7 +5,7 @@ use super::{
     object_propname_to_string, FromAstCtx, FunctionLike,
 };
 use crate::basic_blocks::{
-    BasicBlockExit, BasicBlockInstruction, ClassProperty, ClassPropertyValue, MethodKind, ObjectKey,
+    BasicBlockExit, BasicBlockInstruction, ClassProperty, MethodKind, ObjectKey, ObjectValue,
 };
 
 /// Convert a class to basic blocks.
@@ -43,7 +43,7 @@ pub fn class_to_basic_blocks(
                                 let expr = expr_to_basic_blocks(ctx, &*&computed.expr);
                                 ObjectKey::Computed(expr)
                             }
-                            p_name => ObjectKey::KeyValue(object_propname_to_string(p_name)),
+                            p_name => ObjectKey::NormalKey(object_propname_to_string(p_name)),
                         };
 
                         let value = match &class_prop.value {
@@ -58,9 +58,8 @@ pub fn class_to_basic_blocks(
                             BasicBlockExit::ClassProperty(
                                 ClassProperty {
                                     is_static: class_prop.is_static,
-                                    is_private: false,
                                     key,
-                                    value: ClassPropertyValue::Property(value),
+                                    value: ObjectValue::Property(value),
                                 },
                                 prop + 1,
                             ),
@@ -85,9 +84,8 @@ pub fn class_to_basic_blocks(
                             BasicBlockExit::ClassProperty(
                                 ClassProperty {
                                     is_static: prop.is_static,
-                                    is_private: true,
                                     key: ObjectKey::Private(prop.key.id.sym.to_string()),
-                                    value: ClassPropertyValue::Property(value),
+                                    value: ObjectValue::Property(value),
                                 },
                                 prop_idx + 1,
                             ),
@@ -121,7 +119,7 @@ pub fn class_to_basic_blocks(
                                 let expr = expr_to_basic_blocks(ctx, &*&computed.expr);
                                 ObjectKey::Computed(expr)
                             }
-                            p_name => ObjectKey::KeyValue(object_propname_to_string(p_name)),
+                            p_name => ObjectKey::NormalKey(object_propname_to_string(p_name)),
                         };
 
                         let (_fn_varname, fn_id) = function_to_basic_blocks(
@@ -140,9 +138,8 @@ pub fn class_to_basic_blocks(
                             BasicBlockExit::ClassProperty(
                                 ClassProperty {
                                     is_static: method.is_static,
-                                    is_private: false,
                                     key,
-                                    value: ClassPropertyValue::Method(
+                                    value: ObjectValue::Method(
                                         MethodKind::from(method.kind),
                                         fn_id,
                                     ),
@@ -172,9 +169,8 @@ pub fn class_to_basic_blocks(
                             BasicBlockExit::ClassProperty(
                                 ClassProperty {
                                     is_static: method.is_static,
-                                    is_private: true,
                                     key,
-                                    value: ClassPropertyValue::Method(
+                                    value: ObjectValue::Method(
                                         MethodKind::from(method.kind),
                                         fn_id,
                                     ),
@@ -277,14 +273,14 @@ mod tests {
             exit = jump @2
         }
         @2: {
-            exit = class property ClassProperty { is_static: false, is_private: false, key: .prop1, value: Property(1) } after @3
+            exit = class property ClassProperty { is_static: false, key: .prop1, value: $1 } after @3
         }
         @3: {
             $2 = 2
             exit = jump @4
         }
         @4: {
-            exit = class property ClassProperty { is_static: true, is_private: false, key: .prop2, value: Property(2) } after @5
+            exit = class property ClassProperty { is_static: true, key: .prop2, value: $2 } after @5
         }
         @5: {
             $3 = "prop3"
@@ -292,7 +288,7 @@ mod tests {
             exit = jump @6
         }
         @6: {
-            exit = class property ClassProperty { is_static: false, is_private: false, key: [$3], value: Property(4) } after @7
+            exit = class property ClassProperty { is_static: false, key: [$3], value: $4 } after @7
         }
         @7: {
             $5 = "prop4"
@@ -300,14 +296,14 @@ mod tests {
             exit = jump @8
         }
         @8: {
-            exit = class property ClassProperty { is_static: true, is_private: false, key: [$5], value: Property(6) } after @9
+            exit = class property ClassProperty { is_static: true, key: [$5], value: $6 } after @9
         }
         @9: {
             $7 = 5
             exit = jump @10
         }
         @10: {
-            exit = class property ClassProperty { is_static: false, is_private: false, key: .123, value: Property(7) } after @11
+            exit = class property ClassProperty { is_static: false, key: .123, value: $7 } after @11
         }
         @11: {
             exit = class end after @12
@@ -394,13 +390,13 @@ mod tests {
             exit = jump @2
         }
         @2: {
-            exit = class property ClassProperty { is_static: false, is_private: false, key: .prop, value: Method(Getter, FunctionId(1)) } after @3
+            exit = class property ClassProperty { is_static: false, key: .prop, value: getter FunctionId(1) } after @3
         }
         @3: {
             exit = jump @4
         }
         @4: {
-            exit = class property ClassProperty { is_static: false, is_private: false, key: .prop, value: Method(Setter, FunctionId(2)) } after @5
+            exit = class property ClassProperty { is_static: false, key: .prop, value: setter FunctionId(2) } after @5
         }
         @5: {
             exit = class end after @6

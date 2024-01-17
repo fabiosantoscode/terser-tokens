@@ -34,7 +34,7 @@ fn lhs_to_ast_expr_inner(ctx: &mut ToAstContext, lhs: &LHS, depth: usize) -> Exp
                         span: Default::default(),
                     },
                     prop: match member {
-                        ObjectKey::KeyValue(member) => swc_ecma_ast::SuperProp::Ident(Ident::new(
+                        ObjectKey::NormalKey(member) => swc_ecma_ast::SuperProp::Ident(Ident::new(
                             member.as_str().into(),
                             Default::default(),
                         )),
@@ -55,7 +55,7 @@ fn lhs_to_ast_expr_inner(ctx: &mut ToAstContext, lhs: &LHS, depth: usize) -> Exp
                     span: Default::default(),
                     obj: Box::new(base),
                     prop: match member {
-                        ObjectKey::KeyValue(member) => MemberProp::Ident(Ident::new(
+                        ObjectKey::NormalKey(member) => MemberProp::Ident(Ident::new(
                             member.as_str().into(),
                             Default::default(),
                         )),

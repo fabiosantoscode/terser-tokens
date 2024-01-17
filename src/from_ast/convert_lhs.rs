@@ -10,7 +10,7 @@ pub fn to_basic_blocks_lhs(ctx: &mut FromAstCtx, expr: &Expr) -> LHS {
         Expr::Member(MemberExpr { obj, prop, .. }) => {
             let obj = to_basic_blocks_lhs(ctx, &obj);
             let prop = match prop {
-                MemberProp::Ident(ident) => ObjectKey::KeyValue(ident.sym.to_string()),
+                MemberProp::Ident(ident) => ObjectKey::NormalKey(ident.sym.to_string()),
                 MemberProp::PrivateName(pvt) => ObjectKey::Private(pvt.id.sym.to_string()),
                 MemberProp::Computed(expr) => {
                     ObjectKey::Computed(expr_to_basic_blocks(ctx, &expr.expr))

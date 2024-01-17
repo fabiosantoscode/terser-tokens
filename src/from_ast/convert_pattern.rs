@@ -171,7 +171,7 @@ pub fn pat_like_expr_to_basic_blocks(
         Expr::Member(MemberExpr { obj, prop, .. }) => {
             let base = to_basic_blocks_lhs(ctx, obj.as_ref());
             let prop = match &prop {
-                MemberProp::Ident(ident) => ObjectKey::KeyValue(ident.sym.to_string()),
+                MemberProp::Ident(ident) => ObjectKey::NormalKey(ident.sym.to_string()),
                 MemberProp::PrivateName(pvt) => ObjectKey::Private(pvt.id.sym.to_string()),
                 MemberProp::Computed(comp) => {
                     let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());

@@ -57,7 +57,7 @@ impl<'module> InterpretCtx<'_> {
                 let base = self.get_lhs(base)?;
 
                 let string_key = match member {
-                    ObjectKey::KeyValue(string_key) => string_key.clone(),
+                    ObjectKey::NormalKey(string_key) => string_key.clone(),
                     ObjectKey::Computed(varname) => self.get_variable(*varname)?.to_string()?,
                     _ => todo!("private fields"),
                 };
@@ -92,7 +92,7 @@ impl<'module> InterpretCtx<'_> {
             LHS::Member(base, member) => {
                 let old_base = self.get_lhs(base)?;
                 let string_key = match member {
-                    ObjectKey::KeyValue(string_key) => string_key.clone(),
+                    ObjectKey::NormalKey(string_key) => string_key.clone(),
                     ObjectKey::Computed(varname) => self.get_variable(*varname)?.to_string()?,
                     _ => return None,
                 };
