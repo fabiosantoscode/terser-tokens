@@ -23,28 +23,28 @@ pub fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
         _ => false,
     };
 
-    let might_break = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
-        if is_loop(body) {
-            ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
-            stat_to_basic_blocks_inner(ctx, body);
-            true
-        } else {
-            todo!()
-        }
+    let (pushed, is_labelled_block) = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
+        ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
+        stat_to_basic_blocks_inner(ctx, body);
+        (true, !is_loop(body))
     } else if is_loop(stat) {
         ctx.push_label(NestedIntoStatement::Unlabelled);
         stat_to_basic_blocks_inner(ctx, stat);
-        true
+        (true, false)
     } else {
         stat_to_basic_blocks_inner(ctx, stat);
-        false
+        (false, false)
     };
 
-    if might_break {
+    if pushed {
         let jumpers_towards_me = ctx.pop_label();
         if jumpers_towards_me.len() > 0 {
             for jumper in jumpers_towards_me {
-                ctx.set_exit(jumper, BasicBlockExit::Break(ctx.current_block_index()))
+                if is_labelled_block {
+                    ctx.set_exit(jumper, BasicBlockExit::Jump(ctx.current_block_index()))
+                } else {
+                    ctx.set_exit(jumper, BasicBlockExit::Break(ctx.current_block_index()))
+                }
             }
         }
     }
@@ -1505,6 +1505,52 @@ mod tests {
             exit = break @8
         }
         @8: {
+            $2 = undefined
+            exit = return $2
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_bail_break() {
+        let s = test_basic_blocks(
+            "lab: {
+                123;
+                break lab;
+                456;
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 123
+            $1 = undefined
+            exit = return $1
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_bail_break_2() {
+        let s = test_basic_blocks(
+            "lab: if (123) {
+                456;
+                break lab;
+                789;
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 123
+            exit = cond $0 ? @1..@1 : @2..@2
+        }
+        @1: {
+            $1 = 456
+            exit = jump @3
+        }
+        @2: {
+            exit = jump @3
+        }
+        @3: {
             $2 = undefined
             exit = return $2
         }
