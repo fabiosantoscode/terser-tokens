@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use ordered_float::NotNan;
 
 use crate::basic_blocks::{
-    ArrayElement, ArrayPatternPiece, BasicBlockInstruction, ObjectPatternPiece, ObjectProp,
+    ArrayElement, ArrayPatternPiece, BasicBlockInstruction, ObjectPatternPiece, ObjectProperty,
 };
 
 use super::{interpret_function, InterpretCtx, JsCompletion, JsType};
@@ -127,11 +127,11 @@ pub fn interpret(
                 let mut out_props = BTreeMap::new();
                 for prop in props.iter() {
                     match prop {
-                        ObjectProp::KeyValue(key, value) => {
+                        ObjectProperty::KeyValue(key, value) => {
                             let value = ctx.get_variable(*value)?.clone();
                             out_props.insert(key.clone(), value);
                         }
-                        ObjectProp::Computed(key_varname, value) => {
+                        ObjectProperty::Computed(key_varname, value) => {
                             if let Some(key) = ctx.get_variable(*key_varname)?.to_string() {
                                 let value = ctx.get_variable(*value)?.clone();
                                 out_props.insert(key, value);
@@ -139,7 +139,7 @@ pub fn interpret(
                                 return Some(JsCompletion::Normal(JsType::Object));
                             }
                         }
-                        ObjectProp::Spread(_) => todo!(),
+                        ObjectProperty::Spread(_) => todo!(),
                     }
                 }
 

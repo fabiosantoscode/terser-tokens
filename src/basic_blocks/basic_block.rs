@@ -1,4 +1,4 @@
-use super::{BasicBlockInstruction, FunctionId, ObjectKey};
+use super::{BasicBlockInstruction, ClassProperty, FunctionId};
 
 /// A basic block encapsulates a control-free sequence of instructions. It contains an "exit" which encodes control flow.
 #[derive(Clone, Default, PartialEq)]
@@ -118,76 +118,6 @@ impl BasicBlockExit {
 impl Default for BasicBlockExit {
     fn default() -> Self {
         BasicBlockExit::Jump(0)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ClassProperty {
-    pub is_static: bool,
-    pub is_private: bool,
-    pub key: ObjectKey,
-    pub value: ClassPropertyValue,
-}
-
-#[derive(Clone, Debug, PartialEq, Copy)]
-pub enum MethodKind {
-    Method,
-    Getter,
-    Setter,
-}
-
-impl From<swc_ecma_ast::MethodKind> for MethodKind {
-    fn from(kind: swc_ecma_ast::MethodKind) -> Self {
-        match kind {
-            swc_ecma_ast::MethodKind::Method => MethodKind::Method,
-            swc_ecma_ast::MethodKind::Getter => MethodKind::Getter,
-            swc_ecma_ast::MethodKind::Setter => MethodKind::Setter,
-        }
-    }
-}
-impl Into<swc_ecma_ast::MethodKind> for MethodKind {
-    fn into(self) -> swc_ecma_ast::MethodKind {
-        match self {
-            MethodKind::Method => swc_ecma_ast::MethodKind::Method,
-            MethodKind::Getter => swc_ecma_ast::MethodKind::Getter,
-            MethodKind::Setter => swc_ecma_ast::MethodKind::Setter,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum ClassPropertyValue {
-    Property(usize),
-    Method(MethodKind, FunctionId),
-}
-
-impl ClassProperty {
-    pub fn used_vars(&self) -> Vec<usize> {
-        let key = match &self.key {
-            ObjectKey::KeyValue(_) => vec![],
-            ObjectKey::Private(_) => vec![],
-            ObjectKey::Computed(var) => vec![*var],
-        };
-        let value = match &self.value {
-            ClassPropertyValue::Property(var) => vec![*var],
-            ClassPropertyValue::Method(kind, _fn) => vec![],
-        };
-
-        key.into_iter().chain(value.into_iter()).collect()
-    }
-
-    pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
-        let key = match &mut self.key {
-            ObjectKey::KeyValue(_) => vec![],
-            ObjectKey::Private(_) => vec![],
-            ObjectKey::Computed(var) => vec![var],
-        };
-        let value = match &mut self.value {
-            ClassPropertyValue::Property(var) => vec![var],
-            ClassPropertyValue::Method(kind, _fn) => vec![],
-        };
-
-        key.into_iter().chain(value.into_iter()).collect()
     }
 }
 

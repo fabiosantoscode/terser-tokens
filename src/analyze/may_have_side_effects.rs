@@ -1,4 +1,4 @@
-use crate::basic_blocks::{ArrayElement, BasicBlockInstruction, ObjectProp, LHS};
+use crate::basic_blocks::{ArrayElement, BasicBlockInstruction, ObjectProperty, LHS};
 
 impl BasicBlockInstruction {
     /// Will this instruction throw an error or change the state of the program besides assigning its variable?
@@ -27,7 +27,7 @@ impl BasicBlockInstruction {
             }
             // may throw due to unspreadable object items
             BasicBlockInstruction::Object(_, props) => {
-                props.iter().any(|p| matches!(p, ObjectProp::Spread(_)))
+                props.iter().any(|p| matches!(p, ObjectProperty::Spread(_)))
             }
             // Moving super around is dangerous but it doesn't have side effects itself
             BasicBlockInstruction::Super => false,

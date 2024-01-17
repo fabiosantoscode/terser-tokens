@@ -5,8 +5,8 @@ use super::{
 use crate::basic_blocks::{ClassPropertyValue, ObjectKey, StructuredClassMember};
 use swc_ecma_ast::{
     BlockStmt, Class, ClassDecl, ClassMember, ClassMethod, ClassProp, ComputedPropName,
-    Constructor, Decl, Expr, Function, Ident, MethodKind, ParamOrTsParamProp, PrivateMethod,
-    PrivateName, PrivateProp, PropName, StaticBlock, Stmt,
+    Constructor, Decl, Expr, Function, Ident, ParamOrTsParamProp, PrivateMethod, PrivateName,
+    PrivateProp, PropName, StaticBlock, Stmt,
 };
 
 /// Called when we see the CreateClass instruction

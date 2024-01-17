@@ -9,7 +9,7 @@ use swc_ecma_ast::{
 use crate::{
     basic_blocks::{
         identifier_needs_quotes, ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType,
-        ForInOfKind, IncrDecr, ObjectProp, StructuredFlow, TempExitType, LHS,
+        ForInOfKind, IncrDecr, ObjectProperty, StructuredFlow, TempExitType, LHS,
     },
     to_ast::{
         build_block, build_empty_var_decl, build_multivar_decl, build_var_assign, build_var_decl,
@@ -363,11 +363,11 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 })
                 .into_iter()
                 .chain(props.iter().map(|prop| match prop {
-                    ObjectProp::Spread(spread_obj) => PropOrSpread::Spread(SpreadElement {
+                    ObjectProperty::Spread(spread_obj) => PropOrSpread::Spread(SpreadElement {
                         dot3_token: Default::default(),
                         expr: Box::new(ref_or_inlined_expr(ctx, *spread_obj)),
                     }),
-                    ObjectProp::KeyValue(key, value) => {
+                    ObjectProperty::KeyValue(key, value) => {
                         let key = if identifier_needs_quotes(&key) {
                             PropName::Str(key.as_str().into())
                         } else {
@@ -379,7 +379,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                             value: Box::new(ref_or_inlined_expr(ctx, *value)),
                         })))
                     }
-                    ObjectProp::Computed(key, value) => {
+                    ObjectProperty::Computed(key, value) => {
                         PropOrSpread::Prop(Box::new(Prop::KeyValue(KeyValueProp {
                             key: PropName::Computed(ComputedPropName {
                                 span: Default::default(),

@@ -6,7 +6,7 @@ use swc_ecma_ast::{
 
 use crate::basic_blocks::{
     ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, IncrDecr,
-    ObjectKey, ObjectProp, TempExitType, LHS,
+    ObjectKey, ObjectProperty, TempExitType, LHS,
 };
 
 use super::{
@@ -445,16 +445,16 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             let mut proto = None;
             for prop in props {
                 match prop {
-                    PropOrSpread::Spread(spread) => {
-                        kvs.push(ObjectProp::Spread(expr_to_basic_blocks(ctx, &spread.expr)))
-                    }
+                    PropOrSpread::Spread(spread) => kvs.push(ObjectProperty::Spread(
+                        expr_to_basic_blocks(ctx, &spread.expr),
+                    )),
                     PropOrSpread::Prop(prop) => match prop.as_ref() {
                         Prop::Shorthand(ident) => {
                             let value = expr_to_basic_blocks(ctx, &Expr::Ident(ident.clone()));
-                            kvs.push(ObjectProp::KeyValue(ident.sym.to_string(), value));
+                            kvs.push(ObjectProperty::KeyValue(ident.sym.to_string(), value));
                         }
                         Prop::KeyValue(kv) => match &kv.key {
-                            PropName::Computed(expr) => kvs.push(ObjectProp::Computed(
+                            PropName::Computed(expr) => kvs.push(ObjectProperty::Computed(
                                 expr_to_basic_blocks(ctx, &expr.expr),
                                 expr_to_basic_blocks(ctx, &kv.value),
                             )),
@@ -463,7 +463,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                                 if &prop_name == "__proto__" {
                                     proto = Some(expr_to_basic_blocks(ctx, &kv.value));
                                 } else {
-                                    kvs.push(ObjectProp::KeyValue(
+                                    kvs.push(ObjectProperty::KeyValue(
                                         prop_name,
                                         expr_to_basic_blocks(ctx, &kv.value),
                                     ));
@@ -556,7 +556,7 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 swc_ecma_ast::Callee::Super(_) => {
                     ctx.push_instruction(BasicBlockInstruction::Super)
                 }
-                swc_ecma_ast::Callee::Import(imp) => todo!("import()"),
+                swc_ecma_ast::Callee::Import(_) => todo!("import()"),
                 swc_ecma_ast::Callee::Expr(expr) => expr_to_basic_blocks(ctx, &expr),
             };
 

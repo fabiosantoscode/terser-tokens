@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Error, Formatter};
 
-use crate::basic_blocks::{ForInOfKind, ObjectKey, ObjectProp};
+use crate::basic_blocks::{ForInOfKind, ObjectKey, ObjectProperty};
 
 use super::{
     ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironment, BasicBlockExit,
@@ -109,9 +109,10 @@ impl Debug for BasicBlockInstruction {
                         .iter()
                         .map(|proto| { format!("__proto__: ${}", proto) })
                         .chain(props.iter().map(|e| match e {
-                            ObjectProp::KeyValue(key, value) => format!("{}: ${}", key, value),
-                            ObjectProp::Computed(key, value) => format!("[${}]: ${}", key, value),
-                            ObjectProp::Spread(spread_obj) => format!("...{}", spread_obj),
+                            ObjectProperty::KeyValue(key, value) => format!("{}: ${}", key, value),
+                            ObjectProperty::Computed(key, value) =>
+                                format!("[${}]: ${}", key, value),
+                            ObjectProperty::Spread(spread_obj) => format!("...{}", spread_obj),
                         }))
                         .collect::<Vec<_>>()
                         .join(", ")

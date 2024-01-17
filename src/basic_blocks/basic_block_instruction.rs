@@ -1,3 +1,5 @@
+use super::{ArrayElement, ArrayPatternPiece, ObjectKey, ObjectPatternPiece, ObjectProperty};
+
 /// A usize that uniquely points to a function.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Hash, PartialOrd, Ord, Eq, Default)]
@@ -27,7 +29,7 @@ pub enum BasicBlockInstruction {
     ForInOfValue,
     Array(Vec<ArrayElement>),
     /// __proto__, object props
-    Object(Option<usize>, Vec<ObjectProp>),
+    Object(Option<usize>, Vec<ObjectProperty>),
     /// maybe_extends
     CreateClass(Option<usize>),
     Super,
@@ -46,52 +48,9 @@ pub enum BasicBlockInstruction {
     Write(LHS, usize),
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub enum ArrayPatternPiece {
-    Item,
-    Spread,
-}
-
-#[derive(Clone, PartialEq, Debug, Eq)]
-pub enum ObjectPatternPiece {
-    TakeKey(String),
-    TakeComputedKey(usize),
-    Spread,
-}
-
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq, Hash)]
 pub struct NonLocalId(pub usize);
-
-#[derive(Clone, PartialEq)]
-pub enum ArrayElement {
-    Hole,
-    Item(usize),
-    Spread(usize),
-}
-
-impl ArrayElement {
-    pub fn as_item(&self) -> Option<usize> {
-        match self {
-            ArrayElement::Item(it) => Some(*it),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, PartialEq)]
-pub enum ObjectProp {
-    KeyValue(String, usize),
-    Computed(usize, usize),
-    Spread(usize),
-}
-
-#[derive(Clone, PartialEq)]
-pub enum ObjectKey {
-    KeyValue(String),
-    Private(String),
-    Computed(usize),
-}
 
 /// Increment or decrement
 #[derive(Clone, PartialEq, Debug)]
@@ -160,9 +119,9 @@ impl BasicBlockInstruction {
                 .iter()
                 .cloned()
                 .chain(props.iter().flat_map(|prop| match prop {
-                    ObjectProp::KeyValue(_, val) => vec![*val],
-                    ObjectProp::Computed(key, val) => vec![*key, *val],
-                    ObjectProp::Spread(spread_obj) => vec![*spread_obj],
+                    ObjectProperty::KeyValue(_, val) => vec![*val],
+                    ObjectProperty::Computed(key, val) => vec![*key, *val],
+                    ObjectProperty::Spread(spread_obj) => vec![*spread_obj],
                 }))
                 .collect(),
             BasicBlockInstruction::CreateClass(maybe_extends) => {
@@ -222,9 +181,9 @@ impl BasicBlockInstruction {
                 .iter_mut()
                 .map(|proto| proto)
                 .chain(props.iter_mut().flat_map(|e| match e {
-                    ObjectProp::KeyValue(_, val) => vec![val],
-                    ObjectProp::Computed(key, val) => vec![key, val],
-                    ObjectProp::Spread(spread_obj) => vec![spread_obj],
+                    ObjectProperty::KeyValue(_, val) => vec![val],
+                    ObjectProperty::Computed(key, val) => vec![key, val],
+                    ObjectProperty::Spread(spread_obj) => vec![spread_obj],
                 }))
                 .collect(),
             BasicBlockInstruction::CreateClass(optional_extends) => {
@@ -333,24 +292,6 @@ impl LHS {
             LHS::NonLocal(id) => Some(&mut id.0),
             LHS::Member(base, _) => base.get_nonlocal_id_mut(),
             _ => None,
-        }
-    }
-}
-
-impl ObjectKey {
-    pub fn used_vars(&self) -> Vec<usize> {
-        match self {
-            ObjectKey::KeyValue(_) => vec![],
-            ObjectKey::Private(_) => vec![],
-            ObjectKey::Computed(v) => vec![*v],
-        }
-    }
-
-    pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
-        match self {
-            ObjectKey::KeyValue(_) => vec![],
-            ObjectKey::Private(_) => vec![],
-            ObjectKey::Computed(v) => vec![v],
         }
     }
 }
