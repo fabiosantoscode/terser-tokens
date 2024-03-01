@@ -32,7 +32,7 @@ pub enum StructuredFlow {
     ),
     Break(BreakableId),
     Continue(BreakableId),
-    Return(ExitType, Option<usize>),
+    Return(ExitType, usize),
     BasicBlock(Vec<(usize, BasicBlockInstruction)>),
     /// (class_var, class_members)
     Class(usize, Vec<StructuredClassMember>),
@@ -295,8 +295,7 @@ impl StructuredFlow {
             StructuredFlow::Loop(_, _) => None,
             StructuredFlow::ForInOfLoop(_, loop_var, _, _) => Some(*loop_var),
             StructuredFlow::Block(_) => None,
-            StructuredFlow::Return(_, Some(ret_val)) => Some(*ret_val),
-            StructuredFlow::Return(_, None) => unreachable!("we shouldn't see this anymore"),
+            StructuredFlow::Return(_, ret_val) => Some(*ret_val),
             StructuredFlow::BasicBlock(_) => None,
             StructuredFlow::TryCatch(_, _, _, _) => None,
             StructuredFlow::Class(class_var, _) => Some(*class_var),
@@ -374,7 +373,7 @@ impl Debug for StructuredFlow {
             StructuredFlow::Break(brk) => writeln!(f, "Break{}", print_brk(brk)),
             StructuredFlow::Continue(brk) => writeln!(f, "Continue{}", print_brk(brk)),
             StructuredFlow::Return(exit, ret) => {
-                writeln!(f, "{:?} ${}", exit, ret.unwrap())
+                writeln!(f, "{:?} ${}", exit, ret)
             }
             StructuredFlow::BasicBlock(instructions) => {
                 let mut buf = String::new();

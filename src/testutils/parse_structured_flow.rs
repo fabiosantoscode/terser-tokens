@@ -121,10 +121,10 @@ pub fn parse_structured_flow(input: &str) -> StructuredFlow {
     fn parse_jumps_exits(input: &str) -> IResult<&str, StructuredFlow> {
         alt((
             map(preceded(spaced_tag("Return"), parse_ref), |what| {
-                StructuredFlow::Return(ExitType::Return, Some(what))
+                StructuredFlow::Return(ExitType::Return, what)
             }),
             map(preceded(spaced_tag("Throw"), parse_ref), |what| {
-                StructuredFlow::Return(ExitType::Throw, Some(what))
+                StructuredFlow::Return(ExitType::Throw, what)
             }),
             map(
                 preceded(spaced_tag("Break"), parse_brk),

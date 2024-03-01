@@ -143,7 +143,7 @@ fn fold_blocks(
             StructuredFlow::Return(exit_type, var_idx) => {
                 out_blocks.push(BasicBlock {
                     instructions,
-                    exit: BasicBlockExit::ExitFn(exit_type, var_idx.expect("TODO")),
+                    exit: BasicBlockExit::ExitFn(exit_type, var_idx),
                 });
                 break;
             }

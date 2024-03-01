@@ -72,7 +72,7 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
                 _ => instruction_to_statement(ctx, *varname, ins),
             })
             .collect(),
-        StructuredFlow::Return(ExitType::Return, Some(var_idx)) => {
+        StructuredFlow::Return(ExitType::Return, var_idx) => {
             let return_stmt = Stmt::Return(ReturnStmt {
                 span: Default::default(),
                 arg: Some(Box::new(ref_or_inlined_expr(ctx, *var_idx))),
@@ -80,7 +80,7 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
 
             vec![return_stmt]
         }
-        StructuredFlow::Return(ExitType::Throw, Some(var_idx)) => {
+        StructuredFlow::Return(ExitType::Throw, var_idx) => {
             let throw_stmt = Stmt::Throw(ThrowStmt {
                 span: Default::default(),
                 arg: (Box::new(ref_or_inlined_expr(ctx, *var_idx))),
@@ -207,9 +207,6 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
         StructuredFlow::Debugger => vec![Stmt::Debugger(DebuggerStmt {
             span: Default::default(),
         })],
-        _ => {
-            todo!("to_stat: {:?}", node)
-        }
     }
 }
 

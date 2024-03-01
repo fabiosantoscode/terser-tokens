@@ -153,7 +153,7 @@ fn do_tree_chunk(
                     })
                 }
                 BasicBlockExit::ExitFn(ref exit_type, yielded_val) => {
-                    blocks.push(StructuredFlow::Return(exit_type.clone(), Some(yielded_val)))
+                    blocks.push(StructuredFlow::Return(exit_type.clone(), yielded_val))
                 }
                 BasicBlockExit::SetTryAndCatch(
                     try_block,
