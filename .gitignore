@@ -1,3 +1,4 @@
 /target
 Cargo.lock
 *.pending-snap
+.tmp-rust-analyzer/
