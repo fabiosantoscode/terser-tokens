@@ -1,7 +1,7 @@
 use swc_ecma_ast::{
     ArrowExpr, AssignExpr, AssignOp, BindingIdent, BlockStmt, BlockStmtOrExpr, CallExpr, Callee,
-    Decl, Expr, ExprStmt, Ident, ParenExpr, Pat, PatOrExpr, PrivateName, PropName, ReturnStmt,
-    Stmt, VarDecl, VarDeclKind, VarDeclarator,
+    Decl, Expr, ExprStmt, Ident, Param, ParenExpr, Pat, PatOrExpr, PrivateName, PropName,
+    ReturnStmt, Stmt, VarDecl, VarDeclKind, VarDeclarator,
 };
 
 use crate::basic_blocks::identifier_needs_quotes;
@@ -101,6 +101,14 @@ pub fn build_var_assign(varname: &str, value: Expr) -> Stmt {
             right: Box::new(value),
         })),
     })
+}
+
+pub fn build_ident_param(i: &str) -> Param {
+    Param {
+        span: Default::default(),
+        decorators: Default::default(),
+        pat: build_binding_identifier(i),
+    }
 }
 
 pub fn build_iife(mut stmts: Vec<Stmt>, ret: Expr) -> Expr {

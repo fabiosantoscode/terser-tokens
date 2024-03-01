@@ -59,7 +59,7 @@ impl<'module> InterpretCtx<'_> {
                 let string_key = match member {
                     ObjectKey::NormalKey(string_key) => string_key.clone(),
                     ObjectKey::Computed(varname) => self.get_variable(*varname)?.to_string()?,
-                    _ => todo!("private fields"),
+                    ObjectKey::Private(_) => None?, // private fields not supported
                 };
 
                 match base {

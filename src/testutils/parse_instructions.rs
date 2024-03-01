@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use nom::IResult;
 
 use crate::basic_blocks::{
-    ArrayElement, BasicBlock, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
-    BasicBlockModule, ExitType, FunctionId, IncrDecr, NonLocalId, ObjectKey, TempExitType, LHS,
+    ArrayElement, BasicBlock, BasicBlockEnvironment, BasicBlockExit, BasicBlockGroup,
+    BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, IncrDecr, NonLocalId, ObjectKey,
+    TempExitType, LHS,
 };
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
@@ -20,6 +21,11 @@ pub fn parse_instructions_module(input: Vec<&str>) -> BasicBlockModule {
                 FunctionId(i),
                 BasicBlockGroup {
                     id: FunctionId(i),
+                    environment: if i == 0 {
+                        BasicBlockEnvironment::Module
+                    } else {
+                        BasicBlockEnvironment::Function(false, false)
+                    },
                     ..parse_instructions(s)
                 },
             )

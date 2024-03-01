@@ -227,6 +227,13 @@ impl<'a> ToAstContext<'a> {
         gen.to_string()
     }
 
+    /// create a meaningless, empty variable. used in deleted function params.
+    pub(crate) fn create_varname_dummy(&mut self) -> String {
+        let gen = self.gen_var_index;
+        self.gen_var_index = gen.next();
+        gen.to_string()
+    }
+
     pub(crate) fn enter_breakable(
         &mut self,
         brk_id: &BreakableId,

@@ -8,7 +8,7 @@ use crate::{
     to_ast::build_binding_identifier,
 };
 
-use super::{to_blockgroup_statements, ToAstContext};
+use super::{build_ident_param, to_blockgroup_statements, ToAstContext};
 
 pub fn function_expr_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Expr {
     Expr::Paren(ParenExpr {
@@ -49,16 +49,9 @@ fn take_param_readers(ctx: &mut ToAstContext, func: &mut StructuredFlow) -> Vec<
     for (varname, ins) in func.iter_all_instructions() {
         match ins {
             BasicBlockInstruction::ArgumentRead(n) => {
-                let ident = build_binding_identifier(&ctx.create_varname_for(varname));
+                let ident = &ctx.create_varname_for(varname);
                 vars_to_remove.insert(varname);
-                params.insert(
-                    *n,
-                    Param {
-                        pat: ident,
-                        span: Default::default(),
-                        decorators: Default::default(),
-                    },
-                );
+                params.insert(*n, build_ident_param(ident));
             }
             BasicBlockInstruction::ArgumentRest(from_n) => {
                 let ident = build_binding_identifier(&ctx.create_varname_for(varname));
@@ -89,7 +82,7 @@ fn take_param_readers(ctx: &mut ToAstContext, func: &mut StructuredFlow) -> Vec<
                 if let Some(param) = params.remove(&param_idx) {
                     param
                 } else {
-                    todo!("unused params")
+                    build_ident_param(&ctx.create_varname_dummy())
                 }
             })
             .collect()
@@ -134,6 +127,28 @@ mod tests {
         f = g;
         e() + g();
         return undefined;
+        "###);
+    }
+
+    #[test]
+    fn to_functions_make_dummy_args() {
+        let block_group = parse_instructions_module(vec![
+            "@0: {
+                $0 = FunctionId(1)
+                exit = return $0
+            }",
+            "@0: {
+                $1 = arguments[0]
+                $3 = arguments[3]
+                exit = return $3
+            }",
+        ]);
+
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        return (function(a, c, d, b) {
+            return b;
+        });
         "###);
     }
 }
