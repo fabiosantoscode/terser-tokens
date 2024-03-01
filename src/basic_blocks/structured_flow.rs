@@ -36,6 +36,7 @@ pub enum StructuredFlow {
     BasicBlock(Vec<(usize, BasicBlockInstruction)>),
     /// (class_var, class_members)
     Class(usize, Vec<StructuredClassMember>),
+    Debugger,
 }
 
 /// A "thing" inside a class
@@ -67,6 +68,7 @@ impl StructuredFlow {
             StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
             StructuredFlow::TryCatch(_, _, _, _) => "TryCatch".to_string(),
             StructuredFlow::Class(_, _) => "Class".to_string(),
+            StructuredFlow::Debugger => "Debugger".to_string(),
         }
     }
     pub fn simplify(self) -> Self {
@@ -174,6 +176,7 @@ impl StructuredFlow {
                     .flatten()
                     .collect()]
             }
+            StructuredFlow::Debugger => vec![],
         }
     }
 
@@ -207,6 +210,7 @@ impl StructuredFlow {
                     .flatten()
                     .collect()]
             }
+            StructuredFlow::Debugger => vec![],
         }
     }
 
@@ -296,6 +300,7 @@ impl StructuredFlow {
             StructuredFlow::BasicBlock(_) => None,
             StructuredFlow::TryCatch(_, _, _, _) => None,
             StructuredFlow::Class(class_var, _) => Some(*class_var),
+            StructuredFlow::Debugger => None,
         }
     }
 }
@@ -378,6 +383,7 @@ impl Debug for StructuredFlow {
                 }
                 write!(f, "{}", &buf)
             }
+            StructuredFlow::Debugger => writeln!(f, "Debugger"),
         }
     }
 }

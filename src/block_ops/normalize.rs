@@ -323,6 +323,12 @@ fn fold_blocks(
 
                 to_label.push(end);
             }
+            StructuredFlow::Debugger => {
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::Debugger(MAX),
+                });
+            }
         }
     }
 

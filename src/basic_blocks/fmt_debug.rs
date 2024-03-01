@@ -332,6 +332,9 @@ impl Debug for BasicBlockExit {
             BasicBlockExit::ClassEnd(next) => {
                 write!(f, "class end after @{}", next)
             }
+            BasicBlockExit::Debugger(next) => {
+                write!(f, "debugger and jump @{}", next)
+            }
         }
     }
 }

@@ -1,9 +1,9 @@
 use swc_ecma_ast::{
     AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
-    Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp, Lit, Module,
-    ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, ReturnStmt,
-    SpreadElement, Stmt, Str, Super, ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp,
-    WhileStmt, YieldExpr,
+    DebuggerStmt, Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp,
+    Lit, Module, ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread,
+    ReturnStmt, SpreadElement, Stmt, Str, Super, ThrowStmt, TryStmt, UnaryExpr, UnaryOp,
+    UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
 };
 
 use crate::{
@@ -204,6 +204,9 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
             vec![try_stmt]
         }
         StructuredFlow::Class(class_var, members) => class_to_ast(ctx, *class_var, members),
+        StructuredFlow::Debugger => vec![Stmt::Debugger(DebuggerStmt {
+            span: Default::default(),
+        })],
         _ => {
             todo!("to_stat: {:?}", node)
         }

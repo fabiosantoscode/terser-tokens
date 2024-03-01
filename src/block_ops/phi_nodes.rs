@@ -210,7 +210,9 @@ fn generate_phi_nodes_inner(
                 out_recursive.push(StructuredFlow::Class(class_var, members));
             }
             // Identity - don't need to do anything with these, because they don't read or write vars
-            StructuredFlow::Break(_) | StructuredFlow::Continue(_) => out_recursive.push(item),
+            StructuredFlow::Debugger | StructuredFlow::Break(_) | StructuredFlow::Continue(_) => {
+                out_recursive.push(item)
+            }
         }
     }
 

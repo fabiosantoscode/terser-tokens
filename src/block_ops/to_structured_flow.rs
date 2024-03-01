@@ -105,6 +105,10 @@ fn do_tree_chunk(
 
             match block.exit {
                 BasicBlockExit::Jump(to) => rest = to,
+                BasicBlockExit::Debugger(to) => {
+                    rest = to;
+                    blocks.push(StructuredFlow::Debugger)
+                },
                 BasicBlockExit::Break(tgt) => {
                     blocks.push(StructuredFlow::Break(ctx.break_index(tgt)))
                 }

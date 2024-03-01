@@ -341,7 +341,12 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         }
         Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
-        Stmt::Debugger(_) => todo!(),
+        Stmt::Debugger(_) => {
+            let index = ctx.wrap_up_block();
+            let after_index = ctx.wrap_up_block();
+
+            ctx.set_exit(index, BasicBlockExit::Debugger(after_index));
+        },
         Stmt::With(_) => todo!(),
         Stmt::Switch(_) => todo!(),
         Stmt::Throw(ThrowStmt { arg, .. }) => {

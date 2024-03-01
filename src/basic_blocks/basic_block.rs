@@ -67,6 +67,8 @@ pub enum BasicBlockExit {
     ClassPopStaticBlock(usize),
     /// (Class only): (next_block) Ends a class
     ClassEnd(usize),
+    /// (next) Debugger statement
+    Debugger(usize),
 }
 
 impl BasicBlockExit {
@@ -88,6 +90,7 @@ impl BasicBlockExit {
             | BasicBlockExit::ClassPushStaticBlock(_, _)
             | BasicBlockExit::ClassPopStaticBlock(_)
             | BasicBlockExit::ClassEnd(_)
+            | BasicBlockExit::Debugger(_)
             | BasicBlockExit::Loop(_, _) => vec![],
         }
     }
@@ -110,6 +113,7 @@ impl BasicBlockExit {
             | BasicBlockExit::ClassPushStaticBlock(_, _)
             | BasicBlockExit::ClassPopStaticBlock(_)
             | BasicBlockExit::ClassEnd(_)
+            | BasicBlockExit::Debugger(_)
             | BasicBlockExit::Loop(_, _) => vec![],
         }
     }
