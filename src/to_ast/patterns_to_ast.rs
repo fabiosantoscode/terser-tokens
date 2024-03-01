@@ -1,5 +1,6 @@
 use swc_ecma_ast::{
-    ArrayPat, Ident, KeyValuePatProp, ObjectPat, ObjectPatProp, Pat, PropName, RestPat, Stmt,
+    ArrayPat, ComputedPropName, Ident, KeyValuePatProp, ObjectPat, ObjectPatProp, Pat, PropName,
+    RestPat, Stmt,
 };
 
 use crate::basic_blocks::{ArrayPatternPiece, BasicBlockInstruction, ObjectPatternPiece};
@@ -29,7 +30,15 @@ pub fn pattern_to_statement(
                             value: Box::new(build_binding_identifier(&variable.to_string())),
                         })
                     }
-                    ObjectPatternPiece::TakeComputedKey(_) => todo!(),
+                    ObjectPatternPiece::TakeComputedKey(key_variable) => {
+                        ObjectPatProp::KeyValue(KeyValuePatProp {
+                            key: PropName::Computed(ComputedPropName {
+                                span: Default::default(),
+                                expr: Box::new(ref_or_inlined_expr(ctx, *key_variable)),
+                            }),
+                            value: Box::new(build_binding_identifier(&variable.to_string())),
+                        })
+                    }
                     ObjectPatternPiece::Spread => ObjectPatProp::Rest(RestPat {
                         span: Default::default(),
                         dot3_token: Default::default(),
@@ -221,6 +230,24 @@ mod tests {
                 d
             ];
         })();
+        return undefined;
+        "###);
+    }
+
+    #[test]
+    fn to_object_patterns_computed_key() {
+        let block_group = test_basic_blocks_module(
+            "var obj = { x: 1 };
+            var { ['x']: a } = obj;
+            a;",
+        );
+
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        var { ["x"]: a } = {
+            "x": 1
+        };
+        var b = a;
         return undefined;
         "###);
     }

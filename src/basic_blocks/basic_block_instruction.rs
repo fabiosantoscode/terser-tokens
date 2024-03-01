@@ -133,7 +133,15 @@ impl BasicBlockInstruction {
             }
             BasicBlockInstruction::Super => vec![],
             BasicBlockInstruction::ArrayPattern(input, _) => vec![*input],
-            BasicBlockInstruction::ObjectPattern(input, _) => vec![*input],
+            BasicBlockInstruction::ObjectPattern(input, pat_pieces) => {
+                let mut res = vec![*input];
+                for piece in pat_pieces.iter() {
+                    if let ObjectPatternPiece::TakeComputedKey(id) = piece {
+                        res.push(*id);
+                    }
+                }
+                res
+            },
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
             BasicBlockInstruction::TempExit(_, arg) => vec![*arg],
             BasicBlockInstruction::CaughtError => vec![],
