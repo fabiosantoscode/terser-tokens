@@ -382,6 +382,23 @@ impl Debug for StructuredFlow {
     }
 }
 
+impl StructuredFlow {
+    fn _all(items: &Vec<StructuredFlow>) -> bool {
+        items.iter().all(|x| x.is_structured_flow_empty())
+    }
+
+    pub fn is_structured_flow_empty(&self) -> bool {
+        match self {
+            StructuredFlow::Block(items) => Self::_all(items),
+            StructuredFlow::Loop(_, body) => Self::_all(body),
+            StructuredFlow::Branch(_, _, cons, alt) => Self::_all(cons) && Self::_all(alt),
+            StructuredFlow::TryCatch(_, body, _, fin) => Self::_all(body) && Self::_all(fin),
+            StructuredFlow::BasicBlock(instructions) => instructions.len() == 0,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::testutils::*;

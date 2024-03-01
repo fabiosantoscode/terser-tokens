@@ -183,7 +183,9 @@ pub fn class_to_basic_blocks(
 
                         ctx.set_exit(value, BasicBlockExit::ClassConstructor(fn_id, after));
                     }
-                    other => todo!("class member {:?}", other),
+                    ClassMember::TsIndexSignature(_) => unimplemented!("TypeScript AST nodes"),
+                    ClassMember::AutoAccessor(_) => todo!("Class auto accessors"),
+                    
                 }
             }
             ctx.wrap_up_block()

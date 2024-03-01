@@ -69,10 +69,11 @@ fn fold_basic_blocks(
     Option<StructuredFlow>,
 )> {
     let mut out = vec![];
-    let mut leftover_instructions = vec![];
+    let mut leftover_instructions = Vec::with_capacity(inp.len());
     for item in inp {
         match item {
             StructuredFlow::BasicBlock(instructions) => leftover_instructions.push(instructions),
+            item if item.is_structured_flow_empty() => {}
             _ => {
                 if leftover_instructions.len() > 0 {
                     out.push((leftover_instructions, Some(item)));
@@ -391,6 +392,33 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_if_empty() {
+        let group = test_normalize(
+            "@0: {
+                $0 = 1
+                exit = cond $0 ? @1..@1 : @2..@2
+            }
+            @1: {
+                exit = jump @3
+            }
+            @2: {
+                exit = jump @3
+            }
+            @3: {
+                $1 = 4
+                exit = return $1
+            }",
+        );
+        insta::assert_debug_snapshot!(group, @r###"
+        @0: {
+            $0 = 1
+            $1 = 4
+            exit = return $1
+        }
+        "###);
+    }
+
+    #[test]
     fn test_normalize_trycatch() {
         let group = test_normalize(
             "@0: {
@@ -444,6 +472,49 @@ mod tests {
             exit = end finally after @4
         }
         @4: {
+            $4 = $3
+            exit = return $4
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_normalize_trycatch_empty() {
+        let group = test_normalize(
+            "@0: {
+                exit = jump @1
+            }
+            @1: {
+                exit = try @2 catch @4 finally @6 after @7
+            }
+            @2: {
+                exit = jump @3
+            }
+            @3: {
+                exit = error ? jump @4 : jump @6
+            }
+            @4: {
+                $1 = either($2, $3)
+                $2 = 888
+                exit = jump @5
+            }
+            @5: {
+                $3 = either($1, $2)
+                exit = finally @6 after @7
+            }
+            @6: {
+                exit = jump @7
+            }
+            @7: {
+                exit = end finally after @8
+            }
+            @8: {
+                $4 = $3
+                exit = return $4
+            }",
+        );
+        insta::assert_debug_snapshot!(group, @r###"
+        @0: {
             $4 = $3
             exit = return $4
         }
@@ -531,19 +602,13 @@ mod tests {
         );
         insta::assert_debug_snapshot!(group, @r###"
         @0: {
-            exit = loop @1..@3
+            exit = loop @1..@1
         }
         @1: {
             $0 = 123
-            exit = cond $0 ? @2..@2 : @3..@3
+            exit = jump @2
         }
         @2: {
-            exit = jump @4
-        }
-        @3: {
-            exit = jump @4
-        }
-        @4: {
             $1 = undefined
             exit = return $1
         }
