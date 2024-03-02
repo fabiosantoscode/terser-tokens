@@ -243,7 +243,7 @@ pub fn interpret(
                 .flat_map(|alt| ctx.get_variable(*alt));
             JsType::union_all(types)?
         }
-        BasicBlockInstruction::Function(id) => JsType::TheFunction(*id),
+        BasicBlockInstruction::Function(id) => JsType::TheFunction(*id, Default::default()),
         BasicBlockInstruction::Call(callee, args) => {
             let the_function = ctx.get_variable(*callee)?.as_function_id()?;
             let func = ctx.get_function(the_function)?.clone(/* TODO */);
@@ -310,7 +310,11 @@ mod tests {
         }
     }
 
-    fn test_interp_js(source: &str) -> JsType {
+    fn test_interp_unknown(source: &str) -> bool {
+        test_interp(source).is_none()
+    }
+
+    fn test_interp_js(source: &str) -> Option<JsCompletion> {
         let b_group = test_basic_blocks_module(source);
         let mut ctx = InterpretCtx::from_module(&b_group);
         ctx.start_function(
@@ -320,14 +324,17 @@ mod tests {
         ctx.assign_variable(1, JsType::new_number(1.0));
         ctx.assign_variable(2, JsType::new_number(2.0));
         interpret_module(&mut ctx, &b_group)
-            .unwrap()
-            .as_return()
-            .unwrap()
-            .clone()
     }
 
-    fn test_interp_unknown(source: &str) -> bool {
-        test_interp(source).is_none()
+    fn test_interp_js_normal(source: &str) -> JsType {
+        match test_interp_js(source) {
+            Some(JsCompletion::Return(t)) => t,
+            comp => panic!("expected normal completion, got {:?}", comp),
+        }
+    }
+
+    fn test_interp_js_unknown(source: &str) -> bool {
+        test_interp_js(source).is_none()
     }
 
     #[test]
@@ -436,29 +443,43 @@ mod tests {
 
     #[test]
     fn interp_functions() {
-        let obj = test_interp_js(
+        let obj = test_interp_js_normal(
             "return (function(a, b) {
                 return a + b;
             })(1, 2);",
         );
         insta::assert_debug_snapshot!(obj, @"TheNumber(3)");
+
+        let obj = test_interp_js_normal(
+            "let x = function(a, b) {
+                return a + b;
+            };
+            return x(1, 2);",
+        );
+        insta::assert_debug_snapshot!(obj, @"TheNumber(3)");
+
+        let obj = test_interp_js_unknown(
+            "let x = function() {};
+            return x === x;",
+        );
+        assert!(obj);
     }
 
     #[test]
     fn interp_pattern() {
-        insta::assert_debug_snapshot!(test_interp_js("
+        insta::assert_debug_snapshot!(test_interp_js_normal("
             let [a, [,,b]] = [1, [0,0,2]];
             return [b, a];
         "), @"TheArray([TheNumber(2), TheNumber(1)])");
-        insta::assert_debug_snapshot!(test_interp_js("
+        insta::assert_debug_snapshot!(test_interp_js_normal("
             let [a = 123] = [];
             return a;
         "), @"TheNumber(123)");
-        insta::assert_debug_snapshot!(test_interp_js("
+        insta::assert_debug_snapshot!(test_interp_js_normal("
             let [a = 999, b = 456] = [123];
             return [a, b];
         "), @"TheArray([TheNumber(123), TheNumber(456)])");
-        insta::assert_debug_snapshot!(test_interp_js("
+        insta::assert_debug_snapshot!(test_interp_js_normal("
             let [a, ...b] = [123, 456, 789];
             return [a, b];
         "), @"TheArray([TheNumber(123), TheArray([TheNumber(456), TheNumber(789)])])");
@@ -466,11 +487,11 @@ mod tests {
 
     #[test]
     fn interp_obj_pattern() {
-        insta::assert_debug_snapshot!(test_interp_js("
+        insta::assert_debug_snapshot!(test_interp_js_normal("
             let { a = 123 } = {};
             return a;
         "), @"TheNumber(123)");
-        insta::assert_debug_snapshot!(test_interp_js("
+        insta::assert_debug_snapshot!(test_interp_js_normal("
             let { a = 1, [-1 + 2]: b, ...c } = { 1: 2, xrest: 3 };
             return [a, b, c];
         "), @"TheArray([TheNumber(1), TheNumber(2), TheObject({\"xrest\": TheNumber(3)})])");
@@ -478,30 +499,30 @@ mod tests {
 
     #[test]
     fn interp_typeof() {
-        insta::assert_debug_snapshot!(test_interp_js("return typeof undefined"), @"TheString(\"undefined\")");
-        insta::assert_debug_snapshot!(test_interp_js("return typeof {}"), @"TheString(\"object\")");
-        insta::assert_debug_snapshot!(test_interp_js("return typeof []"), @"TheString(\"object\")");
-        insta::assert_debug_snapshot!(test_interp_js("return typeof function(){}"), @"TheString(\"function\")");
-        insta::assert_debug_snapshot!(test_interp_js("return typeof missingVar"), @"String");
+        insta::assert_debug_snapshot!(test_interp_js_normal("return typeof undefined"), @"TheString(\"undefined\")");
+        insta::assert_debug_snapshot!(test_interp_js_normal("return typeof {}"), @"TheString(\"object\")");
+        insta::assert_debug_snapshot!(test_interp_js_normal("return typeof []"), @"TheString(\"object\")");
+        insta::assert_debug_snapshot!(test_interp_js_normal("return typeof function(){}"), @"TheString(\"function\")");
+        insta::assert_debug_snapshot!(test_interp_js_normal("return typeof missingVar"), @"String");
     }
 
     #[test]
     fn interp_incr() {
-        let num = test_interp_js("let a = 1; return a++;");
+        let num = test_interp_js_normal("let a = 1; return a++;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
-        let num = test_interp_js("let a = 2; return --a;");
+        let num = test_interp_js_normal("let a = 2; return --a;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
-        let num = test_interp_js("let a = 2; a--; return a++;");
+        let num = test_interp_js_normal("let a = 2; a--; return a++;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
-        let num = test_interp_js("let a = 1; a++; return --a;");
+        let num = test_interp_js_normal("let a = 1; a++; return --a;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
     }
 
     #[test]
     fn interp_lhs() {
-        let obj = test_interp_js("let o = {a: 1}; o.a++; return o;");
+        let obj = test_interp_js_normal("let o = {a: 1}; o.a++; return o;");
         insta::assert_debug_snapshot!(obj, @"TheObject({\"a\": TheNumber(2)})");
-        let obj = test_interp_js("let o = {a: 1}; o.a++; return o.a;");
+        let obj = test_interp_js_normal("let o = {a: 1}; o.a++; return o.a;");
         insta::assert_debug_snapshot!(obj, @"TheNumber(2)");
     }
 

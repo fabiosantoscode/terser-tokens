@@ -15,7 +15,8 @@ pub enum JsType {
     Number,
     TheNumber(NotNan<f64>),
     Function,
-    TheFunction(FunctionId),
+    /// (function_id, properties) an instance of a function.
+    TheFunction(FunctionId, BTreeMap<String, JsType>),
     Array,
     TheArray(Vec<JsType>),
     Object,
@@ -50,7 +51,7 @@ impl JsType {
             JsType::Number => None,
             JsType::TheNumber(n) => Some(n != &NotNan::new(0.0).unwrap()),
             JsType::Function => Some(true),
-            JsType::TheFunction(_) => Some(true),
+            JsType::TheFunction { .. } => Some(true),
             JsType::Array => Some(true),
             JsType::TheArray(_) => Some(true),
             JsType::TheObject(_) => Some(true),
@@ -123,7 +124,7 @@ impl JsType {
                 (TheNumber(_) | Number, TheNumber(_) | Number) => Number,
                 (TheBoolean(_) | Boolean, TheBoolean(_) | Boolean) => Boolean,
                 (TheString(_) | String, TheString(_) | String) => String,
-                (TheFunction(_) | Function, TheFunction(_) | Function) => Function,
+                (TheFunction { .. } | Function, TheFunction { .. } | Function) => Function,
                 (TheObject(_) | Object, TheObject(_) | Object) => Object,
                 (TheArray(_) | Array, TheArray(_) | Array) => Array,
                 _ => Any,
@@ -143,7 +144,9 @@ impl JsType {
                 (Number, TheNumber(n)) | (TheNumber(n), Number) => Some(TheNumber(*n)),
                 (Boolean, TheBoolean(b)) | (TheBoolean(b), Boolean) => Some(TheBoolean(*b)),
                 (String, TheString(s)) | (TheString(s), String) => Some(TheString(s.clone())),
-                (Function, TheFunction(id)) | (TheFunction(id), Function) => Some(TheFunction(*id)),
+                (Function, f @ TheFunction { .. }) | (f @ TheFunction { .. }, Function) => {
+                    Some(f.clone())
+                }
                 (Object, TheObject(pps)) | (TheObject(pps), Object) => Some(TheObject(pps.clone())),
                 _ => None,
             }
@@ -152,7 +155,7 @@ impl JsType {
 
     pub(crate) fn as_function_id(&self) -> Option<FunctionId> {
         match self {
-            JsType::TheFunction(id) => Some(*id),
+            JsType::TheFunction(id, _) => Some(*id),
             _ => None,
         }
     }
@@ -182,7 +185,7 @@ impl JsType {
             JsType::TheObject(_)
             | JsType::Object
             | JsType::Function
-            | JsType::TheFunction(_)
+            | JsType::TheFunction { .. }
             | JsType::Array
             | JsType::TheArray(_) => Some(true),
             _ => None,
@@ -221,7 +224,7 @@ impl JsType {
             JsType::Number => JsType::TheString("number".to_string()),
             JsType::TheNumber(_) => JsType::TheString("number".to_string()),
             JsType::Function => JsType::TheString("function".to_string()),
-            JsType::TheFunction(_) => JsType::TheString("function".to_string()),
+            JsType::TheFunction { .. } => JsType::TheString("function".to_string()),
             JsType::Array => JsType::TheString("object".to_string()),
             JsType::TheArray(_) => JsType::TheString("object".to_string()),
             JsType::Object => JsType::TheString("object".to_string()),
@@ -244,7 +247,13 @@ impl std::fmt::Debug for JsType {
             JsType::Number => write!(f, "Number"),
             JsType::TheNumber(n) => write!(f, "TheNumber({})", n),
             JsType::Function => write!(f, "Function"),
-            JsType::TheFunction(id) => write!(f, "TheFunction({})", id.0),
+            JsType::TheFunction(id, x) => {
+                if x.is_empty() {
+                    write!(f, "TheFunction({})", id.0)
+                } else {
+                    write!(f, "TheFunction({} with {:?})", id.0, x)
+                }
+            },
             JsType::Array => write!(f, "Array"),
             JsType::TheArray(items) => write!(f, "TheArray({:?})", items),
             JsType::Object => write!(f, "Object"),

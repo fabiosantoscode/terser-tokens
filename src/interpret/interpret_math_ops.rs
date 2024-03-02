@@ -73,26 +73,34 @@ fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<Js
 fn interp_comparisons(op: &swc_ecma_ast::BinaryOp, l: &JsType, r: &JsType) -> Option<JsCompletion> {
     use swc_ecma_ast::BinaryOp::*;
 
+    let is_strict = match op {
+        EqEq | NotEq => false,
+        EqEqEq | NotEqEq => true,
+        _ => return None,
+    };
     let can_compare_type = |t: &JsType| match t {
-        JsType::TheBoolean(_) | JsType::TheNumber(_) | JsType::TheString(_) | JsType::Undefined => {
-            true
-        }
+        JsType::TheBoolean(_)
+        | JsType::TheNumber(_)
+        | JsType::TheString(_)
+        | JsType::Undefined
+        | JsType::Null => true,
         _ => false,
     };
 
-    let is_equal = if can_compare_type(l) && can_compare_type(r) && matches!(op, EqEqEq | NotEqEq) {
-        l == r
-    } else {
-        match (l, r) {
-            (JsType::Undefined, _) | (_, JsType::Undefined) => false,
-
-            _ => return None,
+    let is_equal = match (l, r) {
+        (JsType::Undefined | JsType::Null, JsType::Undefined | JsType::Null) => is_strict,
+        _ => {
+            if can_compare_type(l) && can_compare_type(r) && is_strict {
+                l == r
+            } else {
+                return None;
+            }
         }
     };
 
     match op {
         EqEq | EqEqEq => Some(JsCompletion::Normal(JsType::TheBoolean(is_equal == true))),
-        NotEq | NotEqEq => Some(JsCompletion::Normal(JsType::TheBoolean(is_equal == true))),
-        _ => None,
+        NotEq | NotEqEq => Some(JsCompletion::Normal(JsType::TheBoolean(is_equal == false))),
+        _ => unreachable!(),
     }
 }
