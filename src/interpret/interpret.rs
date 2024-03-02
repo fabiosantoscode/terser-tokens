@@ -363,7 +363,7 @@ mod tests {
 
     use crate::{
         basic_blocks::FunctionId,
-        interpret::{interpret_block_group, JsType},
+        interpret::{interpret_block_group, JsType, interpret_module},
         testutils::*,
     };
 
@@ -397,15 +397,15 @@ mod tests {
     }
 
     fn test_interp_js(source: &str) -> JsType {
-        let b_group = test_basic_blocks(source);
-        let mut ctx = InterpretCtx::new();
+        let b_group = test_basic_blocks_module(source);
+        let mut ctx = InterpretCtx::from_module(&b_group);
         ctx.start_function(
             FunctionId(0),
             Some(vec![0.0.into(), 1.0.into(), 2.0.into()]).into(),
         );
         ctx.assign_variable(1, JsType::new_number(1.0));
         ctx.assign_variable(2, JsType::new_number(2.0));
-        interpret_block_group(&mut ctx, &b_group)
+        interpret_module(&mut ctx, &b_group)
             .unwrap()
             .as_return()
             .unwrap()
@@ -504,12 +504,6 @@ mod tests {
     }
 
     #[test]
-    fn interp_arguments() {
-        insta::assert_debug_snapshot!(test_interp_normal("arguments[0]"), @"TheNumber(0)");
-        insta::assert_debug_snapshot!(test_interp_normal("arguments[1...]"), @"TheArray([TheNumber(1), TheNumber(2)])");
-    }
-
-    #[test]
     fn interp_phi() {
         insta::assert_debug_snapshot!(test_interp_normal("either($1)"), @"TheNumber(1)");
         insta::assert_debug_snapshot!(test_interp_normal("either($1, $2)"), @"Number");
@@ -518,6 +512,22 @@ mod tests {
     #[test]
     fn interp_function() {
         insta::assert_debug_snapshot!(test_interp_normal("FunctionId(1)"), @"TheFunction(1)");
+    }
+
+    #[test]
+    fn interp_arguments() {
+        insta::assert_debug_snapshot!(test_interp_normal("arguments[0]"), @"TheNumber(0)");
+        insta::assert_debug_snapshot!(test_interp_normal("arguments[1...]"), @"TheArray([TheNumber(1), TheNumber(2)])");
+    }
+
+    #[test]
+    fn interp_functions() {
+        let obj = test_interp_js("
+            return (function(a, b) {
+                return a + b;
+            })(1, 2);
+        ");
+        insta::assert_debug_snapshot!(obj, @"TheNumber(3)");
     }
 
     #[test]
