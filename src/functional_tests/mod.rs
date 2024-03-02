@@ -20,6 +20,9 @@ mod loops;
 mod objects;
 
 #[cfg(test)]
+mod ops;
+
+#[cfg(test)]
 mod real_world;
 
 #[cfg(test)]
