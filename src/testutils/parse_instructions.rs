@@ -5,7 +5,7 @@ use nom::IResult;
 use crate::basic_blocks::{
     ArrayElement, BasicBlock, BasicBlockEnvironment, BasicBlockExit, BasicBlockGroup,
     BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, IncrDecr, NonLocalId, ObjectKey,
-    TempExitType, LHS,
+    ObjectProperty, TempExitType, LHS, ObjectValue,
 };
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
@@ -449,6 +449,45 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             Ok((input, BasicBlockInstruction::Array(items)))
         }
 
+        fn ins_object(input: &str) -> IResult<&str, BasicBlockInstruction> {
+            fn object_prop(input: &str) -> IResult<&str, ObjectProperty> {
+                let input = whitespace!(input);
+                not(tag("}"))(input)?; // In case we see ",}", skip the .expect() below
+
+                let (input, opt_threedot) = opt(tag("..."))(input)?;
+                if let Some(_) = opt_threedot {
+                    let input = whitespace!(input);
+                    let (input, r) = parse_ref(input)?;
+                    return Ok((input, ObjectProperty::Spread(r)));
+                }
+
+                let (input, key) = cut(alt((
+                    map(tuple((tag("["), parse_ref, tag("]"))), |(_, r, _)| ObjectKey::Computed(r)),
+                    map(alphanumeric1, |s| ObjectKey::NormalKey(String::from(s))),
+                )))(input).expect("bad object key");
+
+                let input = whitespace!(input);
+                let (input, _) = tag(":")(input)?;
+                let input = whitespace!(input);
+
+                let (input, value) = parse_ref(input)?;
+
+                Ok((input, ObjectProperty::KeyValue(key, ObjectValue::Property(value))))
+            }
+
+            // {key: ref, [$3]: ref, ...}
+            let (input, _) = tag("{")(input)?;
+            let (input, _) = opt(spaced_comma)(input)?;
+            let input = whitespace!(input);
+            let (input, props) =
+                separated_list0(spaced_comma, preceded(multispace0, object_prop))(input)?;
+            let input = whitespace!(input);
+            let (input, _) = opt(spaced_comma)(input)?;
+            let input = whitespace!(input);
+            let (input, _) = tag("}")(input)?;
+            Ok((input, BasicBlockInstruction::Object(None, props)))
+        }
+
         fn ins_tempexit(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // YieldStar {ref}
             // Yield {ref}
@@ -517,6 +556,7 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
             ins_argref,
             ins_caught_error,
             ins_array,
+            ins_object,
             ins_tempexit,
             ins_phi,
             ins_read,
@@ -645,6 +685,11 @@ mod tests {
                 $10 = FunctionId(1)
                 exit = return $8
             }
+            @10: {
+                $11 = [$1, $2, ...$3]
+                $12 = {a: $1, [$2]: $3, ...$4}
+                exit = return $8
+            }
             "###,
         )
         .unwrap()
@@ -690,6 +735,11 @@ mod tests {
             $8 = arguments[0]
             $9 = arguments[1...]
             $10 = FunctionId(1)
+            exit = return $8
+        }
+        @10: {
+            $11 = [$1, $2, ...$3]
+            $12 = {a: $1, [$2]: $3, ...$4}
             exit = return $8
         }
         "###

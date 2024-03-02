@@ -153,7 +153,13 @@ pub fn interpret(
 
                             out_props.insert(key, value.clone());
                         }
-                        ObjectProperty::Spread(_) => todo!(),
+                        ObjectProperty::Spread(spread) => {
+                            let spread = ctx.get_variable(*spread)?.as_object()?;
+
+                            for (key, value) in spread {
+                                out_props.insert(key.clone(), value.clone());
+                            }
+                        },
                     }
                 }
 
@@ -171,13 +177,21 @@ pub fn interpret(
 
             let mut pattern_contents: Vec<JsType> = Vec::new();
 
-            for (i, item) in pieces.iter().enumerate() {
+            let mut i = 0;
+            for item in pieces {
                 match item {
                     ArrayPatternPiece::Item => {
                         let item_or_undef = from_arr.get(i).cloned().unwrap_or(JsType::Undefined);
+                        i += 1;
+
                         pattern_contents.push(item_or_undef);
                     }
-                    ArrayPatternPiece::Spread => todo!(),
+                    ArrayPatternPiece::Spread => {
+                        let rest = from_arr.iter().skip(i).cloned().collect::<Vec<_>>();
+                        i += rest.len();
+
+                        pattern_contents.push(JsType::TheArray(rest));
+                    }
                 }
             }
 
@@ -483,6 +497,13 @@ mod tests {
     }
 
     #[test]
+    fn interp_object() {
+        insta::assert_debug_snapshot!(test_interp_normal("{ }"), @"TheObject({})");
+        insta::assert_debug_snapshot!(test_interp_normal("{a: $1}"), @"TheObject({\"a\": TheNumber(1)})");
+        insta::assert_debug_snapshot!(test_interp_unknown("{a: $1, ...$2}"), @"true");
+    }
+
+    #[test]
     fn interp_arguments() {
         insta::assert_debug_snapshot!(test_interp_normal("arguments[0]"), @"TheNumber(0)");
         insta::assert_debug_snapshot!(test_interp_normal("arguments[1...]"), @"TheArray([TheNumber(1), TheNumber(2)])");
@@ -513,6 +534,10 @@ mod tests {
             let [a = 999, b = 456] = [123];
             return [a, b];
         "), @"TheArray([TheNumber(123), TheNumber(456)])");
+        insta::assert_debug_snapshot!(test_interp_js("
+            let [a, ...b] = [123, 456, 789];
+            return [a, b];
+        "), @"TheArray([TheNumber(123), TheArray([TheNumber(456), TheNumber(789)])])");
     }
 
     #[test]
@@ -522,7 +547,7 @@ mod tests {
             return a;
         "), @"TheNumber(123)");
         insta::assert_debug_snapshot!(test_interp_js("
-            let { a = 1, [1]: b, ...c } = { 1: 2, xrest: 3 };
+            let { a = 1, [-1 + 2]: b, ...c } = { 1: 2, xrest: 3 };
             return [a, b, c];
         "), @"TheArray([TheNumber(1), TheNumber(2), TheObject({\"xrest\": TheNumber(3)})])");
     }

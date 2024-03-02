@@ -106,12 +106,12 @@ impl Debug for BasicBlockInstruction {
                     elements
                         .iter()
                         .map(|e| match e {
-                            ArrayElement::Hole => format!(","),
-                            ArrayElement::Item(id) => format!("${},", id),
-                            ArrayElement::Spread(id) => format!("...${},", id),
+                            ArrayElement::Hole => format!(""),
+                            ArrayElement::Item(id) => format!("${}", id),
+                            ArrayElement::Spread(id) => format!("...${}", id),
                         })
                         .collect::<Vec<_>>()
-                        .join(" ")
+                        .join(", ")
                 )
             }
             BasicBlockInstruction::Object(proto, props) => {
