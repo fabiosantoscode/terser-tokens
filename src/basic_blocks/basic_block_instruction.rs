@@ -315,10 +315,22 @@ impl LHS {
 }
 
 pub fn identifier_needs_quotes(key: &str) -> bool {
-    // TODO exclude JS keywords
-    key.chars().enumerate().all(|(index, c)| match c {
-        'a'..='z' | 'A'..='Z' | '_' | '$' => true,
-        '0'..='9' if index > 0 => true,
-        _ => false,
-    })
+    if let "await" | "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger"
+    | "default" | "delete" | "do" | "else" | "enum" | "export" | "extends" | "false"
+    | "finally" | "for" | "function" | "if" | "import" | "in" | "instanceof" | "new"
+    | "null" | "return" | "super" | "switch" | "this" | "throw" | "true" | "try" | "typeof"
+    | "var" | "void" | "while" | "with" | "yield" | "let" | "static" | "implements"
+    | "interface" | "package" | "private" | "protected" | "public" | "as" | "async"
+    | "from" | "get" | "meta" | "of" | "set" | "target" = key
+    {
+        true
+    } else if key.len() == 0 {
+        true
+    } else {
+        !key.chars().enumerate().all(|(index, c)| match c {
+            'a'..='z' | 'A'..='Z' | '_' | '$' => true,
+            '0'..='9' if index > 0 => true,
+            _ => false,
+        })
+    }
 }

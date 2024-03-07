@@ -244,9 +244,9 @@ mod tests {
 
         insta::assert_display_snapshot!(out, @"
             class a {
-                \"prop\" = 1;
+                prop = 1;
                 [1 + 1] = 2;
-                static \"prop\" = 1;
+                static prop = 1;
                 static [1 + 1] = 2;
             }
             return undefined;

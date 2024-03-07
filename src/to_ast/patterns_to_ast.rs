@@ -105,9 +105,9 @@ mod tests {
         insta::assert_snapshot!(module_to_string(&tree), @r###"
         var a = undefined;
         var { x: b, ...c } = {
-            "x": {
-                "a": a,
-                "c": undefined
+            x: {
+                a: a,
+                c: undefined
             }
         };
         var d = b;
@@ -245,7 +245,7 @@ mod tests {
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
         var { ["x"]: a } = {
-            "x": 1
+            x: 1
         };
         var b = a;
         return undefined;
