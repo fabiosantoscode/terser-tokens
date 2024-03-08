@@ -11,26 +11,26 @@ pub fn interpret_block_group(
     let (first_block, last_block) = block_group.get_block_range();
 
     let completion = interpret_block_group_inner(ctx, block_group, first_block..=last_block)?;
-    ctx.mark_function_evaluated(block_group.id);
     Some(completion)
 }
 
 /// Interpret a function, or get cached, or give up if it can't be cached (IE too many versions of that function call in cache)
-pub fn interpret_function(
-    ctx: &mut InterpretCtx,
-    block_group: &BasicBlockGroup,
+pub fn interpret_function<'a>(
+    ctx: &'a mut InterpretCtx,
+    block_group: &'a BasicBlockGroup,
     args: JsArgs,
+    is_canonical: bool,
 ) -> Option<JsCompletion> {
-    if let Some(cached) = ctx.get_cached(block_group.id, &args) {
-        cached.clone()
-    } else if ctx.can_cache(block_group.id) {
-        ctx.start_function(block_group.id, args);
-        let interpretation = interpret_block_group(ctx, block_group);
-        ctx.end_function(block_group.id, interpretation.clone());
-        interpretation
-    } else {
-        None
+    if !is_canonical {
+        ctx.start_branch();
     }
+    let old_args = ctx.start_function(is_canonical, block_group.id, args);
+    let interpretation = interpret_block_group(ctx, block_group);
+    ctx.end_function(is_canonical, block_group.id, old_args, interpretation.clone());
+    if !is_canonical {
+        ctx.end_branch();
+    }
+    interpretation
 }
 
 /// Prevent infinite loops and attempting to understand really really large functions
@@ -49,7 +49,7 @@ fn interpret_block_group_inner(
         for (varname, instruction) in instructions {
             let yielded_type = interpret(ctx, instruction)?.into_normal()?;
 
-            ctx.assign_variable(*varname, yielded_type);
+            ctx.assign_variable(*varname, yielded_type)?;
         }
 
         match exit {
@@ -84,14 +84,14 @@ fn interpret_block_group_inner(
                     Some(true) => interpret_block_group_inner(ctx, block_group, *cons..=*cons_end)?,
                     Some(false) => interpret_block_group_inner(ctx, block_group, *alt..=*alt_end)?,
                     None => {
-                        ctx.start_condition();
+                        ctx.start_branch();
 
                         let a = interpret_block_group_inner(ctx, block_group, *cons..=*cons_end);
-                        let a_vars = ctx.end_condition();
+                        let a_vars = ctx.end_branch();
 
-                        ctx.start_condition();
+                        ctx.start_branch();
                         let b = interpret_block_group_inner(ctx, block_group, *alt..=*alt_end);
-                        let b_vars = ctx.end_condition();
+                        let b_vars = ctx.end_branch();
 
                         // merge the variables from both branches
                         ctx.merge_branch_mutations(a_vars, b_vars);
@@ -133,14 +133,14 @@ fn interpret_block_group_inner(
 mod tests {
     use super::*;
 
-    use crate::{interpret::JsType, testutils::*};
+    use crate::{basic_blocks::FunctionId, interpret::JsType, testutils::*};
 
     const ANY_VAR: usize = 666;
     fn test_interp(source: &str) -> Option<JsCompletion> {
-        let ctx = &mut InterpretCtx::new();
+        let module = parse_instructions_module(vec![source]);
+        let ctx = &mut InterpretCtx::from_module(&module);
         ctx.assign_variable(ANY_VAR, JsType::Any);
-        let block_group = parse_instructions(source);
-        interpret_block_group(ctx, &block_group)
+        interpret_block_group(ctx, &module.get_function(FunctionId(0)).unwrap())
     }
 
     fn test_interp_ret(source: &str) -> JsType {

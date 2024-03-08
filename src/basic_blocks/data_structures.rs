@@ -20,7 +20,7 @@ pub enum ObjectProperty {
     Spread(usize),
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Ord, Eq, PartialOrd)]
 pub enum ObjectKey {
     NormalKey(String),
     Private(String),

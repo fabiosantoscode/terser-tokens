@@ -31,7 +31,6 @@ pub struct BasicBlockModule {
 
 impl BasicBlockModule {
     /// Get a function. FunctionId(0) is the top level stats.
-    #[cfg(test)]
     pub fn get_function(&self, id: FunctionId) -> Option<&BasicBlockGroup> {
         self.functions.get(&id)
     }

@@ -17,11 +17,16 @@ where
     K: Ord + Clone + Hash + Default,
     V: Clone + Default,
 {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self {
             parent: None,
             map: BTreeMap::new(),
         }
+    }
+
+    pub fn is_root(&self) -> bool {
+        self.parent.is_none()
     }
 
     pub fn fork(&mut self) {

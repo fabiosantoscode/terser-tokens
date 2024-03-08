@@ -30,19 +30,19 @@ impl JsArgs {
         }
     }
 
-    pub fn consolidate_all<'args, It>(args: It) -> JsArgs
+    pub fn from_argvecs<It>(args: It) -> JsArgs
     where
-        It: IntoIterator<Item = &'args JsArgs>,
+        It: IntoIterator<Item = JsArgs>,
     {
         let mut args = args.into_iter();
-        let mut accum = if let Some(first) = args.next().cloned() {
+        let mut accum = if let Some(first) = args.next() {
             first
         } else {
             return JsArgs::Unknown;
         };
 
         for next_arg in args {
-            accum = accum.consolidate(next_arg);
+            accum = accum.consolidate(&next_arg);
             if let JsArgs::Unknown = accum {
                 break;
             }

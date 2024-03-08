@@ -40,7 +40,9 @@ pub enum BasicBlockInstruction {
     TempExit(TempExitType, usize),
     Phi(Vec<usize>),
     Function(FunctionId),
+    /// callee, arguments
     Call(usize, Vec<usize>),
+    /// callee, arguments
     New(usize, Vec<usize>),
     ArgumentRead(usize),
     ArgumentRest(usize),
@@ -75,7 +77,7 @@ impl IncrDecr {
 }
 
 /// A left hand side expression. This can be used for assignments, typeof, and ++/--.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Ord, Eq, PartialOrd)]
 pub enum LHS {
     Local(usize),
     NonLocal(NonLocalId),
@@ -141,7 +143,7 @@ impl BasicBlockInstruction {
                     }
                 }
                 res
-            },
+            }
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
             BasicBlockInstruction::TempExit(_, arg) => vec![*arg],
             BasicBlockInstruction::CaughtError => vec![],
@@ -241,6 +243,15 @@ impl BasicBlockInstruction {
         self.get_lhs()?.get_nonlocal_id()
     }
 
+    pub fn get_written_lhs(&self) -> Option<&LHS> {
+        match self {
+            BasicBlockInstruction::Write(lhs, _) => Some(lhs),
+            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
+            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
+            _ => None,
+        }
+    }
+
     pub fn get_lhs(&self) -> Option<&LHS> {
         match self {
             BasicBlockInstruction::Read(lhs) => Some(lhs),
@@ -259,6 +270,16 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
             _ => None,
         }
+    }
+
+    pub fn get_used_vars_and_nonlocals(&self) -> Vec<usize> {
+        let mut vars = self.used_vars();
+
+        if let Some(id) = self.get_nonlocal_id() {
+            vars.push(id);
+        }
+
+        vars
     }
 
     #[allow(dead_code)]
@@ -294,6 +315,15 @@ impl LHS {
                 res.extend(memb.used_vars_mut());
                 res
             }
+        }
+    }
+
+    pub fn var_or_nonlocal_base(&self) -> Option<usize> {
+        match self {
+            LHS::Local(v) => Some(*v),
+            LHS::NonLocal(id) => Some(id.0),
+            LHS::Global(_) => None,
+            LHS::Member(memb, _) => memb.var_or_nonlocal_base(),
         }
     }
 
