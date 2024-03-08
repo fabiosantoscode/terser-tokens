@@ -286,4 +286,110 @@ mod tests {
         }
         "###);
     }
+
+    #[test]
+    fn evaluate_nonlocal_1() {
+        let mut module = parse_instructions_module(vec![
+            "@0: {
+                $0 = undefined
+                $3 = FunctionId(1)
+                $4 = 100
+                $5 = write_non_local $$1 $4
+                $6 = $3
+                $7 = call $6()
+                exit = return $7
+            }",
+            "@0: {
+                $8 = read_non_local $$1
+                $9 = 1
+                $10 = $8 + $9
+                $11 = $10
+                exit = return $11
+            }",
+        ]);
+
+        compress_step_evaluate(&mut module);
+
+        insta::assert_debug_snapshot!(module, @r###"
+        BasicBlockModule {
+            summary: ModuleSummary {
+                filename: "",
+            },
+            top_level_stats: @0: {
+                $0 = undefined
+                $1 = FunctionId(1)
+                $2 = 100
+                $3 = 100
+                $4 = $1
+                $5 = 101
+                exit = return $5
+            },
+            functions: [
+                function():
+                @0: {
+                    $6 = 100
+                    $7 = 1
+                    $8 = 101
+                    $9 = 101
+                    exit = return $9
+                },
+            ],
+        }
+        "###);
+    }
+
+    /*
+    #[test]
+    fn evaluate_nonlocal_2() {
+        // TODO: our code generates a duplicate write_non_local $$1 so we can't easily statically evaluate this
+        let mut module = parse_instructions_module(vec![
+            "@0: {
+                $0 = undefined
+                $2 = write_non_local $$1 $0
+                $3 = FunctionId(1)
+                $4 = 100
+                $5 = write_non_local $$1 $4
+                $6 = $3
+                $7 = call $6()
+                exit = return $7
+            }",
+            "@0: {
+                $8 = read_non_local $$1
+                $9 = 1
+                $10 = $8 + $9
+                $11 = $10
+                exit = return $11
+            }",
+        ]);
+
+        compress_step_evaluate(&mut module);
+
+        insta::assert_debug_snapshot!(module, @r###"
+        BasicBlockModule {
+            summary: ModuleSummary {
+                filename: "",
+            },
+            top_level_stats: @0: {
+                $0 = undefined
+                $3 = FunctionId(1)
+                $4 = 100
+                $5 = write_non_local $$1 $4
+                $6 = $3
+                $7 = call $6()
+                exit = return $7
+            },
+            functions: [
+                function():
+                @0: {
+                    $8 = read_non_local $$1
+                    $9 = 1
+                    $10 = $8 + $9
+                    $11 = $10
+                    exit = return $11
+                },
+            ],
+        }
+        "###);
+    }
+    */
 }

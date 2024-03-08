@@ -453,13 +453,13 @@ mod tests {
             return x();",
         );
         insta::assert_debug_snapshot!(obj, @"TheNumber(1)");
+        */
 
         let obj = test_interp_js_unknown(
             "let x = function() {};
             return x === x;",
         );
         assert!(obj);
-        */
     }
 
     #[test]
@@ -505,11 +505,11 @@ mod tests {
 
     #[test]
     fn interp_incr() {
-        /*
         let num = test_interp_js_normal("let a = 1; return a++;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
         let num = test_interp_js_normal("let a = 2; return --a;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
+        /*
         let num = test_interp_js_normal("let a = 2; a--; return a++;");
         insta::assert_debug_snapshot!(num, @"TheNumber(1)");
         let num = test_interp_js_normal("let a = 1; a++; return --a;");
@@ -531,17 +531,18 @@ mod tests {
         assert!(obj);
     }
 
-    /*
     #[test]
     fn interp_nonlocal() {
-        let obj = test_interp_js("
-            let a = 1;
+        /*
+        let obj = test_interp_js(
+            "let a = 100;
             function f() {
                 let b = a + 1;
                 return b;
             }
-            return f();
-        ");
-        insta::assert_debug_snapshot!(obj, @"TheNumber(2)");
-    } */
+            return f();",
+        );
+        insta::assert_debug_snapshot!(obj, @"TheNumber(101)");
+        */
+    }
 }

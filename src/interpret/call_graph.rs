@@ -109,7 +109,7 @@ fn get_all_function_calls(module: &BasicBlockModule) -> BTreeMap<FunctionId, Vec
                 // Reassignment doesn't mean losing track
             }
             unknown_instruction => {
-                for var in unknown_instruction.get_used_vars_and_nonlocals() {
+                for var in unknown_instruction.get_read_vars_and_nonlocals() {
                     mark_unknowable(&mut function_calls, var);
                 }
             }

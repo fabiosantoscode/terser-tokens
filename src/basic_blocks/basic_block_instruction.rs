@@ -243,8 +243,13 @@ impl BasicBlockInstruction {
         self.get_lhs()?.get_nonlocal_id()
     }
 
-    pub fn get_written_lhs(&self) -> Option<&LHS> {
+    pub fn get_read_nonlocal_id(&self) -> Option<usize> {
+        self.get_read_lhs()?.get_nonlocal_id()
+    }
+
+    pub fn get_lhs(&self) -> Option<&LHS> {
         match self {
+            BasicBlockInstruction::Read(lhs) => Some(lhs),
             BasicBlockInstruction::Write(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
@@ -252,9 +257,17 @@ impl BasicBlockInstruction {
         }
     }
 
-    pub fn get_lhs(&self) -> Option<&LHS> {
+    pub fn get_read_lhs(&self) -> Option<&LHS> {
         match self {
             BasicBlockInstruction::Read(lhs) => Some(lhs),
+            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
+            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
+            _ => None,
+        }
+    }
+
+    pub fn get_written_lhs(&self) -> Option<&LHS> {
+        match self {
             BasicBlockInstruction::Write(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
@@ -272,10 +285,10 @@ impl BasicBlockInstruction {
         }
     }
 
-    pub fn get_used_vars_and_nonlocals(&self) -> Vec<usize> {
+    pub fn get_read_vars_and_nonlocals(&self) -> Vec<usize> {
         let mut vars = self.used_vars();
 
-        if let Some(id) = self.get_nonlocal_id() {
+        if let Some(id) = self.get_read_nonlocal_id() {
             vars.push(id);
         }
 

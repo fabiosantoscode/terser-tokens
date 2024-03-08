@@ -142,14 +142,9 @@ impl<'module> InterpretCtx<'_> {
         self.arguments.spread_from(n)
     }
 
-    pub(crate) fn get_function(&self, the_function: FunctionId) -> Option<&BasicBlockGroup> {
-        self.module?.functions.get(&the_function)
-    }
-
     pub(crate) fn start_branch(&mut self) {
         self.variables.fork();
     }
-
     pub(crate) fn end_branch(&mut self) -> BTreeMap<usize, JsType> {
         self.variables.unfork()
     }

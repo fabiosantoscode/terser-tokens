@@ -538,7 +538,6 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
 
         // $123 =
         let input = whitespace!(input);
-
         let (input, var_name) = parse_ref(input)?;
         let input = whitespace!(input);
         let (input, _) = tag("=")(input)?;
