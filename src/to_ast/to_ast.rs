@@ -98,7 +98,11 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
                     span: Default::default(),
                     test: Box::new(branch_expr),
                     cons: Box::new(build_block(cons)),
-                    alt: Some(Box::new(build_block(alt))),
+                    alt: if alt.is_empty() {
+                        None
+                    } else {
+                        Some(Box::new(build_block(alt)))
+                    },
                 })
             });
 
@@ -552,6 +556,89 @@ mod tests {
     }
 
     #[test]
+    fn logical_ops() {
+        let block_group = test_basic_blocks_module("((X ?? Y) && Z) || W");
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        var a = X;
+        if (a == null) {
+            var b = Y;
+        } else {
+            b = a;
+        }
+        if (b) {
+            var c = Z;
+        } else {
+            c = b;
+        }
+        if (!c) {
+            W;
+        }
+        return undefined;
+        "###);
+
+        let block_group = test_basic_blocks_module("X ?? (Y && (Z || W))");
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        var a = X;
+        if (a == null) {
+            var b = Y;
+            if (b) {
+                var c = Z;
+                if (!c) {
+                    W;
+                }
+            }
+        }
+        return undefined;
+        "###);
+
+        let block_group = test_basic_blocks_module("return ((X ?? Y) && Z) || W");
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        var a = X;
+        if (a == null) {
+            var b = Y;
+        } else {
+            b = a;
+        }
+        if (b) {
+            var c = Z;
+        } else {
+            c = b;
+        }
+        if (!c) {
+            var d = W;
+        } else {
+            d = c;
+        }
+        return d;
+        "###);
+
+        let block_group = test_basic_blocks_module("return X ?? (Y && (Z || W))");
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        var a = X;
+        if (a == null) {
+            var b = Y;
+            if (b) {
+                var c = Z;
+                if (!c) {
+                    var d = W;
+                } else {
+                    d = c;
+                }
+            } else {
+                d = b;
+            }
+        } else {
+            d = a;
+        }
+        return d;
+        "###);
+    }
+
+    #[test]
     fn to_incr_decr() {
         let block_group = test_basic_blocks_module(
             "var a = 100;
@@ -634,7 +721,7 @@ mod tests {
         var a = 0;
         if (1) {
             a = 2;
-        } else {}
+        }
         return a;
         "###);
     }
@@ -719,7 +806,7 @@ mod tests {
             if (123) {
                 if (456) {
                     break;
-                } else {}
+                }
                 continue;
             } else {
                 break;
@@ -762,12 +849,12 @@ mod tests {
             if (123) {
                 if (456) {
                     break;
-                } else {}
+                }
                 while(true){
                     if (789) {
                         if (1234) {
                             break;
-                        } else {}
+                        }
                         continue;
                     } else {
                         break;
@@ -799,7 +886,7 @@ mod tests {
             if (123) {
                 if (456) {
                     break;
-                } else {}
+                }
                 while(true){
                     if (789) {
                         if (1234) {
@@ -861,7 +948,7 @@ mod tests {
         try {
             if (a > 10) {
                 throw 123;
-            } else {}
+            }
         } catch (b) {
             a = 456;
         }
@@ -893,7 +980,7 @@ mod tests {
         try {
             if (a > 10) {
                 throw 123;
-            } else {}
+            }
         } catch (b) {
             var c = b;
             try {

@@ -469,39 +469,38 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                             ctx.push_instruction(BasicBlockInstruction::UnaryOp(UnaryOp::Bang, l))
                         }
                         BinaryOp::NullishCoalescing => {
-                            // eqnull
-                            todo!("nullish coalescing")
+                            let nil = ctx.push_instruction(BasicBlockInstruction::Null);
+                            ctx.push_instruction(BasicBlockInstruction::BinOp(
+                                BinaryOp::EqEq,
+                                l,
+                                nil,
+                            ))
                         }
                         _ => unreachable!(),
                     };
 
-                    let after_condition = ctx.wrap_up_block();
+                    let cond = ctx.current_block_index();
+                    ctx.wrap_up_block();
+
                     ctx.enter_conditional_branch();
-
-                    let l = ctx.push_instruction(BasicBlockInstruction::Ref(l));
-
-                    let before_else = ctx.wrap_up_block();
 
                     let r = expr_to_basic_blocks(ctx, &bin.right);
 
-                    ctx.leave_conditional_branch();
+                    let no_else = ctx.wrap_up_block();
 
-                    let after_else = ctx.wrap_up_block();
+                    let l = ctx.push_instruction(BasicBlockInstruction::Ref(l));
 
                     let after = ctx.wrap_up_block();
+                    ctx.wrap_up_block();
+
+                    ctx.leave_conditional_branch();
 
                     ctx.set_exit(
-                        after_condition,
-                        BasicBlockExit::Cond(
-                            condition,
-                            after_condition + 1,
-                            before_else,
-                            before_else + 1,
-                            after_else,
-                        ),
+                        cond,
+                        BasicBlockExit::Cond(condition, cond + 1, no_else - 1, no_else, no_else),
                     );
-                    ctx.set_exit(after_else, BasicBlockExit::Jump(after));
-                    ctx.set_exit(before_else, BasicBlockExit::Jump(after));
+                    ctx.set_exit(no_else - 1, BasicBlockExit::Jump(after));
+                    ctx.set_exit(no_else, BasicBlockExit::Jump(after));
 
                     return ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
                 }
@@ -1208,8 +1207,8 @@ mod tests {
             exit = jump @4
         }
         @4: {
-            $7 = either($5, $6)
-            $8 = either($0, $2, $4)
+            $7 = either($0, $2, $4)
+            $8 = either($5, $6)
             $9 = 1
             exit = jump @6
         }
@@ -1219,7 +1218,7 @@ mod tests {
             exit = jump @6
         }
         @6: {
-            $12 = either($0, $2, $8, $10)
+            $12 = either($0, $2, $7, $10)
             $13 = either($9, $11)
             $14 = $12
             $15 = 2
@@ -1541,14 +1540,14 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 1
-            $1 = $0
             exit = cond $0 ? @1..@1 : @2..@2
         }
         @1: {
-            $2 = 2
+            $1 = 2
             exit = jump @3
         }
         @2: {
+            $2 = $0
             exit = jump @3
         }
         @3: {
@@ -1564,19 +1563,19 @@ mod tests {
             $0 = global "y"
             $1 = call $0()
             $2 = !$1
-            $3 = $1
             exit = cond $2 ? @1..@1 : @2..@2
         }
         @1: {
-            $4 = global "z"
-            $5 = call $4()
+            $3 = global "z"
+            $4 = call $3()
             exit = jump @3
         }
         @2: {
+            $5 = $1
             exit = jump @3
         }
         @3: {
-            $6 = either($3, $5)
+            $6 = either($4, $5)
             $7 = $6
             exit = return $7
         }

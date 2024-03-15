@@ -299,43 +299,77 @@ pub fn remove_phi_module(module: &mut BasicBlockModule) {
 }
 
 fn collect_phi(group: &BasicBlockGroup) -> BTreeMap<usize, usize> {
-    let mut phies_to_final_name: BTreeMap<usize, usize> = Default::default();
-    let mut final_names: BTreeSet<usize> = Default::default();
+    // Create pools (sets) of variables that have a phi connection between them
+    // and merge them as we go.
+    // Each of these pools will be mapped into a single variable, and all phis
+    // replaced with the mapped variable
 
+    let mut related_pools_of_phis: Vec<BTreeSet<usize>> = vec![];
     for (_, varname, ins) in group.iter_all_instructions() {
-        if let BasicBlockInstruction::Phi(alternatives) = ins {
-            let indirect_name = alternatives
-                .iter()
-                .find(|alt_var| final_names.contains(alt_var));
+        let (from, to) = match ins {
+            BasicBlockInstruction::Phi(alternatives) => (varname, alternatives),
+            _ => continue,
+        };
+        // If either "from" or "to" are in any pool, add everything to that pool
+        // However, if they are in different pools, merge the pools
 
-            match indirect_name {
-                Some(indirect_name) => {
-                    phies_to_final_name.insert(varname, *indirect_name);
+        let pools = related_pools_of_phis
+            .iter()
+            .enumerate()
+            .flat_map(|(idx, pool)| {
+                if pool.contains(&from) || to.iter().any(|to| pool.contains(to)) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-                    for phi in alternatives {
-                        phies_to_final_name.insert(*phi, *indirect_name);
-                        final_names.insert(varname);
-                    }
-                }
-                None => {
-                    for phi in alternatives {
-                        phies_to_final_name.insert(*phi, varname);
-                        final_names.insert(varname);
-                    }
-                }
+        match &pools[..] {
+            [] => {
+                let mut new_pool = BTreeSet::from_iter(to.iter().copied());
+                new_pool.insert(from);
+                related_pools_of_phis.push(new_pool);
+            }
+            [one_pool] => {
+                let pool = related_pools_of_phis.get_mut(*one_pool).unwrap();
+                pool.insert(from);
+                pool.extend(to.iter().copied());
+            }
+            many_pools => {
+                let mut merged = many_pools
+                    .iter()
+                    .rev()
+                    .flat_map(|idx| related_pools_of_phis.remove(*idx))
+                    .collect::<BTreeSet<_>>();
+
+                merged.insert(from);
+                merged.extend(to.iter().copied());
+
+                related_pools_of_phis.push(merged);
             }
         }
     }
+
+    // Finally, take any element out of each pool and make it the "final" name
+    // All the other elements in the pool will be remapped to this final name
+    let phies_to_final_name = related_pools_of_phis
+        .into_iter()
+        .flat_map(|pool| {
+            let mut pool = pool.into_iter();
+            if let Some(first) = pool.next() {
+                Some(pool.map(move |x| (x, first)))
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
 
     phies_to_final_name
 }
 
 fn remove_phi_inner(block: &mut BasicBlock, phies_to_final_name: &mut BTreeMap<usize, usize>) {
-    block.instructions.retain(|(_, ins)| match ins {
-        BasicBlockInstruction::Phi(_) => false,
-        _ => true,
-    });
-
     for (varname, ins) in block.instructions.iter_mut() {
         if let Some(final_name) = phies_to_final_name.get(&varname) {
             *varname = *final_name;
@@ -353,6 +387,12 @@ fn remove_phi_inner(block: &mut BasicBlock, phies_to_final_name: &mut BTreeMap<u
             *x = *final_name;
         }
     }
+
+    block.instructions.retain(|(varname, ins)| match ins {
+        BasicBlockInstruction::Phi(_) => false,
+        BasicBlockInstruction::Ref(itself) if itself == varname => false,
+        _ => true,
+    });
 }
 
 #[cfg(test)]
@@ -476,9 +516,8 @@ mod tests {
         insta::assert_debug_snapshot!(blocks,
         @r###"
         @0: {
-            $2 = 777
-            $2 = $2
-            exit = return $2
+            $0 = 777
+            exit = return $0
         }
         "###
         );
@@ -519,7 +558,7 @@ mod tests {
         insta::assert_debug_snapshot!(blocks,
         @r###"
         @0: {
-            $5 = 999
+            $0 = 999
             exit = jump @1
         }
         @1: {
@@ -527,16 +566,16 @@ mod tests {
             exit = cond $1 ? @2..@3 : @3..@4
         }
         @2: {
-            $5 = 2
-            $6 = $5
+            $0 = 2
+            $3 = $0
             exit = jump @4
         }
         @3: {
-            $6 = 3
+            $3 = 3
             exit = jump @4
         }
         @4: {
-            $7 = $5
+            $7 = $0
             exit = return $7
         }
         "###
@@ -616,8 +655,8 @@ mod tests {
         insta::assert_debug_snapshot!(blocks,
         @r###"
         @0: {
-            $13 = 1
-            $1 = $13
+            $0 = 1
+            $1 = $0
             $2 = 1
             $3 = $1 == $2
             exit = jump @1
@@ -626,7 +665,7 @@ mod tests {
             exit = cond $3 ? @2..@9 : @10..@11
         }
         @2: {
-            $4 = $13
+            $4 = $0
             $5 = 1
             $6 = $4 == $5
             exit = jump @3
@@ -635,43 +674,43 @@ mod tests {
             exit = cond $6 ? @4..@5 : @6..@7
         }
         @4: {
-            $7 = $13
+            $7 = $0
             $8 = 2000
-            $13 = $7 + $8
-            $10 = $13
+            $0 = $7 + $8
+            $10 = $0
             exit = jump @5
         }
         @5: {
             exit = jump @8
         }
         @6: {
-            $13 = 3
-            $12 = $13
+            $0 = 3
+            $12 = $0
             exit = jump @7
         }
         @7: {
             exit = jump @8
         }
         @8: {
-            $14 = $13
+            $14 = $0
             $15 = 1000
-            $13 = $14 + $15
-            $17 = $13
+            $0 = $14 + $15
+            $17 = $0
             exit = jump @9
         }
         @9: {
             exit = jump @12
         }
         @10: {
-            $13 = 3
-            $19 = $13
+            $0 = 3
+            $19 = $0
             exit = jump @11
         }
         @11: {
             exit = jump @12
         }
         @12: {
-            $21 = $13
+            $21 = $0
             exit = return $21
         }
         "###

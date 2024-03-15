@@ -136,7 +136,7 @@ mod tests {
             std::mem::take(root.children_mut()[0][2]),
         ];
 
-        let expr = statements_forced_to_expr_ast(&mut ctx, children.as_slice(), 3);
+        let expr = statements_forced_to_expr_ast(&mut ctx, children.as_slice(), 1);
 
         insta::assert_display_snapshot!(expr_to_string(&expr), @r###"
             (()=>{
@@ -148,11 +148,11 @@ mod tests {
                 return a;
             })();
         "###);
-        // $3 is NOT reused but we enqueue it for now
-        insta::assert_debug_snapshot!(ctx.dequeue_enqueued_vars(), @"
-            {
-                3,
-            }
-        ");
+        // $1 is NOT reused but we enqueue it for now
+        insta::assert_debug_snapshot!(ctx.dequeue_enqueued_vars(), @r###"
+        {
+            1,
+        }
+        "###);
     }
 }
