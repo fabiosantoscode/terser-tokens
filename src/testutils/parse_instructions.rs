@@ -5,7 +5,7 @@ use nom::IResult;
 use crate::basic_blocks::{
     ArrayElement, BasicBlock, BasicBlockEnvironment, BasicBlockExit, BasicBlockGroup,
     BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, IncrDecr, NonLocalId, ObjectKey,
-    ObjectProperty, TempExitType, LHS, ObjectValue,
+    ObjectProperty, ObjectValue, TempExitType, LHS,
 };
 
 pub fn parse_instructions(input: &str) -> BasicBlockGroup {
@@ -462,9 +462,12 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
                 }
 
                 let (input, key) = cut(alt((
-                    map(tuple((tag("["), parse_ref, tag("]"))), |(_, r, _)| ObjectKey::Computed(r)),
+                    map(tuple((tag("["), parse_ref, tag("]"))), |(_, r, _)| {
+                        ObjectKey::Computed(r)
+                    }),
                     map(alphanumeric1, |s| ObjectKey::NormalKey(String::from(s))),
-                )))(input).expect("bad object key");
+                )))(input)
+                .expect("bad object key");
 
                 let input = whitespace!(input);
                 let (input, _) = tag(":")(input)?;
@@ -472,7 +475,10 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
 
                 let (input, value) = parse_ref(input)?;
 
-                Ok((input, ObjectProperty::KeyValue(key, ObjectValue::Property(value))))
+                Ok((
+                    input,
+                    ObjectProperty::KeyValue(key, ObjectValue::Property(value)),
+                ))
             }
 
             // {key: ref, [$3]: ref, ...}
@@ -518,11 +524,22 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
 
         fn ins_read(input: &str) -> IResult<&str, BasicBlockInstruction> {
             // read_non_local {ref}
-            let (input, _) = tag("read_non_local")(input)?;
-            let input = whitespace!(input);
-            let (input, nonloc) = parse_lhs(input)?;
+            let as_nonlocal = |input| {
+                let (input, _) = tag("read_non_local")(input)?;
+                let input = whitespace!(input);
+                let (input, nonloc) = parse_lhs(input)?;
 
-            Ok((input, BasicBlockInstruction::Read(nonloc)))
+                Ok((input, BasicBlockInstruction::Read(nonloc)))
+            };
+            let as_global = |input| {
+                let (input, _) = tag("global")(input)?;
+                let input = whitespace!(input);
+                let (input, global) = parse_string(input)?;
+
+                Ok((input, BasicBlockInstruction::Read(LHS::Global(global))))
+            };
+
+            alt((as_nonlocal, as_global))(input)
         }
 
         fn ins_write(input: &str) -> IResult<&str, BasicBlockInstruction> {
@@ -572,6 +589,24 @@ pub fn parse_single_instruction(input: &str) -> IResult<&str, (usize, BasicBlock
         let (input, _) = tag("$")(input)?;
         let (input, n) = digit1(input)?;
         Ok((input, n.parse().unwrap()))
+    }
+    fn parse_string(input: &str) -> IResult<&str, String> {
+        let input = whitespace!(input);
+
+        let (input, quote_style) = alt((tag("'"), tag("\"")))(input)?;
+
+        let (input, contents) = escaped(none_of("\\\"'\n"), '\\', one_of(r#""'\nrt"#))(input)?;
+
+        let contents = String::from(contents)
+            .replace("\\\"", "\"")
+            .replace("\\'", "'")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t");
+
+        let (input, _) = tag(quote_style)(input)?;
+
+        Ok((input, contents))
     }
     fn parse_member(input: &str) -> IResult<&str, ObjectKey> {
         // .name | [$123] | .#private
@@ -689,6 +724,10 @@ mod tests {
                 $12 = {a: $1, [$2]: $3, ...$4}
                 exit = return $8
             }
+            @11: {
+                $13 = global 'print'
+                exit = return $8
+            }
             "###,
         )
         .unwrap()
@@ -739,6 +778,10 @@ mod tests {
         @10: {
             $11 = [$1, $2, ...$3]
             $12 = {a: $1, [$2]: $3, ...$4}
+            exit = return $8
+        }
+        @11: {
+            $13 = global "print"
             exit = return $8
         }
         "###
