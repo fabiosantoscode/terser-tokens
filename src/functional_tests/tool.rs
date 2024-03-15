@@ -29,7 +29,7 @@ pub fn run_checks_inner(isolate: &mut v8::Isolate, s: &str) -> String {
         println!("/* parsed: {:?} */", module);
     }
 
-    let comp_s = compress(s);
+    let comp_s = compress(s, 1);
     println!("// compressed code:\n{}", comp_s);
     let Some(compressed) = run_code_for_logs(scope, &comp_s) else {
         panic!("ERROR: failed to run compressed code {comp_s}")
@@ -40,6 +40,19 @@ pub fn run_checks_inner(isolate: &mut v8::Isolate, s: &str) -> String {
     if reference != compressed {
         panic!(
             "ERROR: reference and compressed code differ:
+            compressed output: {compressed}
+            reference output: {reference}"
+        );
+    }
+
+    let comp_s = compress(s, 5);
+    let Some(compressed) = run_code_for_logs(scope, &comp_s) else {
+        panic!("ERROR: failed to run compressed code {comp_s}")
+    };
+
+    if reference != compressed {
+        panic!(
+            "ERROR: reference and compressed code differ after 5 passes:
             compressed output: {compressed}
             reference output: {reference}"
         );
@@ -56,9 +69,9 @@ fn run_code_for_logs(scope: &mut v8::HandleScope<'_, ()>, s: &str) -> Option<Str
         let code = format!(
             r###"
                 let __str = s =>
-                    Array.isArray(s) ? '[' + s.map(__str).join(', ') + ']' :
-                    s == null ? String(s) :
-                    JSON.stringify(s);
+                    Array.isArray(s) ? '[' + s.map(__str).join(', ') + ']'
+                    : s == null ? String(s)
+                    : JSON.stringify(s);
 
                 ;(async function () {{
                     {s}

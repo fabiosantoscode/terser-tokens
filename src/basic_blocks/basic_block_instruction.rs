@@ -302,6 +302,17 @@ impl BasicBlockInstruction {
             _ => panic!("Expected Ref"),
         }
     }
+
+    pub(crate) fn is_immutable_primitive(&self) -> bool {
+        match self {
+            BasicBlockInstruction::Undefined
+            | BasicBlockInstruction::Null
+            | BasicBlockInstruction::LitBool(_)
+            | BasicBlockInstruction::LitNumber(_)
+            | BasicBlockInstruction::LitString(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl LHS {

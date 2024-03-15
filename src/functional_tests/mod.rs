@@ -2,6 +2,9 @@
 mod classes;
 
 #[cfg(test)]
+mod closures;
+
+#[cfg(test)]
 mod conditions;
 
 #[cfg(test)]

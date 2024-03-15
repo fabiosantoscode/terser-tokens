@@ -1,11 +1,12 @@
 use interpret_block_group::interpret_function;
 
 use crate::{
+    analyze::construct_call_graph,
     basic_blocks::{BasicBlockModule, FunctionId},
     interpret::JsArgs,
 };
 
-use super::{construct_call_graph, interpret_block_group, InterpretCtx, JsCompletion};
+use super::{interpret_block_group, InterpretCtx, JsCompletion};
 
 pub fn interpret_module(ctx: &mut InterpretCtx, module: &BasicBlockModule) -> Option<JsCompletion> {
     let call_graph = construct_call_graph(&module);

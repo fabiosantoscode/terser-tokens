@@ -21,7 +21,7 @@ pub fn main() {
     let mut input = String::new();
     io::stdin().lock().read_to_string(&mut input).unwrap();
 
-    let module = compress::compress(&input);
+    let module = compress::compress(&input, 1);
 
     println!("{}", module)
 }

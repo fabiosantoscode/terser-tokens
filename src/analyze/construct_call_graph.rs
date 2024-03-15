@@ -139,6 +139,18 @@ fn get_all_function_vars(module: &BasicBlockModule) -> BTreeMap<usize, FunctionI
 
 /// Find all variables that are leaked, IE we can't track their value
 fn find_leaked_vars(module: &BasicBlockModule) -> BTreeSet<usize> {
+    let known_non_functions: BTreeSet<_> = module
+        .iter_all_instructions()
+        .filter_map(|(_, _, varname, ins)| {
+            if ins.is_immutable_primitive() {
+                Some(varname)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mut single_writes = BTreeSet::new();
+
     let mut unknowable = BTreeSet::new();
 
     let mark_unknowable = |unknowable: &mut BTreeSet<_>, the_var: usize| {
@@ -146,10 +158,12 @@ fn find_leaked_vars(module: &BasicBlockModule) -> BTreeSet<usize> {
     };
 
     loop {
+        single_writes.clear();
         let unknowable_count_before = unknowable.len();
         for (_, _, block) in module.iter_all_blocks() {
             for (varname, ins) in block.iter() {
                 match ins {
+                    BasicBlockInstruction::Function(_) => {}
                     BasicBlockInstruction::Call(callee, args) => {
                         for arg in args {
                             mark_unknowable(&mut unknowable, *arg);
@@ -159,11 +173,15 @@ fn find_leaked_vars(module: &BasicBlockModule) -> BTreeSet<usize> {
                         LHS::Local(id) | LHS::NonLocal(NonLocalId(id)),
                         inp,
                     ) => {
-                        // if multi_write_vars.contains(&id) {
-                        // TODO only mark the value if it's written to multiple times. Also, track if the original value was a function. This will handle an initial value of undefined which is usually given to nonlocals before reassignment.
+                        if known_non_functions.contains(inp) {
+                            continue;
+                        }
+                        if !single_writes.contains(id) && !unknowable.contains(id) {
+                            single_writes.insert(*id);
+                            continue;
+                        }
                         mark_unknowable(&mut unknowable, *id);
                         mark_unknowable(&mut unknowable, *inp);
-                        //}
                     }
                     BasicBlockInstruction::Read(LHS::Local(id) | LHS::NonLocal(NonLocalId(id)))
                     | BasicBlockInstruction::Ref(id) => {
@@ -177,6 +195,7 @@ fn find_leaked_vars(module: &BasicBlockModule) -> BTreeSet<usize> {
                         for var in unknown_instruction.get_read_vars_and_nonlocals() {
                             mark_unknowable(&mut unknowable, var);
                         }
+                        mark_unknowable(&mut unknowable, varname);
                     }
                 }
             }
@@ -372,6 +391,43 @@ mod tests {
     }
 
     #[test]
+    fn test_nonlocal_function_calls_undefined_then_some() {
+        let module = parse_instructions_module(vec![
+            "@0: {
+                $0 = undefined
+                $2 = write_non_local $$1 $0
+                $3 = FunctionId(1)
+                $100 = call $3()
+                $4 = FunctionId(2)
+                $5 = write_non_local $$1 $4
+                $101 = call $3()
+                exit = return $101
+            }",
+            "@0: {
+                $12 = arguments[0]
+                $13 = $12
+                $14 = read_non_local $$1
+                $15 = call $14()
+                $16 = $13 + $15
+                exit = return $16
+            }",
+            "@0: {
+                $17 = 99999
+                exit = return $17
+            }",
+        ]);
+        let call_graph = construct_call_graph(&module);
+        assert!(
+            call_graph.function_calls.get(&FunctionId(1)).is_some(),
+            "we know FunctionId(1) is called"
+        );
+        assert!(
+            call_graph.function_calls.get(&FunctionId(2)).is_some(),
+            "we know FunctionId(2) is called"
+        );
+    }
+
+    #[test]
     fn test_leaked_funcs() {
         let module = parse_instructions_module(vec![
             "@0: {
@@ -418,6 +474,7 @@ mod tests {
             8,
             10,
             11,
+            12,
             13,
             14,
             15,
