@@ -355,7 +355,7 @@ fn pat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, pat_expr: &'a Pat, pat_type
             expr_nonlocals(ctx, &assign_pat.right);
             pat_nonlocals(ctx, &assign_pat.left, pat_type);
         }
-        Pat::Invalid(_) => todo!(),
+        Pat::Invalid(_) => unreachable!(),
         Pat::Expr(assignee_expr) => {
             expr_nonlocals(ctx, assignee_expr.as_ref());
         }

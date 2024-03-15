@@ -60,7 +60,7 @@ pub fn class_to_basic_blocks(
                         );
 
                         for _ in class_prop.decorators.iter() {
-                            todo!()
+                            todo!("decorators")
                         }
                     }
                     ClassMember::PrivateProp(prop) => {
@@ -86,7 +86,7 @@ pub fn class_to_basic_blocks(
                         );
 
                         for _ in prop.decorators.iter() {
-                            todo!()
+                            todo!("decorators")
                         }
                     }
                     ClassMember::StaticBlock(StaticBlock { body, .. }) => {

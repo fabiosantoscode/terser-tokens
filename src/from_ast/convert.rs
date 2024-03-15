@@ -1,7 +1,8 @@
 use swc_ecma_ast::{
-    AwaitExpr, Decl, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, GetterProp, IfStmt,
-    LabeledStmt, Lit, MethodProp, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread, SetterProp,
-    Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDecl, VarDeclKind, VarDeclOrExpr, YieldExpr,
+    AwaitExpr, BinaryOp, Decl, Expr, ExprOrSpread, ForHead, ForInStmt, ForOfStmt, GetterProp,
+    IfStmt, LabeledStmt, Lit, MethodProp, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread,
+    SetterProp, Stmt, ThrowStmt, UnaryOp, UpdateExpr, UpdateOp, VarDecl, VarDeclKind,
+    VarDeclOrExpr, YieldExpr,
 };
 
 use crate::basic_blocks::{
@@ -459,9 +460,61 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
         }
         Expr::Bin(bin) => {
             let l = expr_to_basic_blocks(ctx, &bin.left);
-            let r = expr_to_basic_blocks(ctx, &bin.right);
 
-            return ctx.push_instruction(BasicBlockInstruction::BinOp(bin.op.clone(), l, r));
+            match &bin.op {
+                BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing => {
+                    let condition = match bin.op {
+                        BinaryOp::LogicalAnd => l,
+                        BinaryOp::LogicalOr => {
+                            ctx.push_instruction(BasicBlockInstruction::UnaryOp(UnaryOp::Bang, l))
+                        }
+                        BinaryOp::NullishCoalescing => {
+                            // eqnull
+                            todo!("nullish coalescing")
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    let after_condition = ctx.wrap_up_block();
+                    ctx.enter_conditional_branch();
+
+                    let l = ctx.push_instruction(BasicBlockInstruction::Ref(l));
+
+                    let before_else = ctx.wrap_up_block();
+
+                    let r = expr_to_basic_blocks(ctx, &bin.right);
+
+                    ctx.leave_conditional_branch();
+
+                    let after_else = ctx.wrap_up_block();
+
+                    let after = ctx.wrap_up_block();
+
+                    ctx.set_exit(
+                        after_condition,
+                        BasicBlockExit::Cond(
+                            condition,
+                            after_condition + 1,
+                            before_else,
+                            before_else + 1,
+                            after_else,
+                        ),
+                    );
+                    ctx.set_exit(after_else, BasicBlockExit::Jump(after));
+                    ctx.set_exit(before_else, BasicBlockExit::Jump(after));
+
+                    return ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
+                }
+                BinaryOp::In | BinaryOp::InstanceOf => todo!("in/instanceof"),
+                _ => {
+                    let r = expr_to_basic_blocks(ctx, &bin.right);
+                    return ctx.push_instruction(BasicBlockInstruction::BinOp(
+                        bin.op.clone(),
+                        l,
+                        r,
+                    ));
+                }
+            }
         }
         Expr::Assign(assign) => match &assign.left {
             PatOrExpr::Pat(pat) => {
@@ -1478,6 +1531,54 @@ mod tests {
             $20 = either($0, $13, $16, $18)
             $21 = $20
             exit = return $21
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_logical_operator() {
+        let s = test_basic_blocks("var x = 1 && 2; return x;");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 1
+            $1 = $0
+            exit = cond $0 ? @1..@1 : @2..@2
+        }
+        @1: {
+            $2 = 2
+            exit = jump @3
+        }
+        @2: {
+            exit = jump @3
+        }
+        @3: {
+            $3 = either($1, $2)
+            $4 = $3
+            exit = return $4
+        }
+        "###);
+
+        let s = test_basic_blocks("var x = y() || z(); return x;");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = global "y"
+            $1 = call $0()
+            $2 = !$1
+            $3 = $1
+            exit = cond $2 ? @1..@1 : @2..@2
+        }
+        @1: {
+            $4 = global "z"
+            $5 = call $4()
+            exit = jump @3
+        }
+        @2: {
+            exit = jump @3
+        }
+        @3: {
+            $6 = either($3, $5)
+            $7 = $6
+            exit = return $7
         }
         "###);
     }
