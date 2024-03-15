@@ -253,7 +253,7 @@ impl std::fmt::Debug for JsType {
                 } else {
                     write!(f, "TheFunction({} with {:?})", id.0, x)
                 }
-            },
+            }
             JsType::Array => write!(f, "Array"),
             JsType::TheArray(items) => write!(f, "TheArray({:?})", items),
             JsType::Object => write!(f, "Object"),

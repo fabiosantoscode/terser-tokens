@@ -346,7 +346,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             let after_index = ctx.wrap_up_block();
 
             ctx.set_exit(index, BasicBlockExit::Debugger(after_index));
-        },
+        }
         Stmt::With(_) => todo!(),
         Stmt::Switch(_) => todo!(),
         Stmt::Throw(ThrowStmt { arg, .. }) => {

@@ -185,7 +185,6 @@ pub fn class_to_basic_blocks(
                     }
                     ClassMember::TsIndexSignature(_) => unimplemented!("TypeScript AST nodes"),
                     ClassMember::AutoAccessor(_) => todo!("Class auto accessors"),
-                    
                 }
             }
             ctx.wrap_up_block()

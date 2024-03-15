@@ -108,7 +108,7 @@ fn do_tree_chunk(
                 BasicBlockExit::Debugger(to) => {
                     rest = to;
                     blocks.push(StructuredFlow::Debugger)
-                },
+                }
                 BasicBlockExit::Break(tgt) => {
                     blocks.push(StructuredFlow::Break(ctx.break_index(tgt)))
                 }

@@ -26,7 +26,12 @@ pub fn interpret_function<'a>(
     }
     let old_args = ctx.start_function(is_canonical, block_group.id, args);
     let interpretation = interpret_block_group(ctx, block_group);
-    ctx.end_function(is_canonical, block_group.id, old_args, interpretation.clone());
+    ctx.end_function(
+        is_canonical,
+        block_group.id,
+        old_args,
+        interpretation.clone(),
+    );
     if !is_canonical {
         ctx.end_branch();
     }
