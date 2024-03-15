@@ -245,11 +245,19 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
         }
         Stmt::Block(block) => block_nonlocals(ctx, &block.stmts),
         Stmt::Break(_) => {}
-        Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
+        Stmt::Continue(_) => {}
         Stmt::Labeled(stat) => stat_nonlocals(ctx, stat.body.as_ref()),
-        Stmt::Debugger(_) => todo!(),
-        Stmt::With(_) => todo!(),
-        Stmt::Switch(_) => todo!(),
+        Stmt::Debugger(_) => {},
+        Stmt::With(_) => todo!("with statement"),
+        Stmt::Switch(switch) => {
+            expr_nonlocals(ctx, &switch.discriminant);
+            for case in &switch.cases {
+                if let Some(test) = &case.test {
+                    expr_nonlocals(ctx, test);
+                }
+                block_nonlocals(ctx, &case.cons);
+            }
+        }
         Stmt::Throw(thr) => {
             expr_nonlocals(ctx, &thr.arg);
         }
@@ -454,10 +462,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
             };
 
             for arg in &call.args {
-                match arg.spread {
-                    Some(_) => todo!("spread args"),
-                    None => expr_nonlocals(ctx, arg.expr.as_ref()),
-                }
+                expr_nonlocals(ctx, arg.expr.as_ref())
             }
         }
         Expr::New(new_expr) => {
@@ -465,15 +470,21 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
 
             if let Some(args) = &new_expr.args {
                 for arg in args {
-                    match arg.spread {
-                        Some(_) => todo!("spread args"),
-                        None => expr_nonlocals(ctx, arg.expr.as_ref()),
-                    }
+                    expr_nonlocals(ctx, arg.expr.as_ref())
                 }
             }
         }
-        Expr::Tpl(_) => todo!(),
-        Expr::TaggedTpl(_) => todo!(),
+        Expr::Tpl(tpl) => {
+            for expr in &tpl.exprs {
+                expr_nonlocals(ctx, expr)
+            }
+        }
+        Expr::TaggedTpl(ttpl) => {
+            expr_nonlocals(ctx, &ttpl.tag);
+            for expr in &ttpl.tpl.exprs {
+                expr_nonlocals(ctx, expr)
+            }
+        },
         Expr::Class(class) => {
             class_nonlocals(ctx, class.class.as_ref());
         }
