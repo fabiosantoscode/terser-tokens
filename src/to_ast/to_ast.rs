@@ -523,6 +523,12 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             left: PatOrExpr::Expr(Box::new(lhs_to_ast_expr(ctx, lhs))),
             right: Box::new(ref_or_inlined_expr(ctx, *assignee)),
         }),
+        BasicBlockInstruction::Delete(lhs) => Expr::Unary(UnaryExpr {
+            span: Default::default(),
+            op: UnaryOp::Delete,
+            arg: Box::new(lhs_to_ast_expr(ctx, lhs)),
+        }),
+
         BasicBlockInstruction::CreateClass(_optional_extends) => {
             unreachable!("handled in function_to_ast")
         }

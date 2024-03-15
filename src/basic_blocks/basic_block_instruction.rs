@@ -48,6 +48,7 @@ pub enum BasicBlockInstruction {
     ArgumentRest(usize),
     Read(LHS),
     Write(LHS, usize),
+    Delete(LHS),
 }
 
 #[repr(transparent)]
@@ -164,6 +165,7 @@ impl BasicBlockInstruction {
                 res.push(*val);
                 res
             }
+            BasicBlockInstruction::Delete(lhs) => lhs.used_vars(),
         }
     }
 
@@ -232,6 +234,7 @@ impl BasicBlockInstruction {
                 res.push(val);
                 res
             }
+            BasicBlockInstruction::Delete(lhs) => lhs.used_vars_mut(),
         }
     }
 
@@ -253,6 +256,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Write(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
+            BasicBlockInstruction::Delete(lhs) => Some(lhs),
             _ => None,
         }
     }
@@ -271,6 +275,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Write(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
+            BasicBlockInstruction::Delete(lhs) => Some(lhs),
             _ => None,
         }
     }
@@ -281,6 +286,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::Write(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
+            BasicBlockInstruction::Delete(lhs) => Some(lhs),
             _ => None,
         }
     }
@@ -369,22 +375,19 @@ impl LHS {
 }
 
 pub fn identifier_needs_quotes(key: &str) -> bool {
-    if let "await" | "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger"
-    | "default" | "delete" | "do" | "else" | "enum" | "export" | "extends" | "false"
-    | "finally" | "for" | "function" | "if" | "import" | "in" | "instanceof" | "new"
-    | "null" | "return" | "super" | "switch" | "this" | "throw" | "true" | "try" | "typeof"
-    | "var" | "void" | "while" | "with" | "yield" | "let" | "static" | "implements"
-    | "interface" | "package" | "private" | "protected" | "public" | "as" | "async"
-    | "from" | "get" | "meta" | "of" | "set" | "target" = key
-    {
-        true
-    } else if key.len() == 0 {
-        true
-    } else {
-        !key.chars().enumerate().all(|(index, c)| match c {
+    match key {
+        "" => true,
+        "await" | "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger"
+        | "default" | "delete" | "do" | "else" | "enum" | "export" | "extends" | "false"
+        | "finally" | "for" | "function" | "if" | "import" | "in" | "instanceof" | "new"
+        | "null" | "return" | "super" | "switch" | "this" | "throw" | "true" | "try" | "typeof"
+        | "var" | "void" | "while" | "with" | "yield" | "let" | "static" | "implements"
+        | "interface" | "package" | "private" | "protected" | "public" | "as" | "async"
+        | "from" | "get" | "meta" | "of" | "set" | "target" => true,
+        _ => !key.chars().enumerate().all(|(index, c)| match c {
             'a'..='z' | 'A'..='Z' | '_' | '$' => true,
             '0'..='9' if index > 0 => true,
             _ => false,
-        })
+        }),
     }
 }

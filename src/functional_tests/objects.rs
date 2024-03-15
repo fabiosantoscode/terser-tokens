@@ -51,6 +51,16 @@ fn object_patterns() {
     insta::assert_display_snapshot!(res, @"[1, 4, {\"b\":2,\"c\":3}]");
 }
 
+#[test]
+fn object_delete() {
+    let res = run_checks(
+        "let o = {a: 1, b: 2, c: 3};
+        delete o.a;
+        return o;",
+    );
+    insta::assert_display_snapshot!(res, @"{\"b\":2,\"c\":3}");
+}
+
 // TODO this should log 1 2 3 4
 // var {a: {[log(3)]: a} = (log(2), {}), [log(4)]: b, x } = {x: log(1)};
 

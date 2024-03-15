@@ -228,6 +228,9 @@ impl Debug for BasicBlockInstruction {
                 LHS::Global(glob_name) => write!(f, "global {:?} = ${}", glob_name, val),
                 LHS::Member(base, member) => write!(f, "{:?}{:?} = ${}", base, member, val),
             },
+            BasicBlockInstruction::Delete(lhs) => {
+                write!(f, "delete {:?}", lhs)
+            }
 
             BasicBlockInstruction::TempExit(exit_type, arg) => {
                 write!(f, "{:?} ${}", exit_type, arg)

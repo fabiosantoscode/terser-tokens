@@ -263,6 +263,10 @@ pub fn interpret(
             ctx.set_lhs(lhs, val.clone())?;
             val
         }
+        BasicBlockInstruction::Delete(lhs) => {
+            ctx.delete_lhs(lhs)?;
+            JsType::Boolean
+        }
     };
 
     Some(JsCompletion::Normal(normal_completion))

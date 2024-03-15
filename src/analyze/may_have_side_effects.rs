@@ -50,6 +50,7 @@ impl BasicBlockInstruction {
             BasicBlockInstruction::ArgumentRest(_) => false,
             BasicBlockInstruction::Read(lhs) => lhs.read_may_have_side_effects(),
             BasicBlockInstruction::Write(_, _) => true,
+            BasicBlockInstruction::Delete(_) => true,
         }
     }
 }

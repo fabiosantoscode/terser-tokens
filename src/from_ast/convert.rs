@@ -635,7 +635,10 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
                 return ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
             }
-            UnaryOp::Delete => todo!(),
+            UnaryOp::Delete => {
+                let lhs = to_basic_blocks_lhs(ctx, &unary_expr.arg);
+                return ctx.push_instruction(BasicBlockInstruction::Delete(lhs));
+            }
             UnaryOp::Void => {
                 expr_to_basic_blocks(ctx, &unary_expr.arg);
                 return ctx.push_instruction(BasicBlockInstruction::Undefined);

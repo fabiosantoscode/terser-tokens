@@ -2,8 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analyze::find_multiple_writes;
 use crate::basic_blocks::{
-    BasicBlockExit, BasicBlockGroup, BasicBlockModule, ExitType, FunctionId, NonLocalId, ObjectKey,
-    LHS,
+    BasicBlockExit, BasicBlockModule, ExitType, FunctionId, NonLocalId, ObjectKey, LHS,
 };
 use crate::data_structures::CowMap;
 
@@ -133,6 +132,10 @@ impl<'module> InterpretCtx<'_> {
                 self.set_lhs(base, new_t)
             }
         }
+    }
+
+    pub fn delete_lhs(&mut self, lhs: &LHS) -> Option<JsType> {
+        None // TODO deleting object props, etc
     }
 
     pub fn get_argument(&self, n: usize) -> Option<&JsType> {
