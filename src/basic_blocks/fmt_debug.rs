@@ -14,7 +14,10 @@ impl Debug for BasicBlock {
         for (id, node) in self.iter() {
             write!(f, "    ${} = {:?}\n", id, node)?;
         }
-        write!(f, "    exit = {:?}\n", &self.exit)?;
+        match &self.exit {
+            BasicBlockExit::Fallthrough => {} // ellide
+            _ => write!(f, "    exit = {:?}\n", &self.exit)?,
+        }
         write!(f, "}}")
     }
 }
@@ -266,20 +269,20 @@ impl Debug for BasicBlockExit {
                     cond, cons, cons_end, alt, alt_end
                 )
             }
-            BasicBlockExit::SwitchStart(expr, first_case, end_last_case) => {
+            BasicBlockExit::Switch(expr, first_case, end_last_case) => {
                 write!(f, "switch ${} @{}..@{}", expr, first_case, end_last_case)
             }
-            BasicBlockExit::SwitchCase(Some(expr), start, end, case_next) => {
-                write!(f, "case ${} ? @{}..@{} : @{}", expr, start, end, case_next)
+            BasicBlockExit::SwitchCase(Some(expr), start, end) => {
+                write!(f, "case ${}: @{}..@{}", expr, start, end,)
             }
-            BasicBlockExit::SwitchCase(None, start, end, case_next) => {
-                write!(f, "default @{}..@{} next @{}", start, end, case_next)
+            BasicBlockExit::SwitchCase(None, start, end) => {
+                write!(f, "default @{}..@{}", start, end,)
             }
-            BasicBlockExit::SwitchCaseExpression(start, end, case) => {
-                write!(f, "case_expr @{}..@{} next @{}", start, end, case)
+            BasicBlockExit::SwitchCaseExpression(start, end) => {
+                write!(f, "case_expr @{}..@{}", start, end)
             }
-            BasicBlockExit::SwitchEnd(next) => {
-                write!(f, "switch_end next @{}", next)
+            BasicBlockExit::SwitchEnd => {
+                write!(f, "switch_end")
             }
             BasicBlockExit::Loop(start, end) => {
                 write!(f, "loop @{}..@{}", start, end)
@@ -295,8 +298,8 @@ impl Debug for BasicBlockExit {
                     write!(f, "for await of ${} @{}..@{}", loop_var, start, end)
                 }
             },
-            BasicBlockExit::Jump(to) => {
-                write!(f, "jump @{}", to)
+            BasicBlockExit::Fallthrough => {
+                write!(f, "fallthrough")
             }
             BasicBlockExit::Break(to) => {
                 write!(f, "break @{}", to)
@@ -315,43 +318,33 @@ impl Debug for BasicBlockExit {
             BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after_block) => {
                 write!(
                     f,
-                    "try @{} catch @{} finally @{} after @{}",
+                    "try @{} catch @{} finally @{}..@{}",
                     try_block, catch_block, finally_block, after_block
                 )
             }
             BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
-                write!(
-                    f,
-                    "error ? jump @{} : jump @{}",
-                    catch_block, finally_or_after
-                )
+                write!(f, "catch @{}..@{}", catch_block, finally_or_after)
             }
-            BasicBlockExit::PopFinally(finally_block, after_block) => {
-                write!(f, "finally @{} after @{}", finally_block, after_block)
-            }
-            BasicBlockExit::EndFinally(after_block) => {
-                write!(f, "end finally after @{}", after_block)
+            BasicBlockExit::PopFinally(start, end) => {
+                write!(f, "finally @{}..@{}", start, end)
             }
             BasicBlockExit::ClassStart(class_var, start, end) => {
                 write!(f, "class ${} @{}..@{}", class_var, start, end)
             }
-            BasicBlockExit::ClassConstructor(fn_id, next) => {
-                write!(f, "class constructor {:?} after @{}", fn_id, next)
+            BasicBlockExit::ClassConstructor(fn_id) => {
+                write!(f, "class constructor {:?}", fn_id)
             }
-            BasicBlockExit::ClassProperty(prop, next) => {
-                write!(f, "class property {:?} after @{}", prop, next)
+            BasicBlockExit::ClassProperty(prop) => {
+                write!(f, "class property {:?}", prop)
             }
-            BasicBlockExit::ClassPushStaticBlock(start, end) => {
+            BasicBlockExit::ClassStaticBlock(start, end) => {
                 write!(f, "class static block @{}..@{}", start, end)
             }
-            BasicBlockExit::ClassPopStaticBlock(next) => {
-                write!(f, "end static block after @{}", next)
+            BasicBlockExit::ClassEnd => {
+                write!(f, "class end")
             }
-            BasicBlockExit::ClassEnd(next) => {
-                write!(f, "class end after @{}", next)
-            }
-            BasicBlockExit::Debugger(next) => {
-                write!(f, "debugger and jump @{}", next)
+            BasicBlockExit::Debugger => {
+                write!(f, "debugger")
             }
         }
     }

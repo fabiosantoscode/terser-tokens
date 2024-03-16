@@ -455,11 +455,9 @@ mod tests {
         }
         @1: {
             $2 = 2
-            exit = jump @3
         }
         @2: {
             $3 = 3
-            exit = jump @3
         }
         @3: {
             $4 = either($1, $2, $3)
@@ -506,11 +504,9 @@ mod tests {
         @1: {
             $2 = 2
             $3 = $2
-            exit = jump @3
         }
         @2: {
             $4 = 3
-            exit = jump @3
         }
         @3: {
             $5 = either($0, $2)
@@ -582,7 +578,6 @@ mod tests {
         @r###"
         @0: {
             $0 = 999
-            exit = jump @1
         }
         @1: {
             $1 = 1
@@ -591,11 +586,9 @@ mod tests {
         @2: {
             $0 = 2
             $3 = $0
-            exit = jump @4
         }
         @3: {
             $3 = 3
-            exit = jump @4
         }
         @4: {
             $7 = $0
@@ -682,7 +675,6 @@ mod tests {
             $1 = $0
             $2 = 1
             $3 = $1 == $2
-            exit = jump @1
         }
         @1: {
             exit = cond $3 ? @2..@9 : @10..@11
@@ -691,7 +683,6 @@ mod tests {
             $4 = $0
             $5 = 1
             $6 = $4 == $5
-            exit = jump @3
         }
         @3: {
             exit = cond $6 ? @4..@5 : @6..@7
@@ -701,36 +692,28 @@ mod tests {
             $8 = 2000
             $0 = $7 + $8
             $10 = $0
-            exit = jump @5
         }
         @5: {
-            exit = jump @8
         }
         @6: {
             $0 = 3
             $12 = $0
-            exit = jump @7
         }
         @7: {
-            exit = jump @8
         }
         @8: {
             $14 = $0
             $15 = 1000
             $0 = $14 + $15
             $17 = $0
-            exit = jump @9
         }
         @9: {
-            exit = jump @12
         }
         @10: {
             $0 = 3
             $19 = $0
-            exit = jump @11
         }
         @11: {
-            exit = jump @12
         }
         @12: {
             $21 = $0
@@ -748,14 +731,14 @@ mod tests {
                 exit = jump @1
             }
             @1: {
-                exit = try @2 catch @4 finally @6 after @7
+                exit = try @2 catch @4 finally @6..@7
             }
             @2: {
                 $0 = 777
                 exit = jump @3
             }
             @3: {
-                exit = error ? jump @4 : jump @5
+                exit = catch @4..@5
             }
             @4: {
                 $1 = either($0, $2, $3)
@@ -763,14 +746,13 @@ mod tests {
                 exit = jump @5
             }
             @5: {
-                exit = finally @6 after @7
+                exit = finally @6..@7
             }
             @6: {
                 $3 = either($0, $1, $2)
                 exit = jump @7
             }
             @7: {
-                exit = end finally after @8
             }
             @8: {
                 $4 = $3
@@ -785,19 +767,18 @@ mod tests {
         insta::assert_debug_snapshot!(blocks.top_level_stats(),
         @r###"
         @0: {
-            exit = try @1 catch @2 finally @3 after @3
+            exit = try @1 catch @2 finally @3..@3
         }
         @1: {
             $0 = 777
-            exit = error ? jump @2 : jump @3
+            exit = catch @2..@3
         }
         @2: {
             $1 = 888
-            exit = finally @3 after @3
+            exit = finally @3..@3
         }
         @3: {
             $2 = either($0, $1)
-            exit = end finally after @4
         }
         @4: {
             $3 = $2

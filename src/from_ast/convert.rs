@@ -19,39 +19,32 @@ use super::{
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
 pub fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
-    let is_loop = |stat: &Stmt| match stat {
-        Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::ForIn(_) | Stmt::ForOf(_) => true,
-        _ => false,
+    let can_break_without_label = |stat: &Stmt| {
+        matches!(
+            stat,
+            Stmt::While(_)
+                | Stmt::DoWhile(_)
+                | Stmt::For(_)
+                | Stmt::ForIn(_)
+                | Stmt::ForOf(_)
+                | Stmt::Switch(_)
+        )
     };
-    let is_switch = |stat: &Stmt| matches!(stat, Stmt::Switch(_));
 
-    let is_labelled_block = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
+    if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
         ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
         stat_to_basic_blocks_inner(ctx, body);
-
-        !is_loop(body) && !is_switch(body)
-    } else if is_loop(stat) {
+    } else if can_break_without_label(stat) {
         ctx.push_label(NestedIntoStatement::Unlabelled);
         stat_to_basic_blocks_inner(ctx, stat);
-        false
-    } else if is_switch(stat) {
-        ctx.push_label(NestedIntoStatement::Unlabelled);
-        stat_to_basic_blocks_inner(ctx, stat);
-        false
     } else {
         stat_to_basic_blocks_inner(ctx, stat);
-        return;
-    };
+        return; // not breakable
+    }
 
     let jumpers_towards_me = ctx.pop_label();
-    if jumpers_towards_me.len() > 0 {
-        for jumper in jumpers_towards_me {
-            if is_labelled_block {
-                ctx.set_exit(jumper, BasicBlockExit::Jump(ctx.current_block_index()))
-            } else {
-                ctx.set_exit(jumper, BasicBlockExit::Break(ctx.current_block_index()))
-            }
-        }
+    for jumper in jumpers_towards_me {
+        ctx.set_exit(jumper, BasicBlockExit::Break(ctx.current_block_index()))
     }
 }
 
@@ -333,8 +326,6 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                     blockidx_alternate_after,
                 ),
             );
-            ctx.set_exit(blockidx_consequent_after, BasicBlockExit::Jump(after)); // TODO should be Break
-            ctx.set_exit(blockidx_alternate_after, BasicBlockExit::Jump(after));
         }
         Stmt::Block(block) => {
             block_to_basic_blocks(ctx, &block.stmts).expect("todo error handling")
@@ -348,9 +339,9 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
         Stmt::Debugger(_) => {
             let index = ctx.wrap_up_block();
-            let after_index = ctx.wrap_up_block();
+            ctx.wrap_up_block();
 
-            ctx.set_exit(index, BasicBlockExit::Debugger(after_index));
+            ctx.set_exit(index, BasicBlockExit::Debugger);
         }
         Stmt::With(_) => todo!(),
         Stmt::Switch(switch) => {
@@ -370,11 +361,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
 
                     ctx.set_exit(
                         case_exp_start,
-                        BasicBlockExit::SwitchCaseExpression(
-                            case_exp_start + 1,
-                            case_exp_end,
-                            case_exp_end + 1,
-                        ),
+                        BasicBlockExit::SwitchCaseExpression(case_exp_start + 1, case_exp_end),
                     );
 
                     ret
@@ -390,22 +377,22 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 }
 
                 let case_end = ctx.current_block_index();
-                let case_next = ctx.wrap_up_block();
+                ctx.wrap_up_block();
 
                 ctx.set_exit(
                     case_start,
-                    BasicBlockExit::SwitchCase(case_exp, case_start + 1, case_end, case_next),
+                    BasicBlockExit::SwitchCase(case_exp, case_start + 1, case_end),
                 );
             }
 
             let switch_end = ctx.current_block_index();
-            let switch_after = ctx.wrap_up_block();
+            ctx.wrap_up_block();
 
-            ctx.set_exit(switch_end, BasicBlockExit::SwitchEnd(switch_after));
+            ctx.set_exit(switch_end, BasicBlockExit::SwitchEnd);
 
             ctx.set_exit(
                 switch_start,
-                BasicBlockExit::SwitchStart(exp, switch_start + 1, switch_end),
+                BasicBlockExit::Switch(exp, switch_start + 1, switch_end),
             );
         }
         Stmt::Throw(ThrowStmt { arg, .. }) => {
@@ -455,16 +442,16 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 block_to_basic_blocks(ctx, &finalizer.stmts).expect("todo error handling");
             }
 
-            let after_finally_idx = ctx.wrap_up_block();
+            let end_finally_idx = ctx.wrap_up_block();
 
             ctx.leave_conditional_branch();
 
-            let done_and_dusted = ctx.wrap_up_block();
+            ctx.wrap_up_block();
 
             // declare the trycatch
             ctx.set_exit(
                 catch_pusher_idx,
-                BasicBlockExit::SetTryAndCatch(try_idx, catch_idx, finally_idx, after_finally_idx),
+                BasicBlockExit::SetTryAndCatch(try_idx, catch_idx, finally_idx, end_finally_idx),
             );
             // catch the error
             ctx.set_exit(
@@ -474,12 +461,7 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             // finally
             ctx.set_exit(
                 after_catch_idx,
-                BasicBlockExit::PopFinally(finally_idx, after_finally_idx),
-            );
-            // end
-            ctx.set_exit(
-                after_finally_idx,
-                BasicBlockExit::EndFinally(done_and_dusted),
+                BasicBlockExit::PopFinally(finally_idx, end_finally_idx),
             );
         }
         Stmt::Empty(_) => {
@@ -544,21 +526,24 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
 
                     let r = expr_to_basic_blocks(ctx, &bin.right);
 
-                    let no_else = ctx.wrap_up_block();
+                    let empty_else = ctx.wrap_up_block();
 
                     let l = ctx.push_instruction(BasicBlockInstruction::Ref(l));
 
-                    let after = ctx.wrap_up_block();
                     ctx.wrap_up_block();
 
                     ctx.leave_conditional_branch();
 
                     ctx.set_exit(
                         cond,
-                        BasicBlockExit::Cond(condition, cond + 1, no_else - 1, no_else, no_else),
+                        BasicBlockExit::Cond(
+                            condition,
+                            cond + 1,
+                            empty_else - 1,
+                            empty_else,
+                            empty_else,
+                        ),
                     );
-                    ctx.set_exit(no_else - 1, BasicBlockExit::Jump(after));
-                    ctx.set_exit(no_else, BasicBlockExit::Jump(after));
 
                     return ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
                 }
@@ -602,7 +587,6 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
             let blockidx_alternate_before = ctx.wrap_up_block();
             let alt = expr_to_basic_blocks(ctx, &cond_expr.alt);
             let blockidx_alternate_after = ctx.current_block_index();
-            let blockidx_after = ctx.wrap_up_block();
 
             ctx.wrap_up_block();
 
@@ -618,16 +602,6 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                     blockidx_alternate_before,
                     blockidx_alternate_after,
                 ),
-            );
-
-            // block starting with cons gets a Jump node added, to the current block
-            ctx.set_exit(
-                blockidx_consequent_after,
-                BasicBlockExit::Jump(blockidx_after),
-            );
-            ctx.set_exit(
-                blockidx_alternate_after,
-                BasicBlockExit::Jump(blockidx_after),
             );
 
             // the retval of our ternary is a phi node
@@ -1082,12 +1056,10 @@ mod tests {
         }
         @1: {
             $2 = $0++
-            exit = jump @3
         }
         @2: {
             $3 = --$0
             $4 = --$0
-            exit = jump @3
         }
         @3: {
             $5 = either($2, $4)
@@ -1108,11 +1080,9 @@ mod tests {
         }
         @1: {
             $1 = 10
-            exit = jump @3
         }
         @2: {
             $2 = 20
-            exit = jump @3
         }
         @3: {
             $3 = either($1, $2)
@@ -1138,11 +1108,9 @@ mod tests {
         @1: {
             $2 = 2
             $3 = $2
-            exit = jump @3
         }
         @2: {
             $4 = 3
-            exit = jump @3
         }
         @3: {
             $5 = either($0, $2)
@@ -1168,19 +1136,15 @@ mod tests {
         }
         @2: {
             $2 = 10
-            exit = jump @4
         }
         @3: {
             $3 = 15
-            exit = jump @4
         }
         @4: {
             $4 = either($2, $3)
-            exit = jump @6
         }
         @5: {
             $5 = 20
-            exit = jump @6
         }
         @6: {
             $6 = either($4, $5)
@@ -1218,12 +1182,10 @@ mod tests {
             $2 = 2
             $3 = $2
             $4 = 1
-            exit = jump @3
         }
         @2: {
             $5 = 3
             $6 = $5
-            exit = jump @3
         }
         @3: {
             $7 = either($0, $2, $5)
@@ -1258,22 +1220,18 @@ mod tests {
         @2: {
             $4 = 567
             $5 = $4
-            exit = jump @4
         }
         @3: {
             $6 = 890
-            exit = jump @4
         }
         @4: {
             $7 = either($0, $2, $4)
             $8 = either($5, $6)
             $9 = 1
-            exit = jump @6
         }
         @5: {
             $10 = 3
             $11 = $10
-            exit = jump @6
         }
         @6: {
             $12 = either($0, $2, $7, $10)
@@ -1296,42 +1254,38 @@ mod tests {
             exit = switch $0 @1..@11
         }
         @1: {
-            exit = case_expr @2..@2 next @3
+            exit = case_expr @2..@2
         }
         @2: {
             $1 = 20
-            exit = jump @3
         }
         @3: {
-            exit = case $1 ? @4..@4 : @5
+            exit = case $1: @4..@4
         }
         @4: {
             $2 = 30
-            exit = jump @5
         }
         @5: {
-            exit = default @6..@6 next @7
+            exit = default @6..@6
         }
         @6: {
             $3 = 40
             exit = break @12
         }
         @7: {
-            exit = case_expr @8..@8 next @9
+            exit = case_expr @8..@8
         }
         @8: {
             $4 = 50
-            exit = jump @9
         }
         @9: {
-            exit = case $4 ? @10..@10 : @11
+            exit = case $4: @10..@10
         }
         @10: {
             $5 = 60
-            exit = jump @11
         }
         @11: {
-            exit = switch_end next @12
+            exit = switch_end
         }
         @12: {
             $6 = undefined
@@ -1437,7 +1391,6 @@ mod tests {
         }
         @6: {
             $13 = either($0, $1, $5, $7, $11)
-            exit = jump @7
         }
         @7: {
             $14 = either($0, $1, $5, $7, $13)
@@ -1448,7 +1401,6 @@ mod tests {
         }
         @9: {
             $15 = either($0, $1, $5, $14)
-            exit = jump @10
         }
         @10: {
             $16 = either($0, $1, $15)
@@ -1521,7 +1473,6 @@ mod tests {
         }
         @4: {
             $10 = either($0, $1, $8)
-            exit = jump @5
         }
         @5: {
             $11 = either($0, $1, $10)
@@ -1562,17 +1513,13 @@ mod tests {
             $8 = 2000
             $9 = $7 + $8
             $10 = $9
-            exit = jump @4
         }
         @3: {
-            exit = jump @4
         }
         @4: {
             $11 = either($0, $4, $9)
-            exit = jump @6
         }
         @5: {
-            exit = jump @6
         }
         @6: {
             $12 = either($0, $4, $11)
@@ -1617,12 +1564,10 @@ mod tests {
             $8 = 2000
             $9 = $7 + $8
             $10 = $9
-            exit = jump @4
         }
         @3: {
             $11 = 3
             $12 = $11
-            exit = jump @4
         }
         @4: {
             $13 = either($0, $9, $11)
@@ -1630,12 +1575,10 @@ mod tests {
             $15 = 1000
             $16 = $14 + $15
             $17 = $16
-            exit = jump @6
         }
         @5: {
             $18 = 3
             $19 = $18
-            exit = jump @6
         }
         @6: {
             $20 = either($0, $13, $16, $18)
@@ -1655,11 +1598,9 @@ mod tests {
         }
         @1: {
             $1 = 2
-            exit = jump @3
         }
         @2: {
             $2 = $0
-            exit = jump @3
         }
         @3: {
             $3 = either($1, $2)
@@ -1679,11 +1620,9 @@ mod tests {
         @1: {
             $3 = global "z"
             $4 = call $3()
-            exit = jump @3
         }
         @2: {
             $5 = $1
-            exit = jump @3
         }
         @3: {
             $6 = either($4, $5)
@@ -1764,10 +1703,9 @@ mod tests {
         }
         @1: {
             $1 = 456
-            exit = jump @3
+            exit = break @3
         }
         @2: {
-            exit = jump @3
         }
         @3: {
             $2 = undefined
@@ -1792,11 +1730,9 @@ mod tests {
         }
         @1: {
             $1 = 456
-            exit = jump @3
         }
         @2: {
             $2 = 789
-            exit = jump @3
         }
         @3: {
             $3 = undefined
@@ -1828,17 +1764,13 @@ mod tests {
         }
         @2: {
             $2 = 789
-            exit = jump @4
         }
         @3: {
-            exit = jump @4
         }
         @4: {
-            exit = jump @6
         }
         @5: {
             $3 = 999
-            exit = jump @6
         }
         @6: {
             $4 = undefined
@@ -1858,18 +1790,17 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @3 after @3
+            exit = try @1 catch @2 finally @3..@3
         }
         @1: {
             $0 = 777
-            exit = error ? jump @2 : jump @3
+            exit = catch @2..@3
         }
         @2: {
             $1 = 888
-            exit = finally @3 after @3
+            exit = finally @3..@3
         }
         @3: {
-            exit = end finally after @4
         }
         @4: {
             $2 = undefined
@@ -1889,11 +1820,11 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @4 after @4
+            exit = try @1 catch @2 finally @4..@4
         }
         @1: {
             $0 = 777
-            exit = error ? jump @2 : jump @4
+            exit = catch @2..@4
         }
         @2: {
             $1 = caught_error()
@@ -1903,10 +1834,9 @@ mod tests {
             exit = return $4
         }
         @3: {
-            exit = finally @4 after @4
+            exit = finally @4..@4
         }
         @4: {
-            exit = end finally after @5
         }
         @5: {
             $5 = undefined
@@ -1927,19 +1857,18 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @3 after @3
+            exit = try @1 catch @2 finally @3..@3
         }
         @1: {
             $0 = 777
-            exit = error ? jump @2 : jump @3
+            exit = catch @2..@3
         }
         @2: {
             $1 = 888
-            exit = finally @3 after @3
+            exit = finally @3..@3
         }
         @3: {
             $2 = either($0, $1)
-            exit = end finally after @4
         }
         @4: {
             $3 = $2
@@ -1961,19 +1890,18 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @3 after @3
+            exit = try @1 catch @2 finally @3..@3
         }
         @1: {
             $0 = 777
-            exit = error ? jump @2 : jump @3
+            exit = catch @2..@3
         }
         @2: {
             $1 = 888
-            exit = finally @3 after @3
+            exit = finally @3..@3
         }
         @3: {
             $2 = 999
-            exit = end finally after @4
         }
         @4: {
             $3 = undefined
@@ -2002,7 +1930,7 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 10
-            exit = try @1 catch @5 finally @12 after @12
+            exit = try @1 catch @5 finally @12..@12
         }
         @1: {
             $1 = $0
@@ -2015,21 +1943,20 @@ mod tests {
             exit = throw $4
         }
         @3: {
-            exit = jump @4
         }
         @4: {
-            exit = error ? jump @5 : jump @12
+            exit = catch @5..@12
         }
         @5: {
             $5 = caught_error()
-            exit = try @6 catch @8 finally @10 after @10
+            exit = try @6 catch @8 finally @10..@10
         }
         @6: {
             $6 = 456
             exit = return $6
         }
         @7: {
-            exit = error ? jump @8 : jump @10
+            exit = catch @8..@10
         }
         @8: {
             $7 = caught_error()
@@ -2037,16 +1964,14 @@ mod tests {
             exit = return $8
         }
         @9: {
-            exit = finally @10 after @10
+            exit = finally @10..@10
         }
         @10: {
-            exit = end finally after @11
         }
         @11: {
-            exit = finally @12 after @12
+            exit = finally @12..@12
         }
         @12: {
-            exit = end finally after @13
         }
         @13: {
             $9 = $0

@@ -30,20 +30,21 @@ impl BasicBlock {
 
 /// Conceptually, an exit occurs after the instructions in a block. It denotes what happens to control flow.
 /// Ranges, such as the numbers in Loop(), are inclusive.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Default)]
 pub enum BasicBlockExit {
-    /// unconditional jump to target
-    Jump(usize),
+    #[default]
+    /// Fall through to the next block
+    Fallthrough,
     /// (cond_var, true_target, false_target). If cond_var is true, go to true_target..true_target_end. Otherwise, go to false_target..false_target_end.
     Cond(usize, usize, usize, usize, usize),
     /// (expression, first_case, end_last_case)
-    SwitchStart(usize, usize, usize),
-    /// (start, end, jump_to_case). It's where we generate the case test.
-    SwitchCaseExpression(usize, usize, usize),
-    /// (expression_or_default, case_start, case_end, next_case). Go to case_start..case_end if the expression matches the case. Otherwise, go to next_case.
-    SwitchCase(Option<usize>, usize, usize, usize),
-    /// (after_switch). End of the switch statement.
-    SwitchEnd(usize),
+    Switch(usize, usize, usize),
+    /// (start, end). It's where we generate the case test.
+    SwitchCaseExpression(usize, usize),
+    /// (expression_or_default, case_start, case_end). Go to case_start..case_end if the expression matches the case.
+    SwitchCase(Option<usize>, usize, usize),
+    /// End of the switch statement.
+    SwitchEnd,
     /// (start, end). Loop from start to end until something jumps out.
     Loop(usize, usize),
     /// (looped_var, for_in_of_kind, start, end). A for-in or for-of loop. looped_var is the variable that gets assigned to.
@@ -57,52 +58,46 @@ pub enum BasicBlockExit {
     ExitFn(ExitType, usize),
     /// (try_block, catch_block, finally_block, end_finally_block). Used when we see "try {". It just goes to try_block, the rest is book-keeping.
     SetTryAndCatch(usize, usize, usize, usize),
-    /// (catch_block, finally). Used when we see "} catch". If we had an exception, we go to catch_block. Otherwise, we go to finally.
+    /// (start, end). Used when we see "} catch". Marks the area where errors are caught.
     PopCatch(usize, usize),
-    /// (finally_block, after_finally_block). Used when we see "} finally". We go to the finally-block.
+    /// (start, end). Used when we see "} finally". We go to the finally-block.
     PopFinally(usize, usize),
-    /// (after_finally_block). Used when we see "}" after a finally block. We go to the after_finally_block.
-    EndFinally(usize),
     /// (class_var, start, end). Start a class. Inside it we can use Class* exits.
     ClassStart(usize, usize, usize),
-    /// (Class only): (prop, next). Create a property
-    ClassProperty(ClassProperty, usize),
-    /// (Class only): (fn_id, next). Create a constructor
-    ClassConstructor(FunctionId, usize),
-    /// (Class only): (start, end). Start a static block
-    ClassPushStaticBlock(usize, usize),
-    /// (Class only): (next_member) End a static block.
-    ClassPopStaticBlock(usize),
-    /// (Class only): (next_block) Ends a class
-    ClassEnd(usize),
-    /// (next) Debugger statement
-    Debugger(usize),
+    /// (Class only): (prop). Create a property
+    ClassProperty(ClassProperty),
+    /// (Class only): (fn_id). Create a constructor
+    ClassConstructor(FunctionId),
+    /// (Class only): (start, end). Create a class static block with the statements in start..=end
+    ClassStaticBlock(usize, usize),
+    /// (Class only): Ends a class
+    ClassEnd,
+    /// Debugger statement
+    Debugger,
 }
 
 impl BasicBlockExit {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![*cond_var],
-            BasicBlockExit::SwitchStart(cond, _, _) => vec![*cond],
-            BasicBlockExit::SwitchCase(cond, _, _, _) => cond.iter().copied().collect(),
-            BasicBlockExit::SwitchCaseExpression(_, _, _) => vec![],
-            BasicBlockExit::SwitchEnd(_) => vec![],
+            BasicBlockExit::Switch(cond, _, _) => vec![*cond],
+            BasicBlockExit::SwitchCase(cond, _, _) => cond.iter().copied().collect(),
+            BasicBlockExit::SwitchCaseExpression(_, _) => vec![],
+            BasicBlockExit::SwitchEnd => vec![],
             BasicBlockExit::ExitFn(_, returned) => vec![*returned],
             BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![*looped_var],
             BasicBlockExit::ClassStart(class_var, _, _) => vec![*class_var],
-            BasicBlockExit::ClassProperty(prop, _) => prop.used_vars(),
-            BasicBlockExit::Jump(_)
+            BasicBlockExit::ClassProperty(prop) => prop.used_vars(),
+            BasicBlockExit::Fallthrough
             | BasicBlockExit::Break(_)
             | BasicBlockExit::Continue(_)
             | BasicBlockExit::SetTryAndCatch(_, _, _, _)
             | BasicBlockExit::PopCatch(_, _)
             | BasicBlockExit::PopFinally(_, _)
-            | BasicBlockExit::EndFinally(_)
-            | BasicBlockExit::ClassConstructor(_, _)
-            | BasicBlockExit::ClassPushStaticBlock(_, _)
-            | BasicBlockExit::ClassPopStaticBlock(_)
-            | BasicBlockExit::ClassEnd(_)
-            | BasicBlockExit::Debugger(_)
+            | BasicBlockExit::ClassConstructor(_)
+            | BasicBlockExit::ClassStaticBlock(_, _)
+            | BasicBlockExit::ClassEnd
+            | BasicBlockExit::Debugger
             | BasicBlockExit::Loop(_, _) => vec![],
         }
     }
@@ -110,36 +105,26 @@ impl BasicBlockExit {
     pub(crate) fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![cond_var],
-            BasicBlockExit::SwitchStart(cond, _, _) => vec![cond],
-            BasicBlockExit::SwitchCase(cond, _, _, _) => {
-                cond.iter_mut().next().into_iter().collect()
-            }
-            BasicBlockExit::SwitchCaseExpression(_, _, _) => vec![],
-            BasicBlockExit::SwitchEnd(_) => vec![],
+            BasicBlockExit::Switch(cond, _, _) => vec![cond],
+            BasicBlockExit::SwitchCase(cond, _, _) => cond.iter_mut().next().into_iter().collect(),
+            BasicBlockExit::SwitchCaseExpression(_, _) => vec![],
+            BasicBlockExit::SwitchEnd => vec![],
             BasicBlockExit::ExitFn(_, returned) => vec![returned],
             BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![looped_var],
             BasicBlockExit::ClassStart(class_var, _, _) => vec![class_var],
-            BasicBlockExit::ClassProperty(prop, _) => prop.used_vars_mut(),
-            BasicBlockExit::Jump(_)
+            BasicBlockExit::ClassProperty(prop) => prop.used_vars_mut(),
+            BasicBlockExit::Fallthrough
             | BasicBlockExit::Break(_)
             | BasicBlockExit::Continue(_)
             | BasicBlockExit::SetTryAndCatch(_, _, _, _)
             | BasicBlockExit::PopCatch(_, _)
             | BasicBlockExit::PopFinally(_, _)
-            | BasicBlockExit::EndFinally(_)
-            | BasicBlockExit::ClassConstructor(_, _)
-            | BasicBlockExit::ClassPushStaticBlock(_, _)
-            | BasicBlockExit::ClassPopStaticBlock(_)
-            | BasicBlockExit::ClassEnd(_)
-            | BasicBlockExit::Debugger(_)
+            | BasicBlockExit::ClassConstructor(_)
+            | BasicBlockExit::ClassStaticBlock(_, _)
+            | BasicBlockExit::ClassEnd
+            | BasicBlockExit::Debugger
             | BasicBlockExit::Loop(_, _) => vec![],
         }
-    }
-}
-
-impl Default for BasicBlockExit {
-    fn default() -> Self {
-        BasicBlockExit::Jump(0)
     }
 }
 

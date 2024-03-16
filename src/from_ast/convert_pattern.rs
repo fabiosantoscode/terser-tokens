@@ -247,7 +247,6 @@ fn default_assign_pat(ctx: &mut FromAstCtx, input: usize, by_default: &Expr) -> 
     let input_value = ctx.push_instruction(BasicBlockInstruction::Ref(input));
     let blockidx_alternate_after = ctx.current_block_index();
 
-    let blockidx_after = ctx.wrap_up_block();
     ctx.wrap_up_block();
 
     ctx.leave_conditional_branch();
@@ -261,14 +260,6 @@ fn default_assign_pat(ctx: &mut FromAstCtx, input: usize, by_default: &Expr) -> 
             blockidx_alternate_before,
             blockidx_alternate_after,
         ),
-    );
-    ctx.set_exit(
-        blockidx_consequent_after,
-        BasicBlockExit::Jump(blockidx_after),
-    );
-    ctx.set_exit(
-        blockidx_alternate_after,
-        BasicBlockExit::Jump(blockidx_after),
     );
 
     ctx.push_instruction(BasicBlockInstruction::Phi(vec![input_value, default_value]))
@@ -299,11 +290,9 @@ mod tests {
         }
         @1: {
             $8 = 4
-            exit = jump @3
         }
         @2: {
             $9 = $5
-            exit = jump @3
         }
         @3: {
             $10 = either($8, $9)
@@ -333,11 +322,9 @@ mod tests {
         }
         @1: {
             $9 = 4
-            exit = jump @3
         }
         @2: {
             $10 = $6
-            exit = jump @3
         }
         @3: {
             $11 = either($9, $10)
@@ -533,11 +520,9 @@ mod tests {
         }
         @1: {
             $12 = {}
-            exit = jump @3
         }
         @2: {
             $13 = $8
-            exit = jump @3
         }
         @3: {
             $14 = either($12, $13)
@@ -550,11 +535,9 @@ mod tests {
         }
         @4: {
             $20 = $0
-            exit = jump @6
         }
         @5: {
             $21 = $17
-            exit = jump @6
         }
         @6: {
             $22 = either($20, $21)

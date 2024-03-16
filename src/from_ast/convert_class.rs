@@ -49,14 +49,11 @@ pub fn class_to_basic_blocks(
 
                         ctx.set_exit(
                             prop,
-                            BasicBlockExit::ClassProperty(
-                                ClassProperty {
-                                    is_static: class_prop.is_static,
-                                    key,
-                                    value: ObjectValue::Property(value),
-                                },
-                                prop + 1,
-                            ),
+                            BasicBlockExit::ClassProperty(ClassProperty {
+                                is_static: class_prop.is_static,
+                                key,
+                                value: ObjectValue::Property(value),
+                            }),
                         );
 
                         for _ in class_prop.decorators.iter() {
@@ -75,14 +72,11 @@ pub fn class_to_basic_blocks(
 
                         ctx.set_exit(
                             prop_idx,
-                            BasicBlockExit::ClassProperty(
-                                ClassProperty {
-                                    is_static: prop.is_static,
-                                    key: ObjectKey::Private(prop.key.id.sym.to_string()),
-                                    value: ObjectValue::Property(value),
-                                },
-                                prop_idx + 1,
-                            ),
+                            BasicBlockExit::ClassProperty(ClassProperty {
+                                is_static: prop.is_static,
+                                key: ObjectKey::Private(prop.key.id.sym.to_string()),
+                                value: ObjectValue::Property(value),
+                            }),
                         );
 
                         for _ in prop.decorators.iter() {
@@ -99,11 +93,7 @@ pub fn class_to_basic_blocks(
                         block_to_basic_blocks(ctx, &body.stmts)?;
 
                         let end = ctx.wrap_up_block();
-                        ctx.set_exit(start, BasicBlockExit::ClassPushStaticBlock(start + 1, end));
-
-                        let after = ctx.wrap_up_block();
-
-                        ctx.set_exit(end, BasicBlockExit::ClassPopStaticBlock(after))
+                        ctx.set_exit(start, BasicBlockExit::ClassStaticBlock(start + 1, end));
                     }
                     ClassMember::Method(method) => {
                         ctx.wrap_up_block();
@@ -119,21 +109,13 @@ pub fn class_to_basic_blocks(
                         // the above function pushes no instructions, but we stay on the safe side
                         let value = ctx.wrap_up_block();
 
-                        let after = ctx.wrap_up_block();
-
                         ctx.set_exit(
                             value,
-                            BasicBlockExit::ClassProperty(
-                                ClassProperty {
-                                    is_static: method.is_static,
-                                    key,
-                                    value: ObjectValue::Method(
-                                        MethodKind::from(method.kind),
-                                        fn_id,
-                                    ),
-                                },
-                                after,
-                            ),
+                            BasicBlockExit::ClassProperty(ClassProperty {
+                                is_static: method.is_static,
+                                key,
+                                value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
+                            }),
                         );
                     }
                     ClassMember::PrivateMethod(method) => {
@@ -150,21 +132,13 @@ pub fn class_to_basic_blocks(
                         // the above function pushes no instructions, but we stay on the safe side
                         let value = ctx.wrap_up_block();
 
-                        let after = ctx.wrap_up_block();
-
                         ctx.set_exit(
                             value,
-                            BasicBlockExit::ClassProperty(
-                                ClassProperty {
-                                    is_static: method.is_static,
-                                    key,
-                                    value: ObjectValue::Method(
-                                        MethodKind::from(method.kind),
-                                        fn_id,
-                                    ),
-                                },
-                                after,
-                            ),
+                            BasicBlockExit::ClassProperty(ClassProperty {
+                                is_static: method.is_static,
+                                key,
+                                value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
+                            }),
                         );
                     }
                     ClassMember::Constructor(method) => {
@@ -179,9 +153,7 @@ pub fn class_to_basic_blocks(
                         // the above function pushes no instructions, but we stay on the safe side
                         let value = ctx.wrap_up_block();
 
-                        let after = ctx.wrap_up_block();
-
-                        ctx.set_exit(value, BasicBlockExit::ClassConstructor(fn_id, after));
+                        ctx.set_exit(value, BasicBlockExit::ClassConstructor(fn_id));
                     }
                     ClassMember::TsIndexSignature(_) => unimplemented!("TypeScript AST nodes"),
                     ClassMember::AutoAccessor(_) => todo!("Class auto accessors"),
@@ -191,13 +163,13 @@ pub fn class_to_basic_blocks(
         }
     };
 
-    let after = ctx.wrap_up_block();
+    ctx.wrap_up_block();
 
     ctx.set_exit(
         head,
         BasicBlockExit::ClassStart(created_class, class_start, class_end),
     );
-    ctx.set_exit(class_end, BasicBlockExit::ClassEnd(after));
+    ctx.set_exit(class_end, BasicBlockExit::ClassEnd);
 
     Ok(created_class)
 }
@@ -232,7 +204,7 @@ mod tests {
             exit = class $0 @1..@1
         }
         @1: {
-            exit = class end after @2
+            exit = class end
         }
         @2: {
             $1 = undefined
@@ -259,43 +231,38 @@ mod tests {
         }
         @1: {
             $1 = 1
-            exit = jump @2
         }
         @2: {
-            exit = class property ClassProperty { is_static: false, key: .prop1, value: $1 } after @3
+            exit = class property ClassProperty { is_static: false, key: .prop1, value: $1 }
         }
         @3: {
             $2 = 2
-            exit = jump @4
         }
         @4: {
-            exit = class property ClassProperty { is_static: true, key: .prop2, value: $2 } after @5
+            exit = class property ClassProperty { is_static: true, key: .prop2, value: $2 }
         }
         @5: {
             $3 = "prop3"
             $4 = 3
-            exit = jump @6
         }
         @6: {
-            exit = class property ClassProperty { is_static: false, key: [$3], value: $4 } after @7
+            exit = class property ClassProperty { is_static: false, key: [$3], value: $4 }
         }
         @7: {
             $5 = "prop4"
             $6 = 4
-            exit = jump @8
         }
         @8: {
-            exit = class property ClassProperty { is_static: true, key: [$5], value: $6 } after @9
+            exit = class property ClassProperty { is_static: true, key: [$5], value: $6 }
         }
         @9: {
             $7 = 5
-            exit = jump @10
         }
         @10: {
-            exit = class property ClassProperty { is_static: false, key: .123, value: $7 } after @11
+            exit = class property ClassProperty { is_static: false, key: .123, value: $7 }
         }
         @11: {
-            exit = class end after @12
+            exit = class end
         }
         @12: {
             $8 = undefined
@@ -323,10 +290,9 @@ mod tests {
         }
         @2: {
             $1 = 1
-            exit = jump @4
         }
         @3: {
-            exit = class end after @4
+            exit = class end
         }
         @4: {
             $2 = undefined
@@ -350,10 +316,10 @@ mod tests {
             exit = class $0 @1..@2
         }
         @1: {
-            exit = class constructor FunctionId(1) after @2
+            exit = class constructor FunctionId(1)
         }
         @2: {
-            exit = class end after @3
+            exit = class end
         }
         @3: {
             $1 = undefined
@@ -376,19 +342,17 @@ mod tests {
             exit = class $0 @1..@5
         }
         @1: {
-            exit = jump @2
         }
         @2: {
-            exit = class property ClassProperty { is_static: false, key: .prop, value: getter FunctionId(1) } after @3
+            exit = class property ClassProperty { is_static: false, key: .prop, value: getter FunctionId(1) }
         }
         @3: {
-            exit = jump @4
         }
         @4: {
-            exit = class property ClassProperty { is_static: false, key: .prop, value: setter FunctionId(2) } after @5
+            exit = class property ClassProperty { is_static: false, key: .prop, value: setter FunctionId(2) }
         }
         @5: {
-            exit = class end after @6
+            exit = class end
         }
         @6: {
             $1 = undefined

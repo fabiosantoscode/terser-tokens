@@ -29,11 +29,11 @@ pub fn compress_step_evaluate(module: &mut BasicBlockModule) {
                     match is_truthy {
                         Some(true) => {
                             blocks_to_suppress.extend(*alt_start..=*alt_end);
-                            block.exit = BasicBlockExit::Jump(*cons_start);
+                            block.exit = BasicBlockExit::Fallthrough;
                         }
                         Some(false) => {
                             blocks_to_suppress.extend(*cons_start..=*cons_end);
-                            block.exit = BasicBlockExit::Jump(*alt_start);
+                            block.exit = BasicBlockExit::Fallthrough;
                         }
                         None => continue,
                     }
@@ -268,12 +268,10 @@ mod tests {
             $8 = 2000
             $9 = $7 + $8
             $10 = $9
-            exit = jump @3
         }
         @2: {
             $11 = 3
             $12 = $11
-            exit = jump @3
         }
         @3: {
             $13 = either($0, $9, $11)

@@ -165,7 +165,7 @@ impl FromAstCtx {
                             self.push_instruction_to_nth_block(BasicBlockInstruction::Undefined, i);
                         exits.push(BasicBlockExit::ExitFn(ExitType::Return, undef_ret));
                     } else {
-                        exits.push(BasicBlockExit::Jump(i + 1));
+                        exits.push(BasicBlockExit::Fallthrough);
                     }
                 }
             }

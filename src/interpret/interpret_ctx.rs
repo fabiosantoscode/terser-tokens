@@ -225,8 +225,8 @@ impl<'module> InterpretCtx<'_> {
                 matches!(
                     block.exit,
                     BasicBlockExit::ExitFn(ExitType::Return, _)
-                        | BasicBlockExit::Debugger(_)
-                        | BasicBlockExit::Jump(_)
+                        | BasicBlockExit::Debugger
+                        | BasicBlockExit::Fallthrough
                 ) && block
                     .instructions
                     .iter()

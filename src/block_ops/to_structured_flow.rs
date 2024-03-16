@@ -32,9 +32,8 @@ impl Ctx {
     }
 
     /// Given a break target, find the enclosing loop or labelled block
-    pub fn break_index(&self, target: usize) -> BreakableId {
-        *self
-            .containing_syntax
+    pub fn break_index(&self, target: usize) -> Option<BreakableId> {
+        self.containing_syntax
             .iter()
             .find_map(
                 |BreakAndRange(item, _start, end)| {
@@ -45,7 +44,7 @@ impl Ctx {
                     }
                 },
             )
-            .expect(&format!("break @{target} without matching to a container"))
+            .cloned()
     }
 
     /// Given a continue target, find the enclosing loop
@@ -105,14 +104,14 @@ fn do_tree_chunk(
             ))];
 
             match block.exit {
-                BasicBlockExit::Jump(to) => rest = to,
-                BasicBlockExit::Debugger(to) => {
-                    rest = to;
-                    blocks.push(StructuredFlow::Debugger)
+                BasicBlockExit::Fallthrough => {}
+                BasicBlockExit::Debugger => {
+                    blocks.push(StructuredFlow::Debugger);
                 }
-                BasicBlockExit::Break(tgt) => {
-                    blocks.push(StructuredFlow::Break(ctx.break_index(tgt)))
-                }
+                BasicBlockExit::Break(tgt) => match ctx.break_index(tgt) {
+                    Some(brk_id) => blocks.push(StructuredFlow::Break(brk_id)),
+                    None => rest = tgt,
+                },
                 BasicBlockExit::Continue(tgt) => {
                     blocks.push(StructuredFlow::Continue(ctx.continue_index(tgt)))
                 }
@@ -140,7 +139,7 @@ fn do_tree_chunk(
                         ))
                     })
                 }
-                BasicBlockExit::SwitchStart(exp, start, end) => {
+                BasicBlockExit::Switch(exp, start, end) => {
                     rest = end + 1;
 
                     let switch_brk_id = ctx.get_breakable_id();
@@ -149,9 +148,9 @@ fn do_tree_chunk(
                         blocks.push(StructuredFlow::Switch(switch_brk_id, exp, switch_contents));
                     })
                 }
-                BasicBlockExit::SwitchCaseExpression(_, _, _)
-                | BasicBlockExit::SwitchEnd(_)
-                | BasicBlockExit::SwitchCase(_, _, _, _) => {
+                BasicBlockExit::SwitchCaseExpression(_, _)
+                | BasicBlockExit::SwitchEnd
+                | BasicBlockExit::SwitchCase(_, _, _) => {
                     unreachable!("invalid switch case structure")
                 }
                 BasicBlockExit::ForInOfLoop(looped_var, loop_type, start, end) => {
@@ -188,9 +187,8 @@ fn do_tree_chunk(
                         ))
                     })
                 }
-                BasicBlockExit::PopCatch(catch, _) => rest = catch,
-                BasicBlockExit::PopFinally(finally, _) => rest = finally,
-                BasicBlockExit::EndFinally(after) => rest = after,
+                BasicBlockExit::PopCatch(start, _) => rest = start,
+                BasicBlockExit::PopFinally(start, _) => rest = start,
                 BasicBlockExit::ClassStart(class_var, start, end) => {
                     rest = end + 1;
 
@@ -199,14 +197,11 @@ fn do_tree_chunk(
                         do_class_members(ctx, func, start, end, vec![]),
                     ));
                 }
-                BasicBlockExit::ClassPopStaticBlock(to) => {
-                    rest = to;
-                }
-                BasicBlockExit::ClassProperty(_, _) | BasicBlockExit::ClassConstructor(_, _) => {
+                BasicBlockExit::ClassProperty(_) | BasicBlockExit::ClassConstructor(_) => {
                     // Pop back to do_class_members
                     return blocks;
                 }
-                BasicBlockExit::ClassPushStaticBlock(_, _) | BasicBlockExit::ClassEnd(_) => {
+                BasicBlockExit::ClassStaticBlock(_, _) | BasicBlockExit::ClassEnd => {
                     assert_eq!(
                         blocks.iter().fold(0, |acc, x| acc + x.count_instructions()),
                         0,
@@ -238,15 +233,13 @@ fn do_class_members(
     let first_member = func.range_mut(start_blk..=end_blk).into_iter().next();
 
     match first_member {
-        Some((_blk_id, block)) => {
-            let rest;
+        Some((blk_id, block)) => {
+            let mut rest = blk_id + 1;
 
             let mut blocks = vec![];
 
             match block.exit {
-                BasicBlockExit::ClassProperty(ref prop, after) => {
-                    rest = after;
-
+                BasicBlockExit::ClassProperty(ref prop) => {
                     let preceding_code = std::mem::take(&mut preceding_code);
 
                     blocks.push(StructuredClassMember::Property(
@@ -254,33 +247,26 @@ fn do_class_members(
                         prop.clone(),
                     ));
                 }
-                BasicBlockExit::ClassConstructor(fn_id, after) => {
-                    rest = after;
-
+                BasicBlockExit::ClassConstructor(fn_id) => {
                     blocks.push(StructuredClassMember::Constructor(fn_id));
                 }
-                BasicBlockExit::ClassPushStaticBlock(start, end) => {
+                BasicBlockExit::ClassStaticBlock(start, end) => {
                     rest = end + 1;
 
                     blocks.push(StructuredClassMember::StaticBlock(do_tree_chunk(
                         ctx, func, start, end,
                     )));
                 }
-                BasicBlockExit::ClassEnd(to) => {
-                    rest = to;
-                }
-                BasicBlockExit::ClassPopStaticBlock(_) => {
-                    unreachable!("pop static block should be handled by do_tree_chunk")
-                }
+                BasicBlockExit::ClassEnd => {}
                 _ => {
                     let index_of_next_prop =
                         func.range(start_blk..=end_blk)
                             .into_iter()
                             .find_map(|(id, block)| match block.exit {
-                                BasicBlockExit::ClassProperty(_, _) => Some(*id),
-                                BasicBlockExit::ClassConstructor(_, _) => Some(*id),
-                                BasicBlockExit::ClassPushStaticBlock(_, _) => Some(*id),
-                                BasicBlockExit::ClassEnd(_) => Some(*id),
+                                BasicBlockExit::ClassProperty(_) => Some(*id),
+                                BasicBlockExit::ClassConstructor(_) => Some(*id),
+                                BasicBlockExit::ClassStaticBlock(_, _) => Some(*id),
+                                BasicBlockExit::ClassEnd => Some(*id),
                                 _ => None,
                             });
 
@@ -318,24 +304,23 @@ fn do_switch(
         let mut condition_exp = None;
 
         let block = match block.exit {
-            BasicBlockExit::SwitchCaseExpression(start, end, next) => {
-                rest = next;
+            BasicBlockExit::SwitchCaseExpression(start, end) => {
+                rest = end + 1;
 
                 condition_exp =
                     Some(do_tree_chunk(ctx, func, start, end)).filter(|x| !x.is_empty());
 
                 func.get(&rest).unwrap()
             }
-            BasicBlockExit::SwitchEnd(next) => {
+            BasicBlockExit::SwitchEnd => {
                 assert_eq!(rest, end_blk, "invalid switch end");
-                assert!(next > rest);
                 return switch_cases;
             }
             _ => block,
         };
 
-        if let BasicBlockExit::SwitchCase(exp, start, end, next) = block.exit {
-            rest = next;
+        if let BasicBlockExit::SwitchCase(exp, start, end) = block.exit {
+            rest = end + 1;
 
             match (exp, condition_exp) {
                 (Some(exp), condition_exp) => {
@@ -864,14 +849,14 @@ mod tests {
                 exit = jump @1
             }
             @1: {
-                exit = try @2 catch @4 finally @6 after @7
+                exit = try @2 catch @4 finally @6..@7
             }
             @2: {
                 $0 = 777
                 exit = jump @3
             }
             @3: {
-                exit = error ? jump @4 : jump @6
+                exit = catch @4..@6
             }
             @4: {
                 $1 = caught_error()
@@ -879,13 +864,12 @@ mod tests {
                 exit = jump @5
             }
             @5: {
-                exit = finally @6 after @7
+                exit = finally @6..@7
             }
             @6: {
                 exit = jump @7
             }
             @7: {
-                exit = end finally after @8
             }
             @8: {
                 $3 = 999
@@ -922,14 +906,14 @@ mod tests {
                 exit = jump @1
             }
             @1: {
-                exit = try @2 catch @4 finally @6 after @7
+                exit = try @2 catch @4 finally @6..@7
             }
             @2: {
                 $0 = 777
                 exit = jump @3
             }
             @3: {
-                exit = error ? jump @4 : jump @6
+                exit = catch @4..@6
             }
             @4: {
                 $1 = caught_error()
@@ -937,14 +921,13 @@ mod tests {
                 exit = jump @5
             }
             @5: {
-                exit = finally @6 after @7
+                exit = finally @6..@7
             }
             @6: {
                 $3 = 999
                 exit = jump @7
             }
             @7: {
-                exit = end finally after @8
             }
             @8: {
                 $4 = 111
@@ -981,7 +964,7 @@ mod tests {
                 exit = jump @1
             }
             @1: {
-                exit = try @2 catch @8 finally @10 after @11
+                exit = try @2 catch @8 finally @10..@11
             }
             @2: {
                 $0 = 111
@@ -1001,19 +984,18 @@ mod tests {
                 exit = jump @7
             }
             @7: {
-                exit = error ? jump @8 : jump @10
+                exit = catch @8..@10
             }
             @8: {
                 exit = jump @9
             }
             @9: {
-                exit = finally @10 after @12
+                exit = finally @10..@12
             }
             @10: {
                 exit = jump @11
             }
             @11: {
-                exit = end finally after @12
             }
             @12: {
                 $2 = 111

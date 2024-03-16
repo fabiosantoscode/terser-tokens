@@ -10,8 +10,25 @@ pub fn interpret_block_group(
 
     let (first_block, last_block) = block_group.get_block_range();
 
-    let completion = interpret_block_group_inner(ctx, block_group, first_block..=last_block)?;
-    Some(completion)
+    let completion =
+        interpret_block_group_inner(ctx, block_group, first_block..=last_block, last_block + 1)?;
+    Some(validate_completion(completion, block_group)?)
+}
+
+fn validate_completion(
+    completion: JsCompletion,
+    block_group: &BasicBlockGroup,
+) -> Option<JsCompletion> {
+    match completion {
+        JsCompletion::Break(idx) => {
+            if !block_group.blocks.contains_key(&idx) {
+                None
+            } else {
+                Some(JsCompletion::Break(idx))
+            }
+        }
+        other => Some(other),
+    }
 }
 
 /// Interpret a function, or get cached, or give up if it can't be cached (IE too many versions of that function call in cache)
@@ -45,11 +62,16 @@ fn interpret_block_group_inner(
     ctx: &mut InterpretCtx,
     block_group: &BasicBlockGroup,
     range: std::ops::RangeInclusive<usize>,
+    falls_through_to: usize,
 ) -> Option<JsCompletion> {
     let mut index = *range.start();
 
     for _safety in 0..MAX_ITERATIONS {
-        let BasicBlock { instructions, exit } = &block_group.blocks[&index];
+        let BasicBlock { instructions, exit } =
+            match block_group.blocks.range(index..=(*range.end())).next() {
+                Some((_, block)) => block,
+                None => return None,
+            };
 
         for (varname, instruction) in instructions {
             let yielded_type = interpret(ctx, instruction)?.into_normal()?;
@@ -58,7 +80,13 @@ fn interpret_block_group_inner(
         }
 
         match exit {
-            BasicBlockExit::Jump(jump) | BasicBlockExit::Break(jump) => {
+            BasicBlockExit::Fallthrough => {
+                index += 1;
+                if index > *range.end() {
+                    return Some(JsCompletion::Break(falls_through_to));
+                }
+            }
+            BasicBlockExit::Break(jump) => {
                 assert!(*jump > index);
                 if jump <= range.end() {
                     index = *jump;
@@ -85,17 +113,39 @@ fn interpret_block_group_inner(
                 let cond = ctx.get_variable(*cond_var)?.clone();
                 let truthy = cond.is_truthy();
 
+                let falls_through_to = alt_end + 1;
+
                 let branch_completion = match truthy {
-                    Some(true) => interpret_block_group_inner(ctx, block_group, *cons..=*cons_end)?,
-                    Some(false) => interpret_block_group_inner(ctx, block_group, *alt..=*alt_end)?,
+                    Some(true) => interpret_block_group_inner(
+                        ctx,
+                        block_group,
+                        *cons..=*cons_end,
+                        falls_through_to,
+                    )?,
+                    Some(false) => interpret_block_group_inner(
+                        ctx,
+                        block_group,
+                        *alt..=*alt_end,
+                        falls_through_to,
+                    )?,
                     None => {
                         ctx.start_branch();
 
-                        let a = interpret_block_group_inner(ctx, block_group, *cons..=*cons_end);
+                        let a = interpret_block_group_inner(
+                            ctx,
+                            block_group,
+                            *cons..=*cons_end,
+                            falls_through_to,
+                        );
                         let a_vars = ctx.end_branch();
 
                         ctx.start_branch();
-                        let b = interpret_block_group_inner(ctx, block_group, *alt..=*alt_end);
+                        let b = interpret_block_group_inner(
+                            ctx,
+                            block_group,
+                            *alt..=*alt_end,
+                            falls_through_to,
+                        );
                         let b_vars = ctx.end_branch();
 
                         // merge the variables from both branches
@@ -104,6 +154,8 @@ fn interpret_block_group_inner(
                         a?.merge(&b?)?
                     }
                 };
+
+                let branch_completion = validate_completion(branch_completion, block_group)?;
 
                 // propagate the branch completion. If we returned or broke out of our range, return that.
                 match &branch_completion {
@@ -272,7 +324,7 @@ mod tests {
                 }
                 @1: {
                     $3 = 2
-                    exit = jump @4
+                    exit = break @4
                 }
                 @2: {
                     $4 = undefined
@@ -337,27 +389,26 @@ mod tests {
                     exit = jump @1
                 }
                 @1: {
-                    exit = try @2 catch @4 finally @6 after @7
+                    exit = try @2 catch @4 finally @6..@7
                 }
                 @2: {
                     $0 = 777
                     exit = jump @3
                 }
                 @3: {
-                    exit = error ? jump @4 : jump @5
+                    exit = catch @4..@5
                 }
                 @4: {
                     $1 = 888
                     exit = jump @5
                 }
                 @5: {
-                    exit = finally @6 after @7
+                    exit = finally @6..@7
                 }
                 @6: {
                     exit = jump @7
                 }
                 @7: {
-                    exit = end finally after @8
                 }
                 @8: {
                     $2 = undefined

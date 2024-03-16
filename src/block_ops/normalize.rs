@@ -26,15 +26,7 @@ pub fn normalize_basic_blocks_tree(recursive: Vec<StructuredFlow>) -> BTreeMap<u
 fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
     if let Some(block) = block {
         match &mut block.exit {
-            BasicBlockExit::Jump(mrk)
-            | BasicBlockExit::Break(mrk)
-            | BasicBlockExit::EndFinally(mrk)
-            | BasicBlockExit::ClassEnd(mrk)
-            | BasicBlockExit::SwitchEnd(mrk)
-                if *mrk == MAX =>
-            {
-                Some(mrk)
-            }
+            BasicBlockExit::Break(mrk) if *mrk == MAX => Some(mrk),
             _ => None,
         }
     } else {
@@ -43,10 +35,18 @@ fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
 }
 
 fn ensure_forward_jump_marker(out_blocks: &mut Vec<BasicBlock>) -> usize {
-    if forward_jump_marker(out_blocks.last_mut()).is_none() {
+    let has_forward_jump_marker = matches!(
+        out_blocks.last(),
+        Some(BasicBlock {
+            exit: BasicBlockExit::Fallthrough,
+            ..
+        })
+    ) || forward_jump_marker(out_blocks.last_mut()).is_some();
+
+    if !has_forward_jump_marker {
         out_blocks.push(BasicBlock {
             instructions: vec![],
-            exit: BasicBlockExit::Jump(MAX),
+            exit: BasicBlockExit::Fallthrough,
         });
     }
 
@@ -109,9 +109,8 @@ fn fold_blocks(
                 // Will not stand on its own
                 out_blocks.push(BasicBlock {
                     instructions,
-                    exit: BasicBlockExit::Jump(MAX),
+                    exit: BasicBlockExit::Fallthrough,
                 });
-                to_label.push(out_blocks.len() - 1);
                 continue;
             }
         };
@@ -133,11 +132,11 @@ fn fold_blocks(
                 break;
             }
             StructuredFlow::Continue(brk) => {
-                let jump_target = jump_targets.get(&brk).unwrap();
+                let (continue_to, _, _) = jump_targets.get(&brk).unwrap();
 
                 out_blocks.push(BasicBlock {
                     instructions,
-                    exit: BasicBlockExit::Continue(jump_target.0),
+                    exit: BasicBlockExit::Continue(*continue_to),
                 });
                 break;
             }
@@ -153,9 +152,8 @@ fn fold_blocks(
                 if instructions.len() > 0 {
                     out_blocks.push(BasicBlock {
                         instructions,
-                        exit: BasicBlockExit::Jump(MAX),
+                        exit: BasicBlockExit::Fallthrough,
                     });
-                    to_label.push(out_blocks.len() - 1);
                 }
                 let (block_labels, _) = fold_blocks(out_blocks, blocks_within, jump_targets);
 
@@ -191,7 +189,7 @@ fn fold_blocks(
 
                 out_blocks.push(BasicBlock {
                     instructions,
-                    exit: BasicBlockExit::SwitchStart(expression, MAX, MAX),
+                    exit: BasicBlockExit::Switch(expression, MAX, MAX),
                 });
                 let switch_start = out_blocks.len() - 1;
 
@@ -200,18 +198,15 @@ fn fold_blocks(
                         Some((insx, condvar)) => {
                             out_blocks.push(BasicBlock {
                                 instructions: vec![],
-                                exit: BasicBlockExit::SwitchCaseExpression(MAX, MAX, MAX),
+                                exit: BasicBlockExit::SwitchCaseExpression(MAX, MAX),
                             });
                             let case_expr_start = out_blocks.len() - 1;
                             let (case_expr_labels, case_expr_end) =
                                 fold_blocks(out_blocks, insx, jump_targets);
 
-                            to_label.extend(case_expr_labels);
-                            resolve_forward_jumps(out_blocks, &mut to_label);
-
                             out_blocks.push(BasicBlock {
                                 instructions: vec![],
-                                exit: BasicBlockExit::SwitchCase(Some(condvar), MAX, MAX, MAX),
+                                exit: BasicBlockExit::SwitchCase(Some(condvar), MAX, MAX),
                             });
                             let case_start = out_blocks.len() - 1;
 
@@ -221,51 +216,40 @@ fn fold_blocks(
                             out_blocks[case_expr_start].exit = BasicBlockExit::SwitchCaseExpression(
                                 case_expr_start + 1,
                                 case_expr_end,
-                                case_start,
                             );
-                            out_blocks[case_start].exit = BasicBlockExit::SwitchCase(
-                                Some(condvar),
-                                case_start + 1,
-                                case_end,
-                                out_blocks.len(), /* there's always a next one */
-                            );
+                            out_blocks[case_start].exit =
+                                BasicBlockExit::SwitchCase(Some(condvar), case_start + 1, case_end);
 
+                            to_label.extend(case_expr_labels);
                             to_label.extend(case_labels);
-                            resolve_forward_jumps(out_blocks, &mut to_label);
                         }
                         None => {
                             out_blocks.push(BasicBlock {
                                 instructions: vec![],
-                                exit: BasicBlockExit::SwitchCase(None, MAX, MAX, MAX),
+                                exit: BasicBlockExit::SwitchCase(None, MAX, MAX),
                             });
                             let case_start = out_blocks.len() - 1;
 
                             let (case_labels, case_end) =
                                 fold_blocks(out_blocks, case.body, jump_targets);
 
-                            out_blocks[case_start].exit = BasicBlockExit::SwitchCase(
-                                None,
-                                case_start + 1,
-                                case_end,
-                                out_blocks.len(), /* there's always a next one */
-                            );
+                            out_blocks[case_start].exit =
+                                BasicBlockExit::SwitchCase(None, case_start + 1, case_end);
 
                             to_label.extend(case_labels);
-                            resolve_forward_jumps(out_blocks, &mut to_label);
                         }
                     }
                 }
 
                 out_blocks.push(BasicBlock {
                     instructions: vec![],
-                    exit: BasicBlockExit::SwitchEnd(MAX),
+                    exit: BasicBlockExit::SwitchEnd,
                 });
                 let switch_end = out_blocks.len() - 1;
 
                 out_blocks[switch_start].exit =
-                    BasicBlockExit::SwitchStart(expression, switch_start + 1, switch_end);
+                    BasicBlockExit::Switch(expression, switch_start + 1, switch_end);
 
-                to_label.push(switch_end);
                 if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
                     to_label.extend(broken_from);
                 }
@@ -335,9 +319,7 @@ fn fold_blocks(
                     BasicBlockExit::SetTryAndCatch(head + 1, body + 1, catch + 1, finally);
                 out_blocks[body].exit = BasicBlockExit::PopCatch(body + 1, catch + 1);
                 out_blocks[catch].exit = BasicBlockExit::PopFinally(catch + 1, finally);
-                out_blocks[finally].exit = BasicBlockExit::EndFinally(MAX);
 
-                to_label.push(finally);
                 to_label.extend(body_labels);
                 to_label.extend(catch_labels);
                 to_label.extend(finally_labels);
@@ -360,29 +342,23 @@ fn fold_blocks(
                             let mut to_label = vec![];
 
                             let (body_labels, _) = fold_blocks(out_blocks, block, jump_targets);
-                            ensure_forward_jump_marker(out_blocks);
-
                             to_label.extend(body_labels);
-                            resolve_forward_jumps(out_blocks, &mut to_label);
-
-                            let prop_end = out_blocks.len();
 
                             out_blocks.push(BasicBlock {
                                 instructions: vec![],
-                                exit: BasicBlockExit::ClassProperty(prop.clone(), prop_end + 1),
+                                exit: BasicBlockExit::ClassProperty(prop.clone()),
                             });
                         }
                         StructuredClassMember::Constructor(func_id) => {
-                            let after_constructor = out_blocks.len() + 1;
                             out_blocks.push(BasicBlock {
                                 instructions: vec![],
-                                exit: BasicBlockExit::ClassConstructor(func_id, after_constructor),
+                                exit: BasicBlockExit::ClassConstructor(func_id),
                             });
                         }
                         StructuredClassMember::StaticBlock(block) => {
                             out_blocks.push(BasicBlock {
                                 instructions: vec![],
-                                exit: BasicBlockExit::ClassPushStaticBlock(MAX, MAX),
+                                exit: BasicBlockExit::ClassStaticBlock(MAX, MAX),
                             });
 
                             let sb_start = out_blocks.len() - 1;
@@ -393,27 +369,23 @@ fn fold_blocks(
                             to_label.extend(body_labels);
 
                             out_blocks[sb_start].exit =
-                                BasicBlockExit::ClassPushStaticBlock(sb_start + 1, sb_end + 1);
+                                BasicBlockExit::ClassStaticBlock(sb_start + 1, sb_end + 1);
                         }
                     }
                 }
 
                 out_blocks.push(BasicBlock {
                     instructions: vec![],
-                    exit: BasicBlockExit::ClassEnd(MAX),
+                    exit: BasicBlockExit::ClassEnd,
                 });
-
                 let end = out_blocks.len() - 1;
 
                 out_blocks[head].exit = BasicBlockExit::ClassStart(class_var, head + 1, end);
-                out_blocks[end].exit = BasicBlockExit::ClassEnd(MAX);
-
-                to_label.push(end);
             }
             StructuredFlow::Debugger => {
                 out_blocks.push(BasicBlock {
                     instructions,
-                    exit: BasicBlockExit::Debugger(MAX),
+                    exit: BasicBlockExit::Debugger,
                 });
             }
         }
@@ -471,11 +443,9 @@ mod tests {
         }
         @1: {
             $1 = 2
-            exit = jump @3
         }
         @2: {
             $2 = 3
-            exit = jump @3
         }
         @3: {
             $3 = 4
@@ -518,14 +488,14 @@ mod tests {
                 exit = jump @1
             }
             @1: {
-                exit = try @2 catch @4 finally @6 after @7
+                exit = try @2 catch @4 finally @6..@7
             }
             @2: {
                 $0 = 777
                 exit = jump @3
             }
             @3: {
-                exit = error ? jump @4 : jump @6
+                exit = catch @4..@6
             }
             @4: {
                 $1 = either($0, $2, $3)
@@ -534,13 +504,12 @@ mod tests {
             }
             @5: {
                 $3 = either($0, $1, $2)
-                exit = finally @6 after @7
+                exit = finally @6..@7
             }
             @6: {
                 exit = jump @7
             }
             @7: {
-                exit = end finally after @8
             }
             @8: {
                 $4 = $3
@@ -549,20 +518,19 @@ mod tests {
         );
         insta::assert_debug_snapshot!(group, @r###"
         @0: {
-            exit = try @1 catch @2 finally @3 after @3
+            exit = try @1 catch @2 finally @3..@3
         }
         @1: {
             $0 = 777
-            exit = error ? jump @2 : jump @3
+            exit = catch @2..@3
         }
         @2: {
             $1 = either($0, $2, $3)
             $2 = 888
             $3 = either($0, $1, $2)
-            exit = finally @3 after @3
+            exit = finally @3..@3
         }
         @3: {
-            exit = end finally after @4
         }
         @4: {
             $4 = $3
@@ -578,13 +546,13 @@ mod tests {
                 exit = jump @1
             }
             @1: {
-                exit = try @2 catch @4 finally @6 after @7
+                exit = try @2 catch @4 finally @6..@7
             }
             @2: {
                 exit = jump @3
             }
             @3: {
-                exit = error ? jump @4 : jump @6
+                exit = catch @4..@6
             }
             @4: {
                 $1 = either($2, $3)
@@ -593,13 +561,12 @@ mod tests {
             }
             @5: {
                 $3 = either($1, $2)
-                exit = finally @6 after @7
+                exit = finally @6..@7
             }
             @6: {
                 exit = jump @7
             }
             @7: {
-                exit = end finally after @8
             }
             @8: {
                 $4 = $3
@@ -622,7 +589,7 @@ mod tests {
             }
             @1: {
                 $1 = 2
-                exit = jump @3
+                exit = break @3
             }
             @2: {
                 $2 = 3
@@ -639,7 +606,7 @@ mod tests {
         }
         @1: {
             $1 = 2
-            exit = jump @2
+            exit = break @2
         }
         @2: {
             $3 = 4
@@ -699,7 +666,6 @@ mod tests {
         }
         @1: {
             $0 = 123
-            exit = jump @2
         }
         @2: {
             $1 = undefined

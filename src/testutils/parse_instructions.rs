@@ -66,9 +66,14 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
     }
 
     fn parse_basic_block_exit(input: &str) -> IResult<&str, BasicBlockExit> {
-        // exit = jump @123
-
         let input = whitespace!(input);
+
+        if let Some(_) = opt(tag("}"))(input)?.1 {
+            // Default exit, doesn't need mentioning
+            return Ok((input, BasicBlockExit::Fallthrough));
+        }
+
+        // exit = jump @123
         let (input, _exit) = tag("exit")(input)?;
         let input = whitespace!(input);
         let (input, _exit) = tag("=")(input)?;
@@ -83,9 +88,8 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
             tag("return"),
             tag("throw"),
             tag("try"),
-            tag("error"),
+            tag("catch"),
             tag("finally"),
-            tag("end finally after"),
         ))(input)?;
 
         let input = whitespace!(input);
@@ -93,7 +97,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
         let (input, ret) = match word {
             "jump" => {
                 let (input, ref_) = parse_blockref(input)?;
-                (input, BasicBlockExit::Jump(ref_))
+                (input, BasicBlockExit::Fallthrough)
             }
             "break" => {
                 let (input, ref_) = parse_blockref(input)?;
@@ -137,7 +141,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
                 (input, BasicBlockExit::ExitFn(ExitType::Throw, ref_))
             }
             "try" => {
-                // try @123 catch @456 finally @789 after @101112
+                // try @123 catch @456 finally @789..@101112
                 let (input, try_block) = parse_blockref(input)?;
                 let input = whitespace!(input);
                 let (input, _) = tag("catch")(input)?;
@@ -146,55 +150,28 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
                 let input = whitespace!(input);
                 let (input, _) = tag("finally")(input)?;
                 let input = whitespace!(input);
-                let (input, finally_block) = parse_blockref(input)?;
-                let input = whitespace!(input);
-                let (input, _) = tag("after")(input)?;
-                let input = whitespace!(input);
-                let (input, after_block) = parse_blockref(input)?;
+                let (input, (finally_start, finally_end)) = parse_blockref_range(input)?;
                 (
                     input,
                     BasicBlockExit::SetTryAndCatch(
                         try_block,
                         catch_block,
-                        finally_block,
-                        after_block,
+                        finally_start,
+                        finally_end,
                     ),
                 )
             }
-            "error" => {
-                // error ? jump @123 : jump @456
-                let (input, _) = tag("?")(input)?;
-                let input = whitespace!(input);
-                let (input, _) = tag("jump")(input)?;
-                let input = whitespace!(input);
-                let (input, consequent) = parse_blockref(input)?;
-                let input = whitespace!(input);
-                let (input, _) = tag(":")(input)?;
-                let input = whitespace!(input);
-                let (input, _) = tag("jump")(input)?;
-                let input = whitespace!(input);
-                let (input, alternate) = parse_blockref(input)?;
+            "catch" => {
+                // catch @123..@456
+                let (input, (start, end)) = parse_blockref_range(input)?;
 
-                (input, BasicBlockExit::PopCatch(consequent, alternate))
+                (input, BasicBlockExit::PopCatch(start, end))
             }
             "finally" => {
-                // finally @10 after @11
-                let (input, finally_block) = parse_blockref(input)?;
-                let input = whitespace!(input);
-                let (input, _) = tag("after")(input)?;
-                let input = whitespace!(input);
-                let (input, after_block) = parse_blockref(input)?;
+                // finally @10..@11
+                let (input, (start, end)) = parse_blockref_range(input)?;
 
-                (
-                    input,
-                    BasicBlockExit::PopFinally(finally_block, after_block),
-                )
-            }
-            "end finally after" => {
-                // end finally after @10
-                let (input, after_block) = parse_blockref(input)?;
-
-                (input, BasicBlockExit::EndFinally(after_block))
+                (input, BasicBlockExit::PopFinally(start, end))
             }
             _ => unimplemented!(),
         };
@@ -666,11 +643,10 @@ mod tests {
         .1;
 
         insta::assert_debug_snapshot!(blocks, @r###"
-            @0: {
-                $0 = 123
-                exit = jump @1
-            }
-            "###
+        @0: {
+            $0 = 123
+        }
+        "###
         );
     }
 
@@ -736,26 +712,21 @@ mod tests {
         insta::assert_debug_snapshot!(blocks, @r###"
         @0: {
             $0 = 777
-            exit = jump @1
         }
         @1: {
             exit = cond $0 ? @2..@4 : @7..@8
         }
         @2: {
             $1 = 888
-            exit = jump @3
         }
         @3: {
             exit = cond $1 ? @4..@4 : @5..@8
         }
         @4: {
-            exit = jump @7
         }
         @5: {
-            exit = jump @6
         }
         @6: {
-            exit = jump @0
         }
         @7: {
             $2 = 999
@@ -765,7 +736,6 @@ mod tests {
         @8: {
             $4 = read_non_local $$2
             $5 = write_non_local $$2 $4
-            exit = jump @9
         }
         @9: {
             $6 = call $5($1, $2)
