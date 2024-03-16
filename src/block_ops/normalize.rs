@@ -161,7 +161,7 @@ fn fold_blocks(
 
                 to_label.extend(block_labels);
             }
-            StructuredFlow::Branch(brk, cond_var, cons, alt) => {
+            StructuredFlow::Cond(brk, cond_var, cons, alt) => {
                 if brk.0.is_some() {
                     jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
                 }

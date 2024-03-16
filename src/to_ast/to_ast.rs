@@ -89,7 +89,7 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
 
             vec![throw_stmt]
         }
-        StructuredFlow::Branch(brk_id, branch_expr, cons, alt) => {
+        StructuredFlow::Cond(brk_id, branch_expr, cons, alt) => {
             let if_stmt = ctx.enter_breakable(brk_id, false, |ctx| {
                 let branch_expr = ref_or_inlined_expr(ctx, *branch_expr);
                 let cons = to_stat_vec(ctx, cons);

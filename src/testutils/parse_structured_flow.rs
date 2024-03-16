@@ -72,7 +72,7 @@ pub fn parse_structured_flow(input: &str) -> StructuredFlow {
         let (input, alt) = parse_many_braced(input)?;
         let input = whitespace!(input);
 
-        Ok((input, StructuredFlow::Branch(brk, branch_var, cons, alt)))
+        Ok((input, StructuredFlow::Cond(brk, branch_var, cons, alt)))
     }
 
     fn parse_loop(input: &str) -> IResult<&str, StructuredFlow> {

@@ -121,7 +121,7 @@ fn do_tree_chunk(
 
                     let brk_id = ctx.get_breakable_id();
                     ctx.push_within(BreakAndRange(brk_id, cons_start, alt_end), |ctx| {
-                        blocks.push(StructuredFlow::Branch(
+                        blocks.push(StructuredFlow::Cond(
                             brk_id,
                             cond,
                             do_tree_chunk(ctx, func, cons_start, cons_end),

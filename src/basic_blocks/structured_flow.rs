@@ -23,7 +23,7 @@ pub enum StructuredFlow {
     Block(Vec<StructuredFlow>),
     Loop(BreakableId, Vec<StructuredFlow>),
     ForInOfLoop(BreakableId, usize, ForInOfKind, Vec<StructuredFlow>),
-    Branch(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
+    Cond(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
     /// (breakable_id, condition, structured_switch_cases)
     Switch(BreakableId, usize, Vec<StructuredSwitchCase>),
     TryCatch(
@@ -67,7 +67,7 @@ impl StructuredFlow {
     #[cfg(test)]
     fn str_head(&self) -> String {
         match self {
-            StructuredFlow::Branch(_, _, _, _) => "Branch".to_string(),
+            StructuredFlow::Cond(_, _, _, _) => "Cond".to_string(),
             StructuredFlow::Switch(_, _, _) => "Switch".to_string(),
             StructuredFlow::Break(_) => "Break".to_string(),
             StructuredFlow::Continue(_) => "Continue".to_string(),
@@ -124,8 +124,8 @@ impl StructuredFlow {
                     StructuredFlow::Block(items)
                 }
             }
-            StructuredFlow::Branch(id, cond, cons, alt) => {
-                StructuredFlow::Branch(id, cond, map(cons), map(alt))
+            StructuredFlow::Cond(id, cond, cons, alt) => {
+                StructuredFlow::Cond(id, cond, map(cons), map(alt))
             }
             StructuredFlow::TryCatch(id, try_, catch, finally) => {
                 StructuredFlow::TryCatch(id, map(try_), map(catch), map(finally))
@@ -162,7 +162,7 @@ impl StructuredFlow {
 
     pub fn children(&self) -> Vec<Vec<&StructuredFlow>> {
         match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
+            StructuredFlow::Cond(_id, _x /* who cares */, y, z) => {
                 vec![y.iter().collect(), z.iter().collect()]
             }
             StructuredFlow::Switch(_, _, cases) => cases
@@ -199,7 +199,7 @@ impl StructuredFlow {
 
     pub fn children_mut(&mut self) -> Vec<Vec<&mut StructuredFlow>> {
         match self {
-            StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
+            StructuredFlow::Cond(_id, _x /* who cares */, y, z) => {
                 vec![y.iter_mut().collect(), z.iter_mut().collect()]
             }
             StructuredFlow::Switch(_id, _var, cases) => {
@@ -296,7 +296,7 @@ impl StructuredFlow {
     }
     fn remove_break_id(&mut self) {
         match self {
-            StructuredFlow::Branch(id, _, _, _) | StructuredFlow::Loop(id, _) => {
+            StructuredFlow::Cond(id, _, _, _) | StructuredFlow::Loop(id, _) => {
                 *id = BreakableId(None)
             }
             _ => {}
@@ -305,7 +305,7 @@ impl StructuredFlow {
 
     fn breakable_id(&self) -> Option<BreakableId> {
         match self {
-            StructuredFlow::Branch(id, _, _, _)
+            StructuredFlow::Cond(id, _, _, _)
             | StructuredFlow::Break(id)
             | StructuredFlow::Continue(id)
             | StructuredFlow::Loop(id, _)
@@ -318,7 +318,7 @@ impl StructuredFlow {
     /// Careful: classes and switch statements will return vars that may be defined inside them
     pub(crate) fn used_vars(&self) -> Vec<usize> {
         match self {
-            StructuredFlow::Branch(_, x, _, _) => vec![*x],
+            StructuredFlow::Cond(_, x, _, _) => vec![*x],
             StructuredFlow::Switch(_, exp, cases) => {
                 let mut vars = vec![*exp];
                 for case in cases {
@@ -399,7 +399,7 @@ impl Debug for StructuredFlow {
                 }
                 print_vec(f, body)
             }
-            StructuredFlow::Branch(brk, cond, cons, alt) => {
+            StructuredFlow::Cond(brk, cond, cons, alt) => {
                 write!(f, "if{} (${}) ", print_brk(brk), cond)?;
                 print_vec_no_eol(f, cons)?;
                 write!(f, " else ")?;
@@ -466,7 +466,7 @@ impl StructuredFlow {
         match self {
             StructuredFlow::Block(items) => Self::_all(items),
             StructuredFlow::Loop(_, body) => Self::_all(body),
-            StructuredFlow::Branch(_, _, cons, alt) => Self::_all(cons) && Self::_all(alt),
+            StructuredFlow::Cond(_, _, cons, alt) => Self::_all(cons) && Self::_all(alt),
             StructuredFlow::TryCatch(_, body, _, fin) => Self::_all(body) && Self::_all(fin),
             StructuredFlow::BasicBlock(instructions) => instructions.len() == 0,
             _ => false,
@@ -514,10 +514,10 @@ mod tests {
         0: Block
         1: $0 = 123
 
-        2: Branch
+        2: Cond
         3: $1 = 456
 
-        4: Branch
+        4: Cond
         5: $2 = 7
 
         6: $3 = 8

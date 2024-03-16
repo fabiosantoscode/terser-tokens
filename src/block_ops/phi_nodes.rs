@@ -138,7 +138,7 @@ fn generate_phi_nodes_inner(
                 out_recursive.push(StructuredFlow::Return(exit, ctx.read_name(exit_val)));
             }
             // Conditional branches
-            StructuredFlow::Branch(brk, cond_var, cons, alt) => {
+            StructuredFlow::Cond(brk, cond_var, cons, alt) => {
                 let cond_var = ctx.read_name(cond_var);
 
                 ctx.enter_conditional();
@@ -148,7 +148,7 @@ fn generate_phi_nodes_inner(
 
                 let phi_block = ctx.leave_conditional();
 
-                out_recursive.push(StructuredFlow::Branch(brk, cond_var, cons, alt));
+                out_recursive.push(StructuredFlow::Cond(brk, cond_var, cons, alt));
                 out_recursive.extend(phi_block.into_iter());
             }
             StructuredFlow::Switch(brk, expression, mut cases) => {
