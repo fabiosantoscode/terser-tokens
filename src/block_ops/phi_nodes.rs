@@ -138,7 +138,9 @@ fn generate_phi_nodes_inner(
                 out_recursive.push(StructuredFlow::Return(exit, ctx.read_name(exit_val)));
             }
             // Conditional branches
-            StructuredFlow::Branch(cond, cond_var, cons, alt) => {
+            StructuredFlow::Branch(brk, cond_var, cons, alt) => {
+                let cond_var = ctx.read_name(cond_var);
+
                 ctx.enter_conditional();
 
                 let cons = generate_phi_nodes_inner(ctx, cons);
@@ -146,13 +148,32 @@ fn generate_phi_nodes_inner(
 
                 let phi_block = ctx.leave_conditional();
 
-                out_recursive.push(StructuredFlow::Branch(
-                    cond,
-                    ctx.read_name(cond_var),
-                    cons,
-                    alt,
-                ));
+                out_recursive.push(StructuredFlow::Branch(brk, cond_var, cons, alt));
                 out_recursive.extend(phi_block.into_iter());
+            }
+            StructuredFlow::Switch(brk, expression, mut cases) => {
+                let expression = ctx.read_name(expression);
+
+                let mut conditionals_to_pop = 1;
+                ctx.enter_conditional();
+
+                for case in cases.iter_mut() {
+                    conditionals_to_pop += 1;
+                    ctx.enter_conditional();
+
+                    if let Some((exprs, varname)) = &mut case.condition {
+                        *exprs = generate_phi_nodes_inner(ctx, std::mem::take(exprs));
+                        *varname = ctx.read_name(*varname);
+                    }
+                    case.body = generate_phi_nodes_inner(ctx, std::mem::take(&mut case.body));
+                }
+
+                let phi_block = (0..conditionals_to_pop)
+                    .flat_map(|_| ctx.leave_conditional())
+                    .collect::<Vec<_>>();
+
+                out_recursive.push(StructuredFlow::Switch(brk, expression, cases));
+                out_recursive.extend(phi_block);
             }
             StructuredFlow::Loop(brk, contents) => {
                 let (phi_block, contents) = generate_phi_nodes_loops(ctx, contents);
@@ -274,7 +295,9 @@ fn get_loop_reentry_vars(contents: &Vec<StructuredFlow>) -> BTreeSet<usize> {
 
                 seen_defs.insert(*varname);
             }
-        } else if let Some(used_var) = block.used_var() {
+        }
+
+        for used_var in block.used_vars() {
             if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
                 loop_vars_used_in_loop.insert(used_var);
             }

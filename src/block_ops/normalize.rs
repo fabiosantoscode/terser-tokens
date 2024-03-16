@@ -30,6 +30,7 @@ fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
             | BasicBlockExit::Break(mrk)
             | BasicBlockExit::EndFinally(mrk)
             | BasicBlockExit::ClassEnd(mrk)
+            | BasicBlockExit::SwitchEnd(mrk)
                 if *mrk == MAX =>
             {
                 Some(mrk)
@@ -179,6 +180,92 @@ fn fold_blocks(
 
                 to_label.extend(cons_labels);
                 to_label.extend(alt_labels);
+                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
+                    to_label.extend(broken_from);
+                }
+            }
+            StructuredFlow::Switch(brk, expression, cases) => {
+                if brk.0.is_some() {
+                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                }
+
+                out_blocks.push(BasicBlock {
+                    instructions,
+                    exit: BasicBlockExit::SwitchStart(expression, MAX, MAX),
+                });
+                let switch_start = out_blocks.len() - 1;
+
+                for case in cases {
+                    match case.condition {
+                        Some((insx, condvar)) => {
+                            out_blocks.push(BasicBlock {
+                                instructions: vec![],
+                                exit: BasicBlockExit::SwitchCaseExpression(MAX, MAX, MAX),
+                            });
+                            let case_expr_start = out_blocks.len() - 1;
+                            let (case_expr_labels, case_expr_end) =
+                                fold_blocks(out_blocks, insx, jump_targets);
+
+                            to_label.extend(case_expr_labels);
+                            resolve_forward_jumps(out_blocks, &mut to_label);
+
+                            out_blocks.push(BasicBlock {
+                                instructions: vec![],
+                                exit: BasicBlockExit::SwitchCase(Some(condvar), MAX, MAX, MAX),
+                            });
+                            let case_start = out_blocks.len() - 1;
+
+                            let (case_labels, case_end) =
+                                fold_blocks(out_blocks, case.body, jump_targets);
+
+                            out_blocks[case_expr_start].exit = BasicBlockExit::SwitchCaseExpression(
+                                case_expr_start + 1,
+                                case_expr_end,
+                                case_start,
+                            );
+                            out_blocks[case_start].exit = BasicBlockExit::SwitchCase(
+                                Some(condvar),
+                                case_start + 1,
+                                case_end,
+                                out_blocks.len(), /* there's always a next one */
+                            );
+
+                            to_label.extend(case_labels);
+                            resolve_forward_jumps(out_blocks, &mut to_label);
+                        }
+                        None => {
+                            out_blocks.push(BasicBlock {
+                                instructions: vec![],
+                                exit: BasicBlockExit::SwitchCase(None, MAX, MAX, MAX),
+                            });
+                            let case_start = out_blocks.len() - 1;
+
+                            let (case_labels, case_end) =
+                                fold_blocks(out_blocks, case.body, jump_targets);
+
+                            out_blocks[case_start].exit = BasicBlockExit::SwitchCase(
+                                None,
+                                case_start + 1,
+                                case_end,
+                                out_blocks.len(), /* there's always a next one */
+                            );
+
+                            to_label.extend(case_labels);
+                            resolve_forward_jumps(out_blocks, &mut to_label);
+                        }
+                    }
+                }
+
+                out_blocks.push(BasicBlock {
+                    instructions: vec![],
+                    exit: BasicBlockExit::SwitchEnd(MAX),
+                });
+                let switch_end = out_blocks.len() - 1;
+
+                out_blocks[switch_start].exit =
+                    BasicBlockExit::SwitchStart(expression, switch_start + 1, switch_end);
+
+                to_label.push(switch_end);
                 if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
                     to_label.extend(broken_from);
                 }

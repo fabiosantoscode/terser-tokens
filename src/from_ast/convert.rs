@@ -23,29 +23,33 @@ pub fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
         Stmt::While(_) | Stmt::DoWhile(_) | Stmt::For(_) | Stmt::ForIn(_) | Stmt::ForOf(_) => true,
         _ => false,
     };
+    let is_switch = |stat: &Stmt| matches!(stat, Stmt::Switch(_));
 
-    let (pushed, is_labelled_block) = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
+    let is_labelled_block = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
         ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
         stat_to_basic_blocks_inner(ctx, body);
-        (true, !is_loop(body))
+
+        !is_loop(body) && !is_switch(body)
     } else if is_loop(stat) {
         ctx.push_label(NestedIntoStatement::Unlabelled);
         stat_to_basic_blocks_inner(ctx, stat);
-        (true, false)
+        false
+    } else if is_switch(stat) {
+        ctx.push_label(NestedIntoStatement::Unlabelled);
+        stat_to_basic_blocks_inner(ctx, stat);
+        false
     } else {
         stat_to_basic_blocks_inner(ctx, stat);
-        (false, false)
+        return;
     };
 
-    if pushed {
-        let jumpers_towards_me = ctx.pop_label();
-        if jumpers_towards_me.len() > 0 {
-            for jumper in jumpers_towards_me {
-                if is_labelled_block {
-                    ctx.set_exit(jumper, BasicBlockExit::Jump(ctx.current_block_index()))
-                } else {
-                    ctx.set_exit(jumper, BasicBlockExit::Break(ctx.current_block_index()))
-                }
+    let jumpers_towards_me = ctx.pop_label();
+    if jumpers_towards_me.len() > 0 {
+        for jumper in jumpers_towards_me {
+            if is_labelled_block {
+                ctx.set_exit(jumper, BasicBlockExit::Jump(ctx.current_block_index()))
+            } else {
+                ctx.set_exit(jumper, BasicBlockExit::Break(ctx.current_block_index()))
             }
         }
     }
@@ -349,7 +353,61 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
             ctx.set_exit(index, BasicBlockExit::Debugger(after_index));
         }
         Stmt::With(_) => todo!(),
-        Stmt::Switch(_) => todo!(),
+        Stmt::Switch(switch) => {
+            let exp = expr_to_basic_blocks(ctx, &switch.discriminant);
+
+            let switch_start = ctx.current_block_index();
+            ctx.wrap_up_block();
+
+            for case in switch.cases.iter() {
+                let case_exp = if let Some(test) = &case.test {
+                    let case_exp_start = ctx.current_block_index();
+                    ctx.wrap_up_block();
+
+                    let ret = Some(expr_to_basic_blocks(ctx, test));
+                    let case_exp_end = ctx.current_block_index();
+                    ctx.wrap_up_block();
+
+                    ctx.set_exit(
+                        case_exp_start,
+                        BasicBlockExit::SwitchCaseExpression(
+                            case_exp_start + 1,
+                            case_exp_end,
+                            case_exp_end + 1,
+                        ),
+                    );
+
+                    ret
+                } else {
+                    None
+                };
+
+                let case_start = ctx.current_block_index();
+                ctx.wrap_up_block();
+
+                for stat in case.cons.iter() {
+                    stat_to_basic_blocks(ctx, stat);
+                }
+
+                let case_end = ctx.current_block_index();
+                let case_next = ctx.wrap_up_block();
+
+                ctx.set_exit(
+                    case_start,
+                    BasicBlockExit::SwitchCase(case_exp, case_start + 1, case_end, case_next),
+                );
+            }
+
+            let switch_end = ctx.current_block_index();
+            let switch_after = ctx.wrap_up_block();
+
+            ctx.set_exit(switch_end, BasicBlockExit::SwitchEnd(switch_after));
+
+            ctx.set_exit(
+                switch_start,
+                BasicBlockExit::SwitchStart(exp, switch_start + 1, switch_end),
+            );
+        }
         Stmt::Throw(ThrowStmt { arg, .. }) => {
             ctx.wrap_up_block();
             let arg = expr_to_basic_blocks(ctx, arg);
@@ -1225,6 +1283,59 @@ mod tests {
             $16 = $14 + $15
             $17 = undefined
             exit = return $17
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_switch() {
+        let s = test_basic_blocks("switch (10) { case 20: 30; default: 40; break; case 50: 60; }");
+        insta::assert_debug_snapshot!(s, @r###"
+        @0: {
+            $0 = 10
+            exit = switch $0 @1..@11
+        }
+        @1: {
+            exit = case_expr @2..@2 next @3
+        }
+        @2: {
+            $1 = 20
+            exit = jump @3
+        }
+        @3: {
+            exit = case $1 ? @4..@4 : @5
+        }
+        @4: {
+            $2 = 30
+            exit = jump @5
+        }
+        @5: {
+            exit = default @6..@6 next @7
+        }
+        @6: {
+            $3 = 40
+            exit = break @12
+        }
+        @7: {
+            exit = case_expr @8..@8 next @9
+        }
+        @8: {
+            $4 = 50
+            exit = jump @9
+        }
+        @9: {
+            exit = case $4 ? @10..@10 : @11
+        }
+        @10: {
+            $5 = 60
+            exit = jump @11
+        }
+        @11: {
+            exit = switch_end next @12
+        }
+        @12: {
+            $6 = undefined
+            exit = return $6
         }
         "###);
     }

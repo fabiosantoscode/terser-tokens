@@ -68,19 +68,21 @@ fn run_code_for_logs(scope: &mut v8::HandleScope<'_, ()>, s: &str) -> Option<Str
     {
         let code = format!(
             r###"
-                let __str = s =>
-                    Array.isArray(s) ? '[' + s.map(__str).join(', ') + ']'
+                let __str = (s, deep = false) =>
+                    Array.isArray(s) ? '[' + s.map(it => __str(it, true)).join(', ') + ']'
                     : s == null ? String(s)
+                    : typeof s === 'string' && !s.includes('\n') && !deep ? s
                     : JSON.stringify(s);
+                let logs = '';
+                console.log = (...args) => logs += args.map(it => __str(it)).join(' ') + '\n';
 
                 ;(async function () {{
                     {s}
                 }})()
-                    .then(result => {{
-                        globalThis.RESULT = __str(result);
-                    }})
-                    .catch(error => {{
-                        globalThis.RESULT = error ? error.message : __str(error);
+                    .then(result => result === undefined ? '' : __str(result))
+                    .catch(error => error ? error.message : __str(error))
+                    .then((result) => {{
+                        globalThis.RESULT = logs + result;
                     }});
             "###
         );

@@ -13,6 +13,7 @@ use crate::{
     },
     to_ast::{
         build_block, build_empty_var_decl, build_multivar_decl, build_var_assign, build_var_decl,
+        statements_forced_to_expr_ast,
     },
 };
 
@@ -107,6 +108,34 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
             });
 
             vec![if_stmt]
+        }
+        StructuredFlow::Switch(brk_id, test, cases) => {
+            let switch_stmt = ctx.enter_breakable(brk_id, false, |ctx| {
+                let test = ref_or_inlined_expr(ctx, *test);
+                let cases = cases
+                    .iter()
+                    .map(|case| {
+                        let test = case.condition.as_ref().map(|(insx, varname)| {
+                            Box::new(statements_forced_to_expr_ast(ctx, &insx, *varname))
+                        });
+                        let cons = to_stat_vec(ctx, &case.body);
+
+                        swc_ecma_ast::SwitchCase {
+                            span: Default::default(),
+                            test,
+                            cons,
+                        }
+                    })
+                    .collect();
+
+                Stmt::Switch(swc_ecma_ast::SwitchStmt {
+                    span: Default::default(),
+                    discriminant: Box::new(test),
+                    cases,
+                })
+            });
+
+            vec![switch_stmt]
         }
         StructuredFlow::Break(brk_id) => {
             let break_stmt = Stmt::Break(swc_ecma_ast::BreakStmt {

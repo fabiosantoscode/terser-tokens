@@ -247,7 +247,7 @@ fn stat_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, stat: &'a Stmt) {
         Stmt::Break(_) => {}
         Stmt::Continue(_) => {}
         Stmt::Labeled(stat) => stat_nonlocals(ctx, stat.body.as_ref()),
-        Stmt::Debugger(_) => {},
+        Stmt::Debugger(_) => {}
         Stmt::With(_) => todo!("with statement"),
         Stmt::Switch(switch) => {
             expr_nonlocals(ctx, &switch.discriminant);
@@ -484,7 +484,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
             for expr in &ttpl.tpl.exprs {
                 expr_nonlocals(ctx, expr)
             }
-        },
+        }
         Expr::Class(class) => {
             class_nonlocals(ctx, class.class.as_ref());
         }

@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, fmt::Debug};
 
 use crate::basic_blocks::{
     BasicBlock, BasicBlockExit, BreakableId, StructuredClassMember, StructuredFlow,
+    StructuredSwitchCase,
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
@@ -138,6 +139,20 @@ fn do_tree_chunk(
                             do_tree_chunk(ctx, func, start, end),
                         ))
                     })
+                }
+                BasicBlockExit::SwitchStart(exp, start, end) => {
+                    rest = end + 1;
+
+                    let switch_brk_id = ctx.get_breakable_id();
+                    ctx.push_within(BreakAndRange(switch_brk_id, start, end), |ctx| {
+                        let switch_contents = do_switch(ctx, func, start, end);
+                        blocks.push(StructuredFlow::Switch(switch_brk_id, exp, switch_contents));
+                    })
+                }
+                BasicBlockExit::SwitchCaseExpression(_, _, _)
+                | BasicBlockExit::SwitchEnd(_)
+                | BasicBlockExit::SwitchCase(_, _, _, _) => {
+                    unreachable!("invalid switch case structure")
                 }
                 BasicBlockExit::ForInOfLoop(looped_var, loop_type, start, end) => {
                     rest = end + 1;
@@ -284,6 +299,62 @@ fn do_class_members(
             blocks
         }
         None => vec![],
+    }
+}
+
+fn do_switch(
+    ctx: &mut Ctx,
+    func: &mut BTreeMap<usize, BasicBlock>,
+    start_blk: usize,
+    end_blk: usize,
+) -> Vec<StructuredSwitchCase> {
+    let mut switch_cases = vec![];
+
+    let mut rest = start_blk;
+
+    loop {
+        let block = func.get(&rest).unwrap();
+
+        let mut condition_exp = None;
+
+        let block = match block.exit {
+            BasicBlockExit::SwitchCaseExpression(start, end, next) => {
+                rest = next;
+
+                condition_exp =
+                    Some(do_tree_chunk(ctx, func, start, end)).filter(|x| !x.is_empty());
+
+                func.get(&rest).unwrap()
+            }
+            BasicBlockExit::SwitchEnd(next) => {
+                assert_eq!(rest, end_blk, "invalid switch end");
+                assert!(next > rest);
+                return switch_cases;
+            }
+            _ => block,
+        };
+
+        if let BasicBlockExit::SwitchCase(exp, start, end, next) = block.exit {
+            rest = next;
+
+            match (exp, condition_exp) {
+                (Some(exp), condition_exp) => {
+                    switch_cases.push(StructuredSwitchCase {
+                        condition: Some((condition_exp.unwrap_or_default(), exp)),
+                        body: do_tree_chunk(ctx, func, start, end),
+                    });
+                }
+                (None, None) => {
+                    switch_cases.push(StructuredSwitchCase {
+                        condition: None,
+                        body: do_tree_chunk(ctx, func, start, end),
+                    });
+                }
+                _ => panic!("invalid switch case structure"),
+            };
+        } else {
+            panic!("invalid switch case structure. Found: {:?}", block.exit)
+        }
     }
 }
 

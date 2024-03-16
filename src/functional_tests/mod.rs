@@ -29,6 +29,9 @@ mod ops;
 mod real_world;
 
 #[cfg(test)]
+mod switch;
+
+#[cfg(test)]
 mod tool;
 
 #[cfg(test)]

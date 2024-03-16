@@ -266,6 +266,21 @@ impl Debug for BasicBlockExit {
                     cond, cons, cons_end, alt, alt_end
                 )
             }
+            BasicBlockExit::SwitchStart(expr, first_case, end_last_case) => {
+                write!(f, "switch ${} @{}..@{}", expr, first_case, end_last_case)
+            }
+            BasicBlockExit::SwitchCase(Some(expr), start, end, case_next) => {
+                write!(f, "case ${} ? @{}..@{} : @{}", expr, start, end, case_next)
+            }
+            BasicBlockExit::SwitchCase(None, start, end, case_next) => {
+                write!(f, "default @{}..@{} next @{}", start, end, case_next)
+            }
+            BasicBlockExit::SwitchCaseExpression(start, end, case) => {
+                write!(f, "case_expr @{}..@{} next @{}", start, end, case)
+            }
+            BasicBlockExit::SwitchEnd(next) => {
+                write!(f, "switch_end next @{}", next)
+            }
             BasicBlockExit::Loop(start, end) => {
                 write!(f, "loop @{}..@{}", start, end)
             }

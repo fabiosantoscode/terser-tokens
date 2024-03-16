@@ -24,6 +24,8 @@ pub enum StructuredFlow {
     Loop(BreakableId, Vec<StructuredFlow>),
     ForInOfLoop(BreakableId, usize, ForInOfKind, Vec<StructuredFlow>),
     Branch(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
+    /// (breakable_id, condition, structured_switch_cases)
+    Switch(BreakableId, usize, Vec<StructuredSwitchCase>),
     TryCatch(
         BreakableId,
         Vec<StructuredFlow>,
@@ -53,12 +55,20 @@ impl Default for StructuredFlow {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct StructuredSwitchCase {
+    pub condition: Option<(Vec<StructuredFlow>, usize)>,
+    pub body: Vec<StructuredFlow>,
+}
+
 // For printing out these trees
 
 impl StructuredFlow {
+    #[cfg(test)]
     fn str_head(&self) -> String {
         match self {
             StructuredFlow::Branch(_, _, _, _) => "Branch".to_string(),
+            StructuredFlow::Switch(_, _, _) => "Switch".to_string(),
             StructuredFlow::Break(_) => "Break".to_string(),
             StructuredFlow::Continue(_) => "Continue".to_string(),
             StructuredFlow::Loop(_, _) => "Loop".to_string(),
@@ -155,6 +165,13 @@ impl StructuredFlow {
             StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
                 vec![y.iter().collect(), z.iter().collect()]
             }
+            StructuredFlow::Switch(_, _, cases) => cases
+                .iter()
+                .flat_map(|case| match &case.condition {
+                    Some((cond, _)) => vec![cond.iter().collect(), case.body.iter().collect()],
+                    None => vec![case.body.iter().collect()],
+                })
+                .collect(),
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
             StructuredFlow::Loop(_, body) => vec![body.iter().collect()],
@@ -184,6 +201,16 @@ impl StructuredFlow {
         match self {
             StructuredFlow::Branch(_id, _x /* who cares */, y, z) => {
                 vec![y.iter_mut().collect(), z.iter_mut().collect()]
+            }
+            StructuredFlow::Switch(_id, _var, cases) => {
+                vec![cases
+                    .iter_mut()
+                    .flat_map(|case| match &mut case.condition {
+                        Some((insx, _var)) => vec![insx, &mut case.body],
+                        None => vec![&mut case.body],
+                    })
+                    .flatten()
+                    .collect()]
             }
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
@@ -287,19 +314,42 @@ impl StructuredFlow {
         }
     }
 
-    pub(crate) fn used_var(&self) -> Option<usize> {
+    /// Retrieves what variables this block reads, not including instructions.
+    /// Careful: classes and switch statements will return vars that may be defined inside them
+    pub(crate) fn used_vars(&self) -> Vec<usize> {
         match self {
-            StructuredFlow::Branch(_, x, _, _) => Some(*x),
-            StructuredFlow::Break(_) => None,
-            StructuredFlow::Continue(_) => None,
-            StructuredFlow::Loop(_, _) => None,
-            StructuredFlow::ForInOfLoop(_, loop_var, _, _) => Some(*loop_var),
-            StructuredFlow::Block(_) => None,
-            StructuredFlow::Return(_, ret_val) => Some(*ret_val),
-            StructuredFlow::BasicBlock(_) => None,
-            StructuredFlow::TryCatch(_, _, _, _) => None,
-            StructuredFlow::Class(class_var, _) => Some(*class_var),
-            StructuredFlow::Debugger => None,
+            StructuredFlow::Branch(_, x, _, _) => vec![*x],
+            StructuredFlow::Switch(_, exp, cases) => {
+                let mut vars = vec![*exp];
+                for case in cases {
+                    if let Some((_insx, condvar)) = &case.condition {
+                        vars.push(*condvar);
+                    }
+                }
+                vars
+            }
+            StructuredFlow::Break(_) => vec![],
+            StructuredFlow::Continue(_) => vec![],
+            StructuredFlow::Loop(_, _) => vec![],
+            StructuredFlow::ForInOfLoop(_, loop_var, _, _) => vec![*loop_var],
+            StructuredFlow::Block(_) => vec![],
+            StructuredFlow::Return(_, ret_val) => vec![*ret_val],
+            StructuredFlow::BasicBlock(_) => vec![],
+            StructuredFlow::TryCatch(_, _, _, _) => vec![],
+            StructuredFlow::Class(class_var, members) => {
+                let mut vars = vec![*class_var];
+                for member in members {
+                    match member {
+                        StructuredClassMember::Property(_, prop) => {
+                            vars.extend(prop.used_vars());
+                        }
+                        StructuredClassMember::StaticBlock(_)
+                        | StructuredClassMember::Constructor(_) => {}
+                    }
+                }
+                vars
+            }
+            StructuredFlow::Debugger => vec![],
         }
     }
 }
@@ -354,6 +404,26 @@ impl Debug for StructuredFlow {
                 print_vec_no_eol(f, cons)?;
                 write!(f, " else ")?;
                 print_vec(f, alt)
+            }
+            StructuredFlow::Switch(brk, expression, cases) => {
+                write!(f, "switch{} (${}) ", print_brk(brk), expression)?;
+                for case in cases {
+                    match &case.condition {
+                        Some((instructions, test_var)) => {
+                            if instructions.len() > 0 {
+                                print_vec_no_eol(f, &instructions)?;
+                            }
+                            write!(f, "case (${}) ", test_var)?;
+                            print_vec_no_eol(f, &case.body)?;
+                        }
+                        None => {
+                            write!(f, "default: ")?;
+                            print_vec_no_eol(f, &case.body)?;
+                        }
+                    }
+                }
+
+                Ok(())
             }
             StructuredFlow::TryCatch(brk, body, catch, fin) => {
                 write!(f, "try{} ", print_brk(brk))?;

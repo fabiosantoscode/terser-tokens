@@ -36,12 +36,20 @@ pub enum BasicBlockExit {
     Jump(usize),
     /// (cond_var, true_target, false_target). If cond_var is true, go to true_target..true_target_end. Otherwise, go to false_target..false_target_end.
     Cond(usize, usize, usize, usize, usize),
+    /// (expression, first_case, end_last_case)
+    SwitchStart(usize, usize, usize),
+    /// (start, end, jump_to_case). It's where we generate the case test.
+    SwitchCaseExpression(usize, usize, usize),
+    /// (expression_or_default, case_start, case_end, next_case). Go to case_start..case_end if the expression matches the case. Otherwise, go to next_case.
+    SwitchCase(Option<usize>, usize, usize, usize),
+    /// (after_switch). End of the switch statement.
+    SwitchEnd(usize),
     /// (start, end). Loop from start to end until something jumps out.
     Loop(usize, usize),
     /// (looped_var, for_in_of_kind, start, end). A for-in or for-of loop. looped_var is the variable that gets assigned to.
     /// https://262.ecma-international.org/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
     ForInOfLoop(usize, ForInOfKind, usize, usize),
-    /// Just like Jump() but signals a break out of a loop or block
+    /// Just like Jump() but signals a break out of a loop, switch or block
     Break(usize),
     /// Just like a backwards Jump() but signals a continue in a loop
     Continue(usize),
@@ -75,6 +83,10 @@ impl BasicBlockExit {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![*cond_var],
+            BasicBlockExit::SwitchStart(cond, _, _) => vec![*cond],
+            BasicBlockExit::SwitchCase(cond, _, _, _) => cond.iter().copied().collect(),
+            BasicBlockExit::SwitchCaseExpression(_, _, _) => vec![],
+            BasicBlockExit::SwitchEnd(_) => vec![],
             BasicBlockExit::ExitFn(_, returned) => vec![*returned],
             BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![*looped_var],
             BasicBlockExit::ClassStart(class_var, _, _) => vec![*class_var],
@@ -98,6 +110,12 @@ impl BasicBlockExit {
     pub(crate) fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
             BasicBlockExit::Cond(cond_var, _, _, _, _) => vec![cond_var],
+            BasicBlockExit::SwitchStart(cond, _, _) => vec![cond],
+            BasicBlockExit::SwitchCase(cond, _, _, _) => {
+                cond.iter_mut().next().into_iter().collect()
+            }
+            BasicBlockExit::SwitchCaseExpression(_, _, _) => vec![],
+            BasicBlockExit::SwitchEnd(_) => vec![],
             BasicBlockExit::ExitFn(_, returned) => vec![returned],
             BasicBlockExit::ForInOfLoop(looped_var, _, _, _) => vec![looped_var],
             BasicBlockExit::ClassStart(class_var, _, _) => vec![class_var],
