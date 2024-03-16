@@ -874,8 +874,6 @@ mod tests {
             $2 = $0 + $1
             $3 = 30
             $4 = $2 + $3
-            $5 = undefined
-            exit = return $5
         }
         "###);
     }
@@ -889,8 +887,6 @@ mod tests {
             $1 = 2
             $2 = 3
             $3 = [$0, $1, , ...$2]
-            $4 = undefined
-            exit = return $4
         }
         "###);
     }
@@ -920,8 +916,6 @@ mod tests {
             $0 = 1
             $1 = Await $0
             $2 = Await $1
-            $3 = undefined
-            exit = return $3
         }
         "###);
     }
@@ -944,8 +938,6 @@ mod tests {
             $4 = $2 + $3
             $5 = 30
             $6 = $4 + $5
-            $7 = undefined
-            exit = return $7
         }
         "###);
     }
@@ -966,8 +958,6 @@ mod tests {
             $3 = typeof $2
             $4 = $0
             $5 = undefined
-            $6 = undefined
-            exit = return $6
         }
         "###);
     }
@@ -989,8 +979,6 @@ mod tests {
             $4 = globalThis.readGlobalProp.prop
             $5 = 1
             $6 = globalThis.writeGlobalProp.prop = $5
-            $7 = undefined
-            exit = return $7
         }
         "###);
     }
@@ -1017,8 +1005,6 @@ mod tests {
             $7 = global "use"
             $8 = $5
             $9 = call $7($8)
-            $10 = undefined
-            exit = return $10
         }
         "###);
 
@@ -1036,8 +1022,6 @@ mod tests {
             $4 = global "use"
             $5 = --$0
             $6 = call $4($5)
-            $7 = undefined
-            exit = return $7
         }
         "###);
     }
@@ -1063,8 +1047,6 @@ mod tests {
         }
         @3: {
             $5 = either($2, $4)
-            $6 = undefined
-            exit = return $6
         }
         "###);
     }
@@ -1086,8 +1068,6 @@ mod tests {
         }
         @3: {
             $3 = either($1, $2)
-            $4 = undefined
-            exit = return $4
         }
         "###);
     }
@@ -1148,8 +1128,6 @@ mod tests {
         }
         @6: {
             $6 = either($4, $5)
-            $7 = undefined
-            exit = return $7
         }
         "###);
     }
@@ -1163,8 +1141,6 @@ mod tests {
             $1 = $0
             $2 = 2
             $3 = $1 + $2
-            $4 = undefined
-            exit = return $4
         }
         "###);
     }
@@ -1193,8 +1169,6 @@ mod tests {
             $9 = $7
             $10 = 2
             $11 = $9 + $10
-            $12 = undefined
-            exit = return $12
         }
         "###);
     }
@@ -1239,8 +1213,6 @@ mod tests {
             $14 = $12
             $15 = 2
             $16 = $14 + $15
-            $17 = undefined
-            exit = return $17
         }
         "###);
     }
@@ -1288,8 +1260,6 @@ mod tests {
             exit = switch_end
         }
         @12: {
-            $6 = undefined
-            exit = return $6
         }
         "###);
     }
@@ -1314,8 +1284,6 @@ mod tests {
             exit = break @4
         }
         @4: {
-            $3 = undefined
-            exit = return $3
         }
         "###);
     }
@@ -1338,8 +1306,6 @@ mod tests {
             exit = break @4
         }
         @4: {
-            $1 = undefined
-            exit = return $1
         }
         "###);
     }
@@ -1433,8 +1399,6 @@ mod tests {
             exit = break @4
         }
         @4: {
-            $2 = undefined
-            exit = return $2
         }
         "###);
     }
@@ -1476,8 +1440,6 @@ mod tests {
         }
         @5: {
             $11 = either($0, $1, $10)
-            $12 = undefined
-            exit = return $12
         }
         "###);
     }
@@ -1663,8 +1625,6 @@ mod tests {
             exit = break @8
         }
         @8: {
-            $2 = undefined
-            exit = return $2
         }
         "###);
     }
@@ -1681,8 +1641,6 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 123
-            $1 = undefined
-            exit = return $1
         }
         "###);
     }
@@ -1708,8 +1666,6 @@ mod tests {
         @2: {
         }
         @3: {
-            $2 = undefined
-            exit = return $2
         }
         "###);
     }
@@ -1735,8 +1691,6 @@ mod tests {
             $2 = 789
         }
         @3: {
-            $3 = undefined
-            exit = return $3
         }
         "###);
     }
@@ -1773,8 +1727,6 @@ mod tests {
             $3 = 999
         }
         @6: {
-            $4 = undefined
-            exit = return $4
         }
         "###);
     }
@@ -1803,8 +1755,6 @@ mod tests {
         @3: {
         }
         @4: {
-            $2 = undefined
-            exit = return $2
         }
         "###);
     }
@@ -1839,8 +1789,6 @@ mod tests {
         @4: {
         }
         @5: {
-            $5 = undefined
-            exit = return $5
         }
         "###);
     }
@@ -1904,8 +1852,6 @@ mod tests {
             $2 = 999
         }
         @4: {
-            $3 = undefined
-            exit = return $3
         }
         "###);
     }
@@ -1999,8 +1945,6 @@ mod tests {
             exit = continue @1
         }
         @2: {
-            $4 = undefined
-            exit = return $4
         }
         "###);
     }
@@ -2030,8 +1974,6 @@ mod tests {
             $7 = "computed"
             $8 = "bignum"
             $9 = {key: $1, ...$2, other: $3, [$6]: $7, 1000000000000000000000000000000: $8}
-            $10 = undefined
-            exit = return $10
         }
         "###);
     }
@@ -2056,8 +1998,6 @@ mod tests {
             $6 = $1[$5]
             $7 = "prop"
             $8 = $1[$7]
-            $9 = undefined
-            exit = return $9
         }
         "###);
     }

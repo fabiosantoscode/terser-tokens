@@ -207,8 +207,6 @@ mod tests {
             exit = class end
         }
         @2: {
-            $1 = undefined
-            exit = return $1
         }
         "###);
     }
@@ -265,8 +263,6 @@ mod tests {
             exit = class end
         }
         @12: {
-            $8 = undefined
-            exit = return $8
         }
         "###);
     }
@@ -295,8 +291,6 @@ mod tests {
             exit = class end
         }
         @4: {
-            $2 = undefined
-            exit = return $2
         }
         "###);
     }
@@ -322,8 +316,6 @@ mod tests {
             exit = class end
         }
         @3: {
-            $1 = undefined
-            exit = return $1
         }
         "###);
     }
@@ -355,8 +347,6 @@ mod tests {
             exit = class end
         }
         @6: {
-            $1 = undefined
-            exit = return $1
         }
         "###);
     }

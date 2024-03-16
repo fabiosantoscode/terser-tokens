@@ -580,7 +580,6 @@ mod tests {
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
         1 + 2 + 3;
-        return undefined;
         "###);
     }
 
@@ -603,7 +602,6 @@ mod tests {
         if (!c) {
             W;
         }
-        return undefined;
         "###);
 
         let block_group = test_basic_blocks_module("X ?? (Y && (Z || W))");
@@ -619,7 +617,6 @@ mod tests {
                 }
             }
         }
-        return undefined;
         "###);
 
         let block_group = test_basic_blocks_module("return ((X ?? Y) && Z) || W");
@@ -690,7 +687,6 @@ mod tests {
         globalVar.foo--;
         a.decrProp--;
         ++a.incrProp;
-        return undefined;
         "###);
 
         let block_group = test_basic_blocks_module(
@@ -718,7 +714,6 @@ mod tests {
         use(globalVar--);
         use(++globalVar.prop);
         use(globalVar.prop--);
-        return undefined;
         "###);
     }
 
@@ -797,9 +792,7 @@ mod tests {
         var a = undefined;
         a = (function*() {
             yield 1;
-            return undefined;
         });
-        return undefined;
         "###);
     }
 
@@ -818,7 +811,6 @@ mod tests {
         var d = (function() {
             var c = a + 1;
             a = c;
-            return undefined;
         });
         b = d;
         return d;
@@ -841,7 +833,6 @@ mod tests {
                 break;
             }
         }
-        return undefined;
         "###);
     }
 
@@ -859,7 +850,6 @@ mod tests {
             a();
             continue;
         }
-        return undefined;
         "###);
     }
 
@@ -894,7 +884,6 @@ mod tests {
                 break;
             }
         }
-        return undefined;
         "###);
     }
 
@@ -933,7 +922,6 @@ mod tests {
                 break;
             }
         }
-        return undefined;
         "###);
     }
 

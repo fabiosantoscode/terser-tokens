@@ -114,8 +114,6 @@ mod tests {
                     $0 = 1
                     $1 = 1
                     $2 = $0 + $1
-                    $3 = undefined
-                    exit = return $3
                 },
             },
         )
@@ -143,21 +141,19 @@ mod tests {
             },
             top_level_stats: @0: {
                 $0 = FunctionId(1)
-                $1 = undefined
-                exit = return $1
             },
             functions: [
                 function():
                 @0: {
-                    $2 = FunctionId(2)
-                    $3 = $2
-                    $4 = call $3()
-                    exit = return $4
+                    $1 = FunctionId(2)
+                    $2 = $1
+                    $3 = call $2()
+                    exit = return $3
                 },
                 function():
                 @0: {
-                    $5 = 2
-                    exit = return $5
+                    $4 = 2
+                    exit = return $4
                 },
             ],
         }
@@ -181,19 +177,19 @@ mod tests {
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $2 = undefined
-            $4 = write_non_local $$3 $2
-            $5 = 1
-            $6 = write_non_local $$3 $5
-            $7 = FunctionId(2)
-            exit = return $7
+            $1 = undefined
+            $3 = write_non_local $$2 $1
+            $4 = 1
+            $5 = write_non_local $$2 $4
+            $6 = FunctionId(2)
+            exit = return $6
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(2)).unwrap(), @r###"
         function():
         @0: {
-            $8 = read_non_local $$3
-            exit = return $8
+            $7 = read_non_local $$2
+            exit = return $7
         }
         "###);
     }
@@ -218,19 +214,15 @@ mod tests {
             $7 = write_non_local $$6 $5
             $8 = FunctionId(1)
             $9 = write_non_local $$6 $8
-            $10 = undefined
-            exit = return $10
         }
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
         @0: {
-            $11 = read_non_local $$6
-            $12 = 9
-            $13 = write_non_local $$1 $12
-            $14 = $12
-            $15 = undefined
-            exit = return $15
+            $10 = read_non_local $$6
+            $11 = 9
+            $12 = write_non_local $$1 $11
+            $13 = $11
         }
         "###);
     }
@@ -267,33 +259,31 @@ mod tests {
                 $12 = $8
                 $13 = call $12()
                 $14 = $11 + $13
-                $15 = undefined
-                exit = return $15
             },
             FunctionId(1): function():
             @0: {
-                $16 = read_non_local $$1
-                $17 = undefined
-                $19 = write_non_local $$18 $17
-                $20 = FunctionId(2)
-                $21 = write_non_local $$18 $20
-                $22 = $20
-                $23 = 123
-                $24 = call $22($23)
-                exit = return $24
+                $15 = read_non_local $$1
+                $16 = undefined
+                $18 = write_non_local $$17 $16
+                $19 = FunctionId(2)
+                $20 = write_non_local $$17 $19
+                $21 = $19
+                $22 = 123
+                $23 = call $21($22)
+                exit = return $23
             },
             FunctionId(2): function():
             @0: {
-                $25 = arguments[0]
-                $26 = read_non_local $$18
-                $27 = $25
-                exit = return $27
+                $24 = arguments[0]
+                $25 = read_non_local $$17
+                $26 = $24
+                exit = return $26
             },
             FunctionId(3): function():
             @0: {
-                $28 = read_non_local $$6
-                $29 = 456
-                exit = return $29
+                $27 = read_non_local $$6
+                $28 = 456
+                exit = return $28
             },
         }
         "###);
@@ -357,8 +347,6 @@ mod tests {
                     filename: "index.js",
                 },
                 top_level_stats: @0: {
-                    $0 = undefined
-                    exit = return $0
                 },
                 imports: [
                     Name(

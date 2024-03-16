@@ -4,7 +4,7 @@ use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
     BasicBlock, BasicBlockEnvironment, BasicBlockExit, BasicBlockGroup, BasicBlockInstruction,
-    BasicBlockModule, ExitType, Export, FunctionId, Import, ModuleSummary, NonLocalId,
+    BasicBlockModule, Export, FunctionId, Import, ModuleSummary, NonLocalId,
 };
 use crate::block_ops::{normalize_basic_blocks, normalize_module};
 use crate::scope::ScopeTree;
@@ -14,7 +14,7 @@ use super::NonLocalInfo;
 #[derive(Debug)]
 pub struct FromAstCtx {
     pub basic_blocks: Vec<Vec<(usize, Option<BasicBlockInstruction>)>>,
-    pub exits: Vec<Option<BasicBlockExit>>,
+    pub exits: Vec<BasicBlockExit>,
     pub var_index: usize,
     pub conditionals: Vec<BTreeMap<String, Vec<usize>>>,
     pub scope_tree: ScopeTree<String, NonLocalOrLocal>,
@@ -31,7 +31,7 @@ impl FromAstCtx {
     pub fn new() -> Self {
         Self {
             basic_blocks: vec![vec![]],
-            exits: vec![None],
+            exits: vec![Default::default()],
             var_index: 0,
             conditionals: vec![],
             scope_tree: ScopeTree::new(),
@@ -85,19 +85,8 @@ impl FromAstCtx {
         id
     }
 
-    pub fn push_instruction_to_nth_block(
-        &mut self,
-        node: BasicBlockInstruction,
-        n: usize,
-    ) -> usize {
-        let id = self.var_index;
-        self.var_index += 1;
-        self.basic_blocks[n].push((id, Some(node)));
-        id
-    }
-
     pub fn set_exit(&mut self, at: usize, new_exit: BasicBlockExit) {
-        self.exits[at] = Some(new_exit)
+        self.exits[at] = new_exit
     }
 
     pub fn current_block_index(&self) -> usize {
@@ -106,7 +95,7 @@ impl FromAstCtx {
 
     pub fn wrap_up_block(&mut self) -> usize {
         self.basic_blocks.push(vec![]);
-        self.exits.push(None);
+        self.exits.push(Default::default());
         self.current_block_index()
     }
 
@@ -152,26 +141,8 @@ impl FromAstCtx {
     }
 
     pub(crate) fn wrap_up_blocks(&mut self) -> (FunctionId, BTreeMap<usize, BasicBlock>) {
-        let exit_count = self.exits.len();
-        let mut exits = Vec::with_capacity(exit_count);
-
-        for i in 0..exit_count {
-            let e = &self.exits[i];
-            match e {
-                Some(exit) => exits.push(exit.clone()),
-                None => {
-                    if i + 1 >= exit_count {
-                        let undef_ret =
-                            self.push_instruction_to_nth_block(BasicBlockInstruction::Undefined, i);
-                        exits.push(BasicBlockExit::ExitFn(ExitType::Return, undef_ret));
-                    } else {
-                        exits.push(BasicBlockExit::Fallthrough);
-                    }
-                }
-            }
-        }
-
-        let basic_blocks = std::mem::replace(&mut self.basic_blocks, vec![]);
+        let exits = std::mem::replace(&mut self.exits, vec![Default::default()]);
+        let basic_blocks = std::mem::replace(&mut self.basic_blocks, vec![vec![]]);
 
         let blocks: BTreeMap<usize, BasicBlock> = exits
             .into_iter()
@@ -187,10 +158,6 @@ impl FromAstCtx {
             .collect();
 
         let blocks = normalize_basic_blocks(blocks);
-
-        // reset state
-        self.basic_blocks.clear();
-        self.exits.clear();
 
         (
             self.current_function_index.take().expect(
@@ -242,7 +209,7 @@ impl FromAstCtx {
 
         let mut inner_ctx = Self {
             basic_blocks: vec![vec![]],
-            exits: vec![None],
+            exits: vec![Default::default()],
             var_index: self.var_index,
             conditionals: vec![],
             scope_tree,

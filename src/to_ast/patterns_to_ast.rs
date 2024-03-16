@@ -180,7 +180,6 @@ mod tests {
                 d
             ];
         })();
-        return undefined;
         "###);
 
         let obj = test_basic_blocks_module(
@@ -204,7 +203,6 @@ mod tests {
                 d
             ];
         })();
-        return undefined;
         "###);
 
         let obj = test_basic_blocks_module(
@@ -230,7 +228,6 @@ mod tests {
                 d
             ];
         })();
-        return undefined;
         "###);
     }
 
@@ -248,7 +245,6 @@ mod tests {
             x: 1
         };
         var b = a;
-        return undefined;
         "###);
     }
 
@@ -278,7 +274,6 @@ mod tests {
             e();
             return c;
         })(1);
-        return undefined;
         "###);
     }
 }

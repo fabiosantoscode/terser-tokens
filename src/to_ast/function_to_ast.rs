@@ -126,7 +126,6 @@ mod tests {
         });
         f = g;
         e() + g();
-        return undefined;
         "###);
     }
 

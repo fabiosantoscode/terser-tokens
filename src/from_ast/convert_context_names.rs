@@ -419,7 +419,7 @@ mod tests {
                     parent: None,
                     is_block: false,
                     vars: {
-                        "conditional_varname": Local(1),
+                        "conditional_varname": Local(0),
                         "varname": Local(123),
                     },
                 },
@@ -440,7 +440,7 @@ mod tests {
         [
             [
                 (
-                    1,
+                    0,
                     Some(
                         either($456, $789),
                     ),

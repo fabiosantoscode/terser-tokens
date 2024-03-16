@@ -297,8 +297,6 @@ mod tests {
         @3: {
             $10 = either($8, $9)
             $11 = $10
-            $12 = undefined
-            exit = return $12
         }
         "###);
 
@@ -329,8 +327,6 @@ mod tests {
         @3: {
             $11 = either($9, $10)
             $12 = $11
-            $13 = undefined
-            exit = return $13
         }
         "###);
     }
@@ -352,8 +348,6 @@ mod tests {
             $4 = unpack $2[1]
             $5 = $3
             $6 = $4
-            $7 = undefined
-            exit = return $7
         }
         "###);
 
@@ -372,8 +366,6 @@ mod tests {
             $4 = unpack $2[1]
             $5 = $3
             $6 = $4
-            $7 = undefined
-            exit = return $7
         }
         "###);
     }
@@ -398,8 +390,6 @@ mod tests {
             $7 = pack $6 {0: _}
             $8 = unpack $7[0]
             $9 = $8
-            $10 = undefined
-            exit = return $10
         }
         "###);
     }
@@ -418,8 +408,6 @@ mod tests {
             $3 = unpack $2[0]
             $4 = unpack $2[1]
             $5 = unpack $2[2]
-            $6 = undefined
-            exit = return $6
         }
         "###);
 
@@ -434,8 +422,6 @@ mod tests {
             $2 = pack $1 [_, _...]
             $3 = unpack $2[0]
             $4 = unpack $2[1]
-            $5 = undefined
-            exit = return $5
         }
         "###);
     }
@@ -454,8 +440,6 @@ mod tests {
             $3 = pack $1 {a: _, [$2]: _}
             $4 = unpack $3[0]
             $5 = unpack $3[1]
-            $6 = undefined
-            exit = return $6
         }
         "###);
     }
@@ -541,8 +525,6 @@ mod tests {
         }
         @6: {
             $22 = either($20, $21)
-            $23 = undefined
-            exit = return $23
         }
         "###);
 
@@ -557,8 +539,6 @@ mod tests {
             $2 = pack $1 [_, _...]
             $3 = unpack $2[0]
             $4 = unpack $2[1]
-            $5 = undefined
-            exit = return $5
         }
         "###);
     }

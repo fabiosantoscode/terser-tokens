@@ -194,8 +194,6 @@ mod tests {
                 $8 = write_non_local $$7 $6
                 $9 = FunctionId(2)
                 $10 = write_non_local $$7 $9
-                $14 = undefined
-                exit = return $14
             },
             FunctionId(2): function():
             @0: {
@@ -226,8 +224,6 @@ mod tests {
                 $8 = write_non_local $$7 $6
                 $9 = FunctionId(2)
                 $10 = write_non_local $$7 $9
-                $14 = undefined
-                exit = return $14
             },
             FunctionId(2): function():
             @0: {
@@ -265,12 +261,10 @@ mod tests {
                 $8 = write_non_local $$7 $6
                 $9 = FunctionId(2)
                 $10 = write_non_local $$7 $9
-                $14 = undefined
-                $16 = write_non_local $$15 $14
-                $17 = FunctionId(3)
-                $18 = write_non_local $$15 $17
-                $34 = undefined
-                exit = return $34
+                $13 = undefined
+                $15 = write_non_local $$14 $13
+                $16 = FunctionId(3)
+                $17 = write_non_local $$14 $16
             },
             FunctionId(2): function():
             @0: {
@@ -280,23 +274,21 @@ mod tests {
             },
             FunctionId(3): function():
             @0: {
-                $19 = undefined
-                $21 = write_non_local $$20 $19
-                $22 = read_non_local $$15
-                $23 = 2
-                $24 = write_non_local $$20 $23
-                $25 = undefined
-                $27 = write_non_local $$26 $25
-                $28 = FunctionId(4)
-                $29 = write_non_local $$26 $28
-                $33 = undefined
-                exit = return $33
+                $18 = undefined
+                $20 = write_non_local $$19 $18
+                $21 = read_non_local $$14
+                $22 = 2
+                $23 = write_non_local $$19 $22
+                $24 = undefined
+                $26 = write_non_local $$25 $24
+                $27 = FunctionId(4)
+                $28 = write_non_local $$25 $27
             },
             FunctionId(4): function():
             @0: {
-                $30 = read_non_local $$26
-                $31 = read_non_local $$20
-                exit = return $31
+                $29 = read_non_local $$25
+                $30 = read_non_local $$19
+                exit = return $30
             },
         }
         "###);
@@ -326,8 +318,6 @@ mod tests {
                 $9 = write_non_local $$8 $7
                 $10 = FunctionId(2)
                 $11 = write_non_local $$8 $10
-                $15 = undefined
-                exit = return $15
             },
             FunctionId(2): function():
             @0: {

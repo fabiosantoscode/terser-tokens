@@ -242,15 +242,14 @@ mod tests {
             }",
         );
 
-        insta::assert_display_snapshot!(out, @"
-            class a {
-                prop = 1;
-                [1 + 1] = 2;
-                static prop = 1;
-                static [1 + 1] = 2;
-            }
-            return undefined;
-        ");
+        insta::assert_display_snapshot!(out, @r###"
+        class a {
+            prop = 1;
+            [1 + 1] = 2;
+            static prop = 1;
+            static [1 + 1] = 2;
+        }
+        "###);
     }
 
     #[test]
@@ -260,12 +259,11 @@ mod tests {
                 [0 + 1] = 2 + 3;
             }",
         );
-        insta::assert_display_snapshot!(out, @"
-            class a {
-                [0 + 1] = 2 + 3;
-            }
-            return undefined;
-        ");
+        insta::assert_display_snapshot!(out, @r###"
+        class a {
+            [0 + 1] = 2 + 3;
+        }
+        "###);
 
         let out = test_to_ast(
             "var a;
@@ -273,13 +271,12 @@ mod tests {
                 [(a = 0) + 1] = (a++) + 3;
             }",
         );
-        insta::assert_display_snapshot!(out, @"
-            class a {
-                [(b = 0, b + 1)] = b++ + 3;
-            }
-            return undefined;
-            var b;
-        ");
+        insta::assert_display_snapshot!(out, @r###"
+        class a {
+            [(b = 0, b + 1)] = b++ + 3;
+        }
+        var b;
+        "###);
     }
 
     #[test]
