@@ -50,9 +50,9 @@ pub enum BasicBlockExit {
     /// (looped_var, for_in_of_kind, start, end). A for-in or for-of loop. looped_var is the variable that gets assigned to.
     /// https://262.ecma-international.org/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
     ForInOfLoop(usize, ForInOfKind, usize, usize),
-    /// Just like Jump() but signals a break out of a loop, switch or block
+    /// Jumps down and out of a loop, switch or block
     Break(usize),
-    /// Just like a backwards Jump() but signals a continue in a loop
+    /// Like Break, but goes to the next iteration of the loop
     Continue(usize),
     /// (exit_type, returned). Used when we see "return" or "throw". "returned" holds the value returned or thrown.
     ExitFn(ExitType, usize),

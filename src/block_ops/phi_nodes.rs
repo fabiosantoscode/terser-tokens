@@ -5,18 +5,11 @@ use crate::{
         BasicBlock, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,
         StructuredClassMember, StructuredFlow,
     },
-    block_ops::{block_group_to_structured_flow, normalize_basic_blocks_tree, normalize_varnames},
+    block_ops::{block_group_to_structured_flow, normalize_basic_blocks_tree},
 };
 
 pub fn generate_phi_nodes(module: &mut BasicBlockModule) {
-    let unique_name = module
-        .iter_all_instructions()
-        .map(|(_, _, varname, _)| varname)
-        .max()
-        .unwrap_or(0)
-        + 1;
-
-    let mut ctx = PhiGenerationCtx::new(unique_name);
+    let mut ctx = PhiGenerationCtx::new();
 
     for (_func_id, block_group) in module.iter_mut() {
         ctx.enter_conditional();
@@ -31,25 +24,24 @@ pub fn generate_phi_nodes(module: &mut BasicBlockModule) {
 
         block_group.blocks = normalize_basic_blocks_tree(as_recursive);
     }
-
-    normalize_varnames(module);
 }
 
 struct PhiGenerationCtx {
-    unique_name: usize,
     conditionals: Vec<BTreeMap<usize, Vec<usize>>>,
+    created_names: BTreeSet<usize>,
 }
 impl PhiGenerationCtx {
-    fn new(unique_name: usize) -> Self {
+    fn new() -> Self {
         Self {
-            unique_name,
             conditionals: vec![BTreeMap::new()],
+            created_names: BTreeSet::new(),
         }
     }
-    fn make_name(&mut self) -> usize {
-        let name = self.unique_name;
-        self.unique_name += 1;
-        name
+    fn make_name(&mut self, mut orig: usize) -> usize {
+        while !self.created_names.insert(orig) {
+            orig += 1;
+        }
+        orig
     }
     fn read_name_cond(&mut self, varname: usize) -> Option<usize> {
         self.conditionals
@@ -101,7 +93,7 @@ impl PhiGenerationCtx {
         for (varname, phies) in to_phi {
             let phi = BasicBlockInstruction::Phi(phies);
 
-            let name = self.make_name();
+            let name = self.make_name(varname);
             phi_instructions.push((name, phi));
             self.write_name(varname, name);
         }
@@ -124,7 +116,7 @@ fn generate_phi_nodes_inner(
                         *used_var = ctx.read_name(*used_var);
                     }
 
-                    let new_varname = ctx.make_name();
+                    let new_varname = ctx.make_name(*varname);
                     ctx.write_name(*varname, new_varname);
                     *varname = new_varname;
                 }
@@ -247,7 +239,7 @@ fn generate_phi_nodes_loops(
     let mut loop_top_phis = vec![];
     for canonical_name in vars_used_and_defined_in_loop {
         if let Some(current_name) = ctx.read_name_cond(canonical_name) {
-            let new_name = ctx.make_name();
+            let new_name = ctx.make_name(canonical_name);
             loop_top_phis.push((canonical_name, current_name, new_name));
             ctx.write_name(canonical_name, new_name);
         }
@@ -781,8 +773,8 @@ mod tests {
             $2 = either($0, $1)
         }
         @4: {
-            $3 = $2
-            exit = return $3
+            $4 = $2
+            exit = return $4
         }
         "###
         );

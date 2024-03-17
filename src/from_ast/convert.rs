@@ -1819,8 +1819,8 @@ mod tests {
             $2 = either($0, $1)
         }
         @4: {
-            $3 = $2
-            exit = return $3
+            $4 = $2
+            exit = return $4
         }
         "###);
     }

@@ -213,7 +213,15 @@ impl BasicBlockInstruction {
             }
             BasicBlockInstruction::Super => vec![],
             BasicBlockInstruction::ArrayPattern(input, _) => vec![input],
-            BasicBlockInstruction::ObjectPattern(input, _) => vec![input],
+            BasicBlockInstruction::ObjectPattern(input, pieces) => {
+                let mut res = vec![input];
+                for piece in pieces.iter_mut() {
+                    if let ObjectPatternPiece::TakeComputedKey(id) = piece {
+                        res.push(id);
+                    }
+                }
+                res
+            },
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
             BasicBlockInstruction::CaughtError => vec![],
@@ -238,27 +246,8 @@ impl BasicBlockInstruction {
         }
     }
 
-    pub fn get_nonlocal_id_mut(&mut self) -> Option<&mut usize> {
-        self.get_lhs_mut()?.get_nonlocal_id_mut()
-    }
-
-    pub fn get_nonlocal_id(&self) -> Option<usize> {
-        self.get_lhs()?.get_nonlocal_id()
-    }
-
     pub fn get_read_nonlocal_id(&self) -> Option<usize> {
         self.get_read_lhs()?.get_nonlocal_id()
-    }
-
-    pub fn get_lhs(&self) -> Option<&LHS> {
-        match self {
-            BasicBlockInstruction::Read(lhs) => Some(lhs),
-            BasicBlockInstruction::Write(lhs, _) => Some(lhs),
-            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
-            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
-            BasicBlockInstruction::Delete(lhs) => Some(lhs),
-            _ => None,
-        }
     }
 
     pub fn get_read_lhs(&self) -> Option<&LHS> {
@@ -272,17 +261,6 @@ impl BasicBlockInstruction {
 
     pub fn get_written_lhs(&self) -> Option<&LHS> {
         match self {
-            BasicBlockInstruction::Write(lhs, _) => Some(lhs),
-            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
-            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
-            BasicBlockInstruction::Delete(lhs) => Some(lhs),
-            _ => None,
-        }
-    }
-
-    pub fn get_lhs_mut(&mut self) -> Option<&mut LHS> {
-        match self {
-            BasicBlockInstruction::Read(lhs) => Some(lhs),
             BasicBlockInstruction::Write(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
             BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),

@@ -4,8 +4,12 @@ use super::{
     block_to_basic_blocks, convert_object_propname, expr_to_basic_blocks, function_to_basic_blocks,
     FromAstCtx, FunctionLike,
 };
-use crate::basic_blocks::{
-    BasicBlockExit, BasicBlockInstruction, ClassProperty, MethodKind, ObjectKey, ObjectValue,
+use crate::{
+    basic_blocks::{
+        BasicBlockInstruction, ClassProperty, MethodKind, ObjectKey, ObjectValue,
+        StructuredClassMember, StructuredFlow,
+    },
+    block_ops::normalize_basic_blocks_tree_at_block_index,
 };
 
 /// Convert a class to basic blocks.
@@ -14,8 +18,6 @@ pub fn class_to_basic_blocks(
     class: &Class,
     optional_name: Option<String>,
 ) -> Result<usize, String> {
-    let head = ctx.wrap_up_block();
-
     let extends = class
         .super_class
         .as_ref()
@@ -23,153 +25,135 @@ pub fn class_to_basic_blocks(
 
     let created_class = ctx.push_instruction(BasicBlockInstruction::CreateClass(extends));
 
-    let class_start = ctx.wrap_up_block();
-
     if let Some(optional_name) = optional_name {
         ctx.declare_name(&optional_name, created_class);
     }
 
-    let class_end = match class.body.len() {
-        0 => class_start,
-        _ => {
-            for member in &class.body {
-                match member {
-                    ClassMember::Empty(_) => continue,
-                    ClassMember::ClassProp(class_prop) => {
-                        ctx.wrap_up_block();
-
-                        let key = convert_object_propname(ctx, &class_prop.key);
-
-                        let value = match &class_prop.value {
-                            Some(value) => expr_to_basic_blocks(ctx, &*value),
-                            None => ctx.push_instruction(BasicBlockInstruction::Undefined),
-                        };
-
-                        let prop = ctx.wrap_up_block();
-
-                        ctx.set_exit(
-                            prop,
-                            BasicBlockExit::ClassProperty(ClassProperty {
-                                is_static: class_prop.is_static,
-                                key,
-                                value: ObjectValue::Property(value),
-                            }),
-                        );
-
-                        for _ in class_prop.decorators.iter() {
-                            todo!("decorators")
-                        }
-                    }
-                    ClassMember::PrivateProp(prop) => {
-                        ctx.wrap_up_block();
-
-                        let value = match &prop.value {
-                            Some(value) => expr_to_basic_blocks(ctx, &*value),
-                            None => ctx.push_instruction(BasicBlockInstruction::Undefined),
-                        };
-
-                        let prop_idx = ctx.wrap_up_block();
-
-                        ctx.set_exit(
-                            prop_idx,
-                            BasicBlockExit::ClassProperty(ClassProperty {
-                                is_static: prop.is_static,
-                                key: ObjectKey::Private(prop.key.id.sym.to_string()),
-                                value: ObjectValue::Property(value),
-                            }),
-                        );
-
-                        for _ in prop.decorators.iter() {
-                            todo!("decorators")
-                        }
-                    }
-                    ClassMember::StaticBlock(StaticBlock { body, .. }) => {
-                        ctx.wrap_up_block();
-
-                        let start = ctx.wrap_up_block();
-
-                        ctx.wrap_up_block();
-
-                        block_to_basic_blocks(ctx, &body.stmts)?;
-
-                        let end = ctx.wrap_up_block();
-                        ctx.set_exit(start, BasicBlockExit::ClassStaticBlock(start + 1, end));
-                    }
-                    ClassMember::Method(method) => {
-                        ctx.wrap_up_block();
-
-                        let key = convert_object_propname(ctx, &method.key);
-
-                        let (_fn_varname, fn_id) = function_to_basic_blocks(
-                            ctx,
-                            FunctionLike::ClassMethod(&method),
-                            None,
-                        )?;
-
-                        // the above function pushes no instructions, but we stay on the safe side
-                        let value = ctx.wrap_up_block();
-
-                        ctx.set_exit(
-                            value,
-                            BasicBlockExit::ClassProperty(ClassProperty {
-                                is_static: method.is_static,
-                                key,
-                                value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
-                            }),
-                        );
-                    }
-                    ClassMember::PrivateMethod(method) => {
-                        ctx.wrap_up_block();
-
-                        let key = ObjectKey::Private(method.key.id.sym.to_string());
-
-                        let (_fn_varname, fn_id) = function_to_basic_blocks(
-                            ctx,
-                            FunctionLike::PrivateMethod(&method),
-                            None,
-                        )?;
-
-                        // the above function pushes no instructions, but we stay on the safe side
-                        let value = ctx.wrap_up_block();
-
-                        ctx.set_exit(
-                            value,
-                            BasicBlockExit::ClassProperty(ClassProperty {
-                                is_static: method.is_static,
-                                key,
-                                value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
-                            }),
-                        );
-                    }
-                    ClassMember::Constructor(method) => {
-                        ctx.wrap_up_block();
-
-                        let (_fn_varname, fn_id) = function_to_basic_blocks(
-                            ctx,
-                            FunctionLike::ClassConstructor(&method),
-                            None,
-                        )?;
-
-                        // the above function pushes no instructions, but we stay on the safe side
-                        let value = ctx.wrap_up_block();
-
-                        ctx.set_exit(value, BasicBlockExit::ClassConstructor(fn_id));
-                    }
-                    ClassMember::TsIndexSignature(_) => unimplemented!("TypeScript AST nodes"),
-                    ClassMember::AutoAccessor(_) => todo!("Class auto accessors"),
-                }
-            }
-            ctx.wrap_up_block()
-        }
-    };
-
     ctx.wrap_up_block();
 
-    ctx.set_exit(
-        head,
-        BasicBlockExit::ClassStart(created_class, class_start, class_end),
+    let members = ctx.with_temporary_instructions(|ctx| -> Result<_, String> {
+        let mut members = vec![];
+
+        for member in &class.body {
+            match member {
+                ClassMember::Empty(_) => continue,
+                ClassMember::ClassProp(class_prop) => {
+                    let key = convert_object_propname(ctx, &class_prop.key);
+
+                    let value = match &class_prop.value {
+                        Some(value) => expr_to_basic_blocks(ctx, &*value),
+                        None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+                    };
+
+                    let value_flow = ctx.snip_into_structured_flow();
+
+                    members.push(StructuredClassMember::Property(
+                        vec![value_flow],
+                        ClassProperty {
+                            is_static: class_prop.is_static,
+                            key,
+                            value: ObjectValue::Property(value),
+                        },
+                    ));
+
+                    for _ in class_prop.decorators.iter() {
+                        todo!("decorators")
+                    }
+                }
+                ClassMember::PrivateProp(prop) => {
+                    let value = match &prop.value {
+                        Some(value) => expr_to_basic_blocks(ctx, &*value),
+                        None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+                    };
+
+                    let value_flow = ctx.snip_into_structured_flow();
+
+                    members.push(StructuredClassMember::Property(
+                        vec![value_flow],
+                        ClassProperty {
+                            is_static: prop.is_static,
+                            key: ObjectKey::Private(prop.key.id.sym.to_string()),
+                            value: ObjectValue::Property(value),
+                        },
+                    ));
+
+                    for _ in prop.decorators.iter() {
+                        todo!("decorators")
+                    }
+                }
+                ClassMember::StaticBlock(StaticBlock { body, .. }) => {
+                    block_to_basic_blocks(ctx, &body.stmts)?;
+
+                    let body_flow = ctx.snip_into_structured_flow();
+
+                    members.push(StructuredClassMember::StaticBlock(vec![body_flow]));
+                }
+                ClassMember::Method(method) => {
+                    let key = convert_object_propname(ctx, &method.key);
+
+                    let (_fn_varname, fn_id) =
+                        function_to_basic_blocks(ctx, FunctionLike::ClassMethod(&method), None)?;
+
+                    let method_flow = ctx.snip_into_structured_flow();
+
+                    members.push(StructuredClassMember::Property(
+                        vec![method_flow],
+                        ClassProperty {
+                            is_static: method.is_static,
+                            key,
+                            value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
+                        },
+                    ));
+                }
+                ClassMember::PrivateMethod(method) => {
+                    let key = ObjectKey::Private(method.key.id.sym.to_string());
+
+                    let (_fn_varname, fn_id) =
+                        function_to_basic_blocks(ctx, FunctionLike::PrivateMethod(&method), None)?;
+
+                    let method_flow = ctx.snip_into_structured_flow();
+                    assert!(method_flow.is_structured_flow_empty());
+
+                    members.push(StructuredClassMember::Property(
+                        vec![method_flow],
+                        ClassProperty {
+                            is_static: method.is_static,
+                            key,
+                            value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
+                        },
+                    ));
+                }
+                ClassMember::Constructor(method) => {
+                    let (_fn_varname, fn_id) = function_to_basic_blocks(
+                        ctx,
+                        FunctionLike::ClassConstructor(&method),
+                        None,
+                    )?;
+
+                    let constructor_flow = ctx.snip_into_structured_flow();
+                    assert!(constructor_flow.is_structured_flow_empty());
+
+                    members.push(StructuredClassMember::Constructor(fn_id));
+                }
+                ClassMember::TsIndexSignature(_) => unimplemented!("TypeScript AST nodes"),
+                ClassMember::AutoAccessor(_) => todo!("Class auto accessors"),
+            }
+        }
+
+        let no_leftovers = ctx.snip_into_structured_flow();
+        assert!(no_leftovers.is_structured_flow_empty());
+
+        Ok(members)
+    })?;
+
+    let class = normalize_basic_blocks_tree_at_block_index(
+        vec![StructuredFlow::Class(created_class, members)],
+        ctx.current_block_index() + 1,
     );
-    ctx.set_exit(class_end, BasicBlockExit::ClassEnd);
+
+    ctx.inject_blocks(class);
+
+    ctx.wrap_up_block();
 
     Ok(created_class)
 }

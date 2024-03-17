@@ -206,18 +206,18 @@ mod tests {
             None,
         );
 
-        assert_eq!(ctx.basic_blocks[0].len(), 3);
+        assert_eq!(ctx.get_block(0).len(), 3);
 
         ctx.read_name("read_before_assign"); // produces undefined instruction
-        assert_eq!(ctx.basic_blocks[0].len(), 4);
+        assert_eq!(ctx.get_block(0).len(), 4);
 
         ctx.assign_name("read_after_assign", 1);
         ctx.read_name("read_after_assign"); // just reads
-        assert_eq!(ctx.basic_blocks[0].len(), 4);
+        assert_eq!(ctx.get_block(0).len(), 4);
 
         insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
-        [
-            [
+        {
+            0: [
                 (
                     0,
                     Some(
@@ -241,7 +241,7 @@ mod tests {
                     ),
                 ),
             ],
-        ]
+        }
         "###);
 
         insta::assert_debug_snapshot!(ctx.scope_tree, @r###"
@@ -295,7 +295,7 @@ mod tests {
 
         // time to read a nonlocal
         assert_eq!(ctx.read_name("provided_nonlocal"), 7);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[7], @r###"
+        insta::assert_debug_snapshot!(ctx.get_block(0)[7], @r###"
         (
             7,
             Some(
@@ -306,7 +306,7 @@ mod tests {
 
         // time to write it!
         ctx.assign_name("provided_nonlocal", 123);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[8], @r###"
+        insta::assert_debug_snapshot!(ctx.get_block(0)[8], @r###"
         (
             8,
             Some(
@@ -318,7 +318,7 @@ mod tests {
         // nonlocals are never conditional
         ctx.enter_conditional_branch();
         ctx.assign_name("provided_nonlocal", 777);
-        insta::assert_debug_snapshot!(ctx.basic_blocks.get(0).unwrap()[9], @r###"
+        insta::assert_debug_snapshot!(ctx.get_block(0)[9], @r###"
         (
             9,
             Some(
@@ -437,8 +437,8 @@ mod tests {
         }
         "###);
         insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
-        [
-            [
+        {
+            0: [
                 (
                     0,
                     Some(
@@ -446,7 +446,7 @@ mod tests {
                     ),
                 ),
             ],
-        ]
+        }
         "###);
     }
 
@@ -497,8 +497,8 @@ mod tests {
         }
         "###);
         insta::assert_debug_snapshot!(ctx.basic_blocks, @r###"
-        [
-            [
+        {
+            0: [
                 (
                     0,
                     Some(
@@ -512,7 +512,7 @@ mod tests {
                     ),
                 ),
             ],
-        ]
+        }
         "###);
     }
 
@@ -568,7 +568,7 @@ mod tests {
             current_scope: ScopeTreeHandle(0),
         }
         "###);
-        insta::assert_debug_snapshot!(ctx.basic_blocks[0], @r###"
+        insta::assert_debug_snapshot!(ctx.get_block(0), @r###"
         [
             (
                 0,

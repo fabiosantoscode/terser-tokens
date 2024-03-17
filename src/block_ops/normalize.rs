@@ -22,6 +22,17 @@ pub fn normalize_basic_blocks_tree(recursive: Vec<StructuredFlow>) -> BTreeMap<u
     ctx.out_blocks
 }
 
+pub fn normalize_basic_blocks_tree_at_block_index(
+    recursive: Vec<StructuredFlow>,
+    idx: usize,
+) -> BTreeMap<usize, BasicBlock> {
+    let mut ctx = FoldBlocksCtx::default();
+    ctx.block_index = idx;
+    fold_blocks(&mut ctx, recursive);
+
+    ctx.out_blocks
+}
+
 fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
     if let Some(block) = block {
         match &mut block.exit {

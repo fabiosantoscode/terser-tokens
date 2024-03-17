@@ -60,8 +60,8 @@ mod tests {
 
         insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap().blocks[&0], @r###"
         {
-            $0 = 3
-            exit = return $0
+            $2 = 3
+            exit = return $2
         }
         "###);
     }
@@ -92,13 +92,13 @@ mod tests {
             FunctionId(0): @0: {
                 $0 = FunctionId(1)
                 $1 = call $0()
-                $2 = undefined
+                $404 = undefined
                 exit = return $1
             },
             FunctionId(1): function():
             @0: {
-                $3 = 1
-                exit = return $3
+                $2 = 1
+                exit = return $2
             },
         }
         "###);
