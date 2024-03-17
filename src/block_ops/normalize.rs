@@ -16,11 +16,10 @@ pub fn normalize_basic_blocks(blocks: BTreeMap<usize, BasicBlock>) -> BTreeMap<u
 }
 
 pub fn normalize_basic_blocks_tree(recursive: Vec<StructuredFlow>) -> BTreeMap<usize, BasicBlock> {
-    let mut out_blocks = vec![];
-    let mut jump_targets = BTreeMap::new();
-    fold_blocks(&mut out_blocks, recursive, &mut jump_targets);
+    let mut ctx = FoldBlocksCtx::default();
+    fold_blocks(&mut ctx, recursive);
 
-    out_blocks.into_iter().enumerate().collect()
+    ctx.out_blocks
 }
 
 fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
@@ -34,29 +33,31 @@ fn forward_jump_marker(block: Option<&mut BasicBlock>) -> Option<&mut usize> {
     }
 }
 
-fn ensure_forward_jump_marker(out_blocks: &mut Vec<BasicBlock>) -> usize {
+fn ensure_forward_jump_marker(ctx: &mut FoldBlocksCtx) -> usize {
+    let last_block = ctx.out_blocks.get_mut(&(ctx.block_index - 1));
+
     let has_forward_jump_marker = matches!(
-        out_blocks.last(),
+        last_block,
         Some(BasicBlock {
             exit: BasicBlockExit::Fallthrough,
             ..
         })
-    ) || forward_jump_marker(out_blocks.last_mut()).is_some();
+    ) || forward_jump_marker(last_block).is_some();
 
     if !has_forward_jump_marker {
-        out_blocks.push(BasicBlock {
+        ctx.push_block(BasicBlock {
             instructions: vec![],
             exit: BasicBlockExit::Fallthrough,
         });
     }
 
-    out_blocks.len() - 1
+    ctx.block_index()
 }
 
-fn resolve_forward_jumps(out_blocks: &mut Vec<BasicBlock>, to_label: &mut Vec<usize>) {
-    let jump_target = out_blocks.len();
-    for label in to_label.drain(..) {
-        let m = out_blocks.get_mut(label);
+fn resolve_forward_jumps(ctx: &mut FoldBlocksCtx) {
+    let jump_target = ctx.next_block();
+    for label in ctx.to_label.drain(..) {
+        let m = ctx.out_blocks.get_mut(&label);
         if let Some(marker) = forward_jump_marker(m) {
             *marker = jump_target;
         }
@@ -91,15 +92,41 @@ fn fold_basic_blocks(
     out
 }
 
-fn fold_blocks(
-    out_blocks: &mut Vec<BasicBlock>,
-    as_tree: Vec<StructuredFlow>,
-    jump_targets: &mut BTreeMap<BreakableId, (usize, usize, Vec<usize>)>,
-) -> (Vec<usize>, usize) {
-    let mut to_label = vec![];
+#[derive(Default)]
+struct FoldBlocksCtx {
+    to_label: Vec<usize>,
+    block_index: usize,
+    out_blocks: BTreeMap<usize, BasicBlock>,
+    jump_targets: BTreeMap<BreakableId, (usize, Vec<usize>)>,
+}
 
+impl FoldBlocksCtx {
+    fn push_block(&mut self, block: BasicBlock) {
+        self.out_blocks.insert(self.block_index, block);
+        self.block_index += 1;
+    }
+
+    fn block_index(&self) -> usize {
+        self.block_index - 1
+    }
+
+    fn next_block(&self) -> usize {
+        self.block_index
+    }
+
+    fn block_after_next(&self) -> usize {
+        self.block_index + 1
+    }
+
+    fn set_exit(&mut self, at: usize, exit: BasicBlockExit) {
+        let blk = self.out_blocks.get_mut(&at).unwrap();
+        blk.exit = exit;
+    }
+}
+
+fn fold_blocks(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize {
     for (preceding_bbs, item) in fold_basic_blocks(as_tree) {
-        resolve_forward_jumps(out_blocks, &mut to_label);
+        resolve_forward_jumps(ctx);
 
         let instructions = preceding_bbs.into_iter().flatten().collect::<Vec<_>>();
 
@@ -107,7 +134,7 @@ fn fold_blocks(
             Some(item) => item,
             None => {
                 // Will not stand on its own
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::Fallthrough,
                 });
@@ -122,26 +149,27 @@ fn fold_blocks(
             }
             // EXITS
             StructuredFlow::Break(brk) => {
-                let (_, _, jump_target) = jump_targets.get_mut(&brk).unwrap();
+                let new_tgt = ctx.block_index() + 1;
+                let (_, jump_target) = ctx.jump_targets.get_mut(&brk).unwrap();
 
-                out_blocks.push(BasicBlock {
+                jump_target.push(new_tgt);
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::Break(MAX),
                 });
-                jump_target.push(out_blocks.len() - 1);
                 break;
             }
             StructuredFlow::Continue(brk) => {
-                let (continue_to, _, _) = jump_targets.get(&brk).unwrap();
+                let (continue_to, _) = ctx.jump_targets.get(&brk).unwrap();
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::Continue(*continue_to),
                 });
                 break;
             }
             StructuredFlow::Return(exit_type, var_idx) => {
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::ExitFn(exit_type, var_idx),
                 });
@@ -150,188 +178,191 @@ fn fold_blocks(
             // SETS OF BLOCKS (will recurse 1+ times)
             StructuredFlow::Block(blocks_within) => {
                 if instructions.len() > 0 {
-                    out_blocks.push(BasicBlock {
+                    ctx.push_block(BasicBlock {
                         instructions,
                         exit: BasicBlockExit::Fallthrough,
                     });
                 }
-                let (block_labels, _) = fold_blocks(out_blocks, blocks_within, jump_targets);
-
-                to_label.extend(block_labels);
+                fold_blocks(ctx, blocks_within);
             }
             StructuredFlow::Cond(brk, cond_var, cons, alt) => {
                 if brk.0.is_some() {
-                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                    ctx.jump_targets
+                        .insert(brk, (ctx.block_after_next(), vec![]));
                 }
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::Cond(cond_var, MAX, MAX, MAX, MAX),
                 });
-                let cond = out_blocks.len() - 1;
+                let cond = ctx.block_index();
 
-                let (cons_labels, cons) = fold_blocks(out_blocks, cons, jump_targets);
-                let (alt_labels, alt) = fold_blocks(out_blocks, alt, jump_targets);
+                let cons = fold_blocks(ctx, cons);
+                let alt = fold_blocks(ctx, alt);
 
-                out_blocks[cond].exit =
-                    BasicBlockExit::Cond(cond_var, cond + 1, cons, cons + 1, alt);
+                ctx.set_exit(
+                    cond,
+                    BasicBlockExit::Cond(cond_var, cond + 1, cons, cons + 1, alt),
+                );
 
-                to_label.extend(cons_labels);
-                to_label.extend(alt_labels);
-                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
-                    to_label.extend(broken_from);
+                if let Some((_, broken_from)) = ctx.jump_targets.remove(&brk) {
+                    ctx.to_label.extend(broken_from);
                 }
             }
             StructuredFlow::Switch(brk, expression, cases) => {
                 if brk.0.is_some() {
-                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                    ctx.jump_targets
+                        .insert(brk, (ctx.block_after_next(), vec![]));
                 }
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::Switch(expression, MAX, MAX),
                 });
-                let switch_start = out_blocks.len() - 1;
+                let switch_start = ctx.block_index();
 
                 for case in cases {
                     match case.condition {
                         Some((insx, condvar)) => {
-                            out_blocks.push(BasicBlock {
+                            ctx.push_block(BasicBlock {
                                 instructions: vec![],
                                 exit: BasicBlockExit::SwitchCaseExpression(MAX, MAX),
                             });
-                            let case_expr_start = out_blocks.len() - 1;
-                            let (case_expr_labels, case_expr_end) =
-                                fold_blocks(out_blocks, insx, jump_targets);
+                            let case_expr_start = ctx.block_index();
+                            let case_expr_end = fold_blocks(ctx, insx);
 
-                            out_blocks.push(BasicBlock {
+                            ctx.push_block(BasicBlock {
                                 instructions: vec![],
                                 exit: BasicBlockExit::SwitchCase(Some(condvar), MAX, MAX),
                             });
-                            let case_start = out_blocks.len() - 1;
+                            let case_start = ctx.block_index();
 
-                            let (case_labels, case_end) =
-                                fold_blocks(out_blocks, case.body, jump_targets);
+                            let case_end = fold_blocks(ctx, case.body);
 
-                            out_blocks[case_expr_start].exit = BasicBlockExit::SwitchCaseExpression(
-                                case_expr_start + 1,
-                                case_expr_end,
+                            ctx.set_exit(
+                                case_expr_start,
+                                BasicBlockExit::SwitchCaseExpression(
+                                    case_expr_start + 1,
+                                    case_expr_end,
+                                ),
                             );
-                            out_blocks[case_start].exit =
-                                BasicBlockExit::SwitchCase(Some(condvar), case_start + 1, case_end);
-
-                            to_label.extend(case_expr_labels);
-                            to_label.extend(case_labels);
+                            ctx.set_exit(
+                                case_start,
+                                BasicBlockExit::SwitchCase(Some(condvar), case_start + 1, case_end),
+                            );
                         }
                         None => {
-                            out_blocks.push(BasicBlock {
+                            ctx.push_block(BasicBlock {
                                 instructions: vec![],
                                 exit: BasicBlockExit::SwitchCase(None, MAX, MAX),
                             });
-                            let case_start = out_blocks.len() - 1;
+                            let case_start = ctx.block_index();
 
-                            let (case_labels, case_end) =
-                                fold_blocks(out_blocks, case.body, jump_targets);
+                            let case_end = fold_blocks(ctx, case.body);
 
-                            out_blocks[case_start].exit =
-                                BasicBlockExit::SwitchCase(None, case_start + 1, case_end);
-
-                            to_label.extend(case_labels);
+                            ctx.set_exit(
+                                case_start,
+                                BasicBlockExit::SwitchCase(None, case_start + 1, case_end),
+                            );
                         }
                     }
                 }
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions: vec![],
                     exit: BasicBlockExit::SwitchEnd,
                 });
-                let switch_end = out_blocks.len() - 1;
+                let switch_end = ctx.block_index();
 
-                out_blocks[switch_start].exit =
-                    BasicBlockExit::Switch(expression, switch_start + 1, switch_end);
+                ctx.set_exit(
+                    switch_start,
+                    BasicBlockExit::Switch(expression, switch_start + 1, switch_end),
+                );
 
-                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
-                    to_label.extend(broken_from);
+                if let Some((_, broken_from)) = ctx.jump_targets.remove(&brk) {
+                    ctx.to_label.extend(broken_from);
                 }
             }
             StructuredFlow::Loop(brk, body) => {
                 if brk.0.is_some() {
-                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                    ctx.jump_targets
+                        .insert(brk, (ctx.block_after_next(), vec![]));
                 }
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::Loop(MAX, MAX),
                 });
-                let head = out_blocks.len() - 1;
+                let head = ctx.block_index();
 
-                let (body_labels, body) = fold_blocks(out_blocks, body, jump_targets);
+                let body = fold_blocks(ctx, body);
 
-                out_blocks[head].exit = BasicBlockExit::Loop(head + 1, body);
+                ctx.set_exit(head, BasicBlockExit::Loop(head + 1, body));
 
-                to_label.extend(body_labels);
-                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
-                    to_label.extend(broken_from);
+                if let Some((_, broken_from)) = ctx.jump_targets.remove(&brk) {
+                    ctx.to_label.extend(broken_from);
                 }
             }
             StructuredFlow::ForInOfLoop(brk, looped_var, loop_kind, body) => {
                 if brk.0.is_some() {
-                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                    ctx.jump_targets
+                        .insert(brk, (ctx.block_after_next(), vec![]));
                 }
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::ForInOfLoop(looped_var, loop_kind, MAX, MAX),
                 });
-                let head = out_blocks.len() - 1;
+                let head = ctx.block_index();
 
-                let (body_labels, body) = fold_blocks(out_blocks, body, jump_targets);
+                let body = fold_blocks(ctx, body);
 
-                out_blocks[head].exit =
-                    BasicBlockExit::ForInOfLoop(looped_var, loop_kind, head + 1, body);
+                ctx.set_exit(
+                    head,
+                    BasicBlockExit::ForInOfLoop(looped_var, loop_kind, head + 1, body),
+                );
 
-                to_label.extend(body_labels);
-                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
-                    to_label.extend(broken_from);
+                if let Some((_, broken_from)) = ctx.jump_targets.remove(&brk) {
+                    ctx.to_label.extend(broken_from);
                 }
             }
             StructuredFlow::TryCatch(brk, body, catch, finally) => {
                 if brk.0.is_some() {
-                    jump_targets.insert(brk, (out_blocks.len() + 1, MAX, vec![]));
+                    ctx.jump_targets
+                        .insert(brk, (ctx.block_after_next(), vec![]));
                 }
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::SetTryAndCatch(MAX, MAX, MAX, MAX),
                 });
-                let head = out_blocks.len() - 1;
+                let head = ctx.block_index();
 
-                let (body_labels, _) = fold_blocks(out_blocks, body, jump_targets);
-                let body = ensure_forward_jump_marker(out_blocks);
+                fold_blocks(ctx, body);
+                let body = ensure_forward_jump_marker(ctx);
 
-                let (catch_labels, _) = fold_blocks(out_blocks, catch, jump_targets);
-                let catch = ensure_forward_jump_marker(out_blocks);
+                fold_blocks(ctx, catch);
+                let catch = ensure_forward_jump_marker(ctx);
 
-                let (finally_labels, _) = fold_blocks(out_blocks, finally, jump_targets);
-                let finally = ensure_forward_jump_marker(out_blocks);
+                fold_blocks(ctx, finally);
+                let finally = ensure_forward_jump_marker(ctx);
 
-                out_blocks[head].exit =
-                    BasicBlockExit::SetTryAndCatch(head + 1, body + 1, catch + 1, finally);
-                out_blocks[body].exit = BasicBlockExit::PopCatch(body + 1, catch + 1);
-                out_blocks[catch].exit = BasicBlockExit::PopFinally(catch + 1, finally);
+                ctx.set_exit(
+                    head,
+                    BasicBlockExit::SetTryAndCatch(head + 1, body + 1, catch + 1, finally),
+                );
+                ctx.set_exit(body, BasicBlockExit::PopCatch(body + 1, catch + 1));
+                ctx.set_exit(catch, BasicBlockExit::PopFinally(catch + 1, finally));
 
-                to_label.extend(body_labels);
-                to_label.extend(catch_labels);
-                to_label.extend(finally_labels);
-                if let Some((_, _, broken_from)) = jump_targets.remove(&brk) {
-                    to_label.extend(broken_from);
+                if let Some((_, broken_from)) = ctx.jump_targets.remove(&brk) {
+                    ctx.to_label.extend(broken_from);
                 }
             }
             StructuredFlow::Class(class_var, members) => {
                 // TODO push/pop jump_targets? It's invalid to `break` out of a static block
-                let head = out_blocks.len();
+                let head = ctx.next_block();
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::ClassStart(class_var, head + 1, MAX),
                 });
@@ -339,51 +370,47 @@ fn fold_blocks(
                 for member in members.into_iter() {
                     match member {
                         StructuredClassMember::Property(block, prop) => {
-                            let mut to_label = vec![];
+                            fold_blocks(ctx, block);
 
-                            let (body_labels, _) = fold_blocks(out_blocks, block, jump_targets);
-                            to_label.extend(body_labels);
-
-                            out_blocks.push(BasicBlock {
+                            ctx.push_block(BasicBlock {
                                 instructions: vec![],
                                 exit: BasicBlockExit::ClassProperty(prop.clone()),
                             });
                         }
                         StructuredClassMember::Constructor(func_id) => {
-                            out_blocks.push(BasicBlock {
+                            ctx.push_block(BasicBlock {
                                 instructions: vec![],
                                 exit: BasicBlockExit::ClassConstructor(func_id),
                             });
                         }
                         StructuredClassMember::StaticBlock(block) => {
-                            out_blocks.push(BasicBlock {
+                            ctx.push_block(BasicBlock {
                                 instructions: vec![],
                                 exit: BasicBlockExit::ClassStaticBlock(MAX, MAX),
                             });
 
-                            let sb_start = out_blocks.len() - 1;
+                            let sb_start = ctx.block_index();
 
-                            let (body_labels, sb_end) =
-                                fold_blocks(out_blocks, block, jump_targets);
+                            let sb_end = fold_blocks(ctx, block);
 
-                            to_label.extend(body_labels);
-
-                            out_blocks[sb_start].exit =
-                                BasicBlockExit::ClassStaticBlock(sb_start + 1, sb_end + 1);
+                            ctx.set_exit(
+                                sb_start,
+                                BasicBlockExit::ClassStaticBlock(sb_start + 1, sb_end + 1),
+                            );
                         }
                     }
                 }
 
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions: vec![],
                     exit: BasicBlockExit::ClassEnd,
                 });
-                let end = out_blocks.len() - 1;
+                let end = ctx.block_index();
 
-                out_blocks[head].exit = BasicBlockExit::ClassStart(class_var, head + 1, end);
+                ctx.set_exit(head, BasicBlockExit::ClassStart(class_var, head + 1, end));
             }
             StructuredFlow::Debugger => {
-                out_blocks.push(BasicBlock {
+                ctx.push_block(BasicBlock {
                     instructions,
                     exit: BasicBlockExit::Debugger,
                 });
@@ -391,7 +418,7 @@ fn fold_blocks(
         }
     }
 
-    (to_label, out_blocks.len() - 1)
+    ctx.block_index()
 }
 
 #[cfg(test)]
