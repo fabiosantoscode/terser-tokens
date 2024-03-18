@@ -1,161 +1,156 @@
 use swc_ecma_ast::{Class, ClassMember, StaticBlock};
 
 use super::{
-    block_to_basic_blocks, convert_object_propname, expr_to_basic_blocks, function_to_basic_blocks,
-    FromAstCtx, FunctionLike,
+    block_to_basic_blocks, convert_object_propname_tmp, expr_to_basic_blocks, FromAstCtx,
+    FunctionLike,
 };
 use crate::{
     basic_blocks::{
         BasicBlockInstruction, ClassProperty, MethodKind, ObjectKey, ObjectValue,
         StructuredClassMember, StructuredFlow,
     },
-    block_ops::normalize_basic_blocks_tree_at_block_index,
+    from_ast::function_to_basic_blocks_tmp,
 };
 
 /// Convert a class to basic blocks.
-pub fn class_to_basic_blocks(
+pub fn class_to_basic_blocks_tmp(
     ctx: &mut FromAstCtx,
     class: &Class,
     optional_name: Option<String>,
-) -> Result<usize, String> {
-    let extends = class
-        .super_class
-        .as_ref()
-        .map(|extends| expr_to_basic_blocks(ctx, &*extends));
+) -> Result<(Vec<StructuredFlow>, usize), String> {
+    let mut before_class = vec![];
 
-    let created_class = ctx.push_instruction(BasicBlockInstruction::CreateClass(extends));
+    let extends = if let Some(super_class) = &class.super_class {
+        let (flow, var) = expr_to_basic_blocks(ctx, &super_class)?;
+        before_class.extend(flow);
+
+        Some(var)
+    } else {
+        None
+    };
+
+    let (flow, created_class) = ctx.push_instruction(BasicBlockInstruction::CreateClass(extends));
+    before_class.extend(flow);
 
     if let Some(optional_name) = optional_name {
-        ctx.declare_name(&optional_name, created_class);
+        let (flow, _) = ctx.declare_name(&optional_name, created_class);
+        before_class.extend(flow);
     }
 
-    ctx.wrap_up_block();
+    let mut members = vec![];
+    for member in &class.body {
+        match member {
+            ClassMember::Empty(_) => continue,
+            ClassMember::ClassProp(class_prop) => {
+                let mut prop_flow = vec![];
 
-    let members = ctx.with_temporary_instructions(|ctx| -> Result<_, String> {
-        let mut members = vec![];
+                let (flow, key) = convert_object_propname_tmp(ctx, &class_prop.key)?;
+                prop_flow.extend(flow);
 
-        for member in &class.body {
-            match member {
-                ClassMember::Empty(_) => continue,
-                ClassMember::ClassProp(class_prop) => {
-                    let key = convert_object_propname(ctx, &class_prop.key);
+                let (flow, value) = match &class_prop.value {
+                    Some(value) => expr_to_basic_blocks(ctx, &*value)?,
+                    None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+                };
+                prop_flow.extend(flow);
 
-                    let value = match &class_prop.value {
-                        Some(value) => expr_to_basic_blocks(ctx, &*value),
-                        None => ctx.push_instruction(BasicBlockInstruction::Undefined),
-                    };
+                members.push(StructuredClassMember::Property(
+                    prop_flow,
+                    ClassProperty {
+                        is_static: class_prop.is_static,
+                        key,
+                        value: ObjectValue::Property(value),
+                    },
+                ));
 
-                    let value_flow = ctx.snip_into_structured_flow();
-
-                    members.push(StructuredClassMember::Property(
-                        vec![value_flow],
-                        ClassProperty {
-                            is_static: class_prop.is_static,
-                            key,
-                            value: ObjectValue::Property(value),
-                        },
-                    ));
-
-                    for _ in class_prop.decorators.iter() {
-                        todo!("decorators")
-                    }
+                for _ in class_prop.decorators.iter() {
+                    todo!("decorators")
                 }
-                ClassMember::PrivateProp(prop) => {
-                    let value = match &prop.value {
-                        Some(value) => expr_to_basic_blocks(ctx, &*value),
-                        None => ctx.push_instruction(BasicBlockInstruction::Undefined),
-                    };
-
-                    let value_flow = ctx.snip_into_structured_flow();
-
-                    members.push(StructuredClassMember::Property(
-                        vec![value_flow],
-                        ClassProperty {
-                            is_static: prop.is_static,
-                            key: ObjectKey::Private(prop.key.id.sym.to_string()),
-                            value: ObjectValue::Property(value),
-                        },
-                    ));
-
-                    for _ in prop.decorators.iter() {
-                        todo!("decorators")
-                    }
-                }
-                ClassMember::StaticBlock(StaticBlock { body, .. }) => {
-                    block_to_basic_blocks(ctx, &body.stmts)?;
-
-                    let body_flow = ctx.snip_into_structured_flow();
-
-                    members.push(StructuredClassMember::StaticBlock(vec![body_flow]));
-                }
-                ClassMember::Method(method) => {
-                    let key = convert_object_propname(ctx, &method.key);
-
-                    let (_fn_varname, fn_id) =
-                        function_to_basic_blocks(ctx, FunctionLike::ClassMethod(&method), None)?;
-
-                    let method_flow = ctx.snip_into_structured_flow();
-
-                    members.push(StructuredClassMember::Property(
-                        vec![method_flow],
-                        ClassProperty {
-                            is_static: method.is_static,
-                            key,
-                            value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
-                        },
-                    ));
-                }
-                ClassMember::PrivateMethod(method) => {
-                    let key = ObjectKey::Private(method.key.id.sym.to_string());
-
-                    let (_fn_varname, fn_id) =
-                        function_to_basic_blocks(ctx, FunctionLike::PrivateMethod(&method), None)?;
-
-                    let method_flow = ctx.snip_into_structured_flow();
-                    assert!(method_flow.is_structured_flow_empty());
-
-                    members.push(StructuredClassMember::Property(
-                        vec![method_flow],
-                        ClassProperty {
-                            is_static: method.is_static,
-                            key,
-                            value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
-                        },
-                    ));
-                }
-                ClassMember::Constructor(method) => {
-                    let (_fn_varname, fn_id) = function_to_basic_blocks(
-                        ctx,
-                        FunctionLike::ClassConstructor(&method),
-                        None,
-                    )?;
-
-                    let constructor_flow = ctx.snip_into_structured_flow();
-                    assert!(constructor_flow.is_structured_flow_empty());
-
-                    members.push(StructuredClassMember::Constructor(fn_id));
-                }
-                ClassMember::TsIndexSignature(_) => unimplemented!("TypeScript AST nodes"),
-                ClassMember::AutoAccessor(_) => todo!("Class auto accessors"),
             }
+            ClassMember::PrivateProp(class_prop) => {
+                let mut prop_flow = vec![];
+
+                let (flow, value) = match &class_prop.value {
+                    Some(value) => expr_to_basic_blocks(ctx, &*value)?,
+                    None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+                };
+                prop_flow.extend(flow);
+
+                members.push(StructuredClassMember::Property(
+                    prop_flow,
+                    ClassProperty {
+                        is_static: class_prop.is_static,
+                        key: ObjectKey::Private(class_prop.key.id.sym.to_string()),
+                        value: ObjectValue::Property(value),
+                    },
+                ));
+
+                for _ in class_prop.decorators.iter() {
+                    todo!("decorators")
+                }
+            }
+            ClassMember::StaticBlock(StaticBlock { body, .. }) => {
+                let body_flow = block_to_basic_blocks(ctx, body.stmts.iter())?;
+
+                members.push(StructuredClassMember::StaticBlock(body_flow));
+            }
+            ClassMember::Method(method) => {
+                let mut prop_flow = vec![];
+
+                let (flow, key) = convert_object_propname_tmp(ctx, &method.key)?;
+                prop_flow.extend(flow);
+
+                let (flow, _, fn_id) =
+                    function_to_basic_blocks_tmp(ctx, FunctionLike::ClassMethod(&method), None)?;
+                assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
+
+                members.push(StructuredClassMember::Property(
+                    prop_flow,
+                    ClassProperty {
+                        is_static: method.is_static,
+                        key,
+                        value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
+                    },
+                ));
+            }
+            ClassMember::PrivateMethod(method) => {
+                let key = ObjectKey::Private(method.key.id.sym.to_string());
+
+                let (flow, _fn_varname, fn_id) =
+                    function_to_basic_blocks_tmp(ctx, FunctionLike::PrivateMethod(&method), None)?;
+                assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
+
+                members.push(StructuredClassMember::Property(
+                    vec![],
+                    ClassProperty {
+                        is_static: method.is_static,
+                        key,
+                        value: ObjectValue::Method(MethodKind::from(method.kind), fn_id),
+                    },
+                ));
+            }
+            ClassMember::Constructor(method) => {
+                let (flow, _fn_varname, fn_id) = function_to_basic_blocks_tmp(
+                    ctx,
+                    FunctionLike::ClassConstructor(&method),
+                    None,
+                )?;
+
+                assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
+
+                members.push(StructuredClassMember::Constructor(fn_id));
+            }
+            ClassMember::TsIndexSignature(_) => unimplemented!("TypeScript AST nodes"),
+            ClassMember::AutoAccessor(_) => todo!("Class auto accessors"),
         }
+    }
 
-        let no_leftovers = ctx.snip_into_structured_flow();
-        assert!(no_leftovers.is_structured_flow_empty());
-
-        Ok(members)
-    })?;
-
-    let class = normalize_basic_blocks_tree_at_block_index(
-        vec![StructuredFlow::Class(created_class, members)],
-        ctx.current_block_index() + 1,
-    );
-
-    ctx.inject_blocks(class);
-
-    ctx.wrap_up_block();
-
-    Ok(created_class)
+    Ok((
+        vec![
+            StructuredFlow::from_vec(before_class),
+            StructuredFlow::Class(created_class, members),
+        ],
+        created_class,
+    ))
 }
 
 #[cfg(test)]
@@ -173,10 +168,13 @@ mod tests {
             .expect_decl()
             .expect_class();
 
-        class_to_basic_blocks(&mut ctx, &*decl.class, Some(decl.ident.sym.to_string())).unwrap();
+        let (cls, _) =
+            class_to_basic_blocks_tmp(&mut ctx, &*decl.class, Some(decl.ident.sym.to_string()))
+                .unwrap();
 
-        ctx.wrap_up_module(Default::default())
-            .take_top_level_stats()
+        return ctx
+            .wrap_up_module(Default::default(), cls)
+            .take_top_level_stats();
     }
 
     #[test]
@@ -189,8 +187,6 @@ mod tests {
         }
         @1: {
             exit = class end
-        }
-        @2: {
         }
         "###);
     }
@@ -246,8 +242,6 @@ mod tests {
         @11: {
             exit = class end
         }
-        @12: {
-        }
         "###);
     }
 
@@ -274,8 +268,6 @@ mod tests {
         @3: {
             exit = class end
         }
-        @4: {
-        }
         "###);
     }
 
@@ -298,8 +290,6 @@ mod tests {
         }
         @2: {
             exit = class end
-        }
-        @3: {
         }
         "###);
     }
@@ -329,8 +319,6 @@ mod tests {
         }
         @5: {
             exit = class end
-        }
-        @6: {
         }
         "###);
     }

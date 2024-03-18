@@ -2,14 +2,17 @@ use swc_ecma_ast::{
     ExportSpecifier, ImportSpecifier, Module, ModuleDecl, ModuleExportName, ModuleItem, Stmt,
 };
 
-use super::{block_statrefs_to_basic_blocks, find_module_nonlocals, FromAstCtx};
+use super::{block_to_basic_blocks, find_module_nonlocals, FromAstCtx};
 use crate::basic_blocks::{BasicBlockModule, Export, Import, ModuleSummary};
 
 pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBlockModule, String> {
     let mut ctx = FromAstCtx::new();
     let summary = find_importexport(&mut ctx, filename, &module);
 
-    ctx.embed_nonlocals(find_module_nonlocals(module), None);
+    let mut module_flow = vec![];
+
+    let flow = ctx.embed_nonlocals_tmp(find_module_nonlocals(module), None);
+    module_flow.extend(flow);
 
     let top_level_stats: Vec<&Stmt> = module
         .body
@@ -20,9 +23,10 @@ pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBl
         })
         .collect();
 
-    block_statrefs_to_basic_blocks(&mut ctx, top_level_stats)?;
+    let flow = block_to_basic_blocks(&mut ctx, top_level_stats.iter().copied())?;
+    module_flow.extend(flow);
 
-    Ok(ctx.wrap_up_module(summary))
+    Ok(ctx.wrap_up_module(summary, module_flow))
 }
 
 fn find_importexport(
@@ -306,8 +310,8 @@ mod tests {
                 $0 = undefined
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
-                $4 = FunctionId(2)
-                $5 = write_non_local $$1 $4
+                $9 = FunctionId(2)
+                $11 = write_non_local $$1 $9
                 $12 = $3
                 $13 = 1
                 $14 = call $12($13)
@@ -315,17 +319,17 @@ mod tests {
             },
             FunctionId(1): function():
             @0: {
-                $6 = arguments[0]
-                $7 = $6
-                $8 = read_non_local $$1
-                $9 = call $8()
-                $10 = $7 + $9
-                exit = return $10
+                $4 = arguments[0]
+                $5 = $4
+                $6 = read_non_local $$1
+                $7 = call $6()
+                $8 = $5 + $7
+                exit = return $8
             },
             FunctionId(2): function():
             @0: {
-                $11 = 100
-                exit = return $11
+                $10 = 100
+                exit = return $10
             },
         }
         "###);

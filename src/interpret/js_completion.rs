@@ -41,30 +41,4 @@ impl JsCompletion {
             _ => None,
         }
     }
-
-    /// Merges all possible return types
-    pub(crate) fn merge_all_return<'comp, It>(completions: It) -> Option<JsType>
-    where
-        It: IntoIterator<Item = &'comp JsCompletion>,
-    {
-        let mut completions = completions.into_iter();
-
-        let mut accum = match completions.next().and_then(|c| match c {
-            JsCompletion::Return(t) => Some(t.clone()),
-            _ => None,
-        }) {
-            Some(first) => first,
-            None => return None,
-        };
-
-        for next_completion in completions {
-            accum = accum.union(next_completion.as_return()?);
-
-            if let JsType::Any = accum {
-                return Some(JsType::Any);
-            }
-        }
-
-        Some(accum)
-    }
 }

@@ -8,7 +8,7 @@ use swc_ecma_ast::{Expr, ExprStmt, Module, ModuleItem, Stmt};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{parse_file_as_expr, EsConfig};
 
-use crate::basic_blocks::{BasicBlockEnvironment, BasicBlockGroup, BasicBlockModule};
+use crate::basic_blocks::{BasicBlockEnvironment, BasicBlockGroup, BasicBlockModule, FunctionId};
 use crate::from_ast::{block_to_basic_blocks, module_to_basic_blocks, FromAstCtx};
 use crate::swc_parse::swc_parse;
 
@@ -36,25 +36,23 @@ pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
 pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
     let m = parse_expression(source);
 
-    let mut c = FromAstCtx::new();
-    let bg = c.go_into_function(
+    let mut ctx = FromAstCtx::new();
+    ctx.go_into_function_tmp(
         BasicBlockEnvironment::Function(false, false),
         None,
-        |c: &mut FromAstCtx| {
-            block_to_basic_blocks(
-                c,
-                &vec![Stmt::Expr(ExprStmt {
-                    span: Default::default(),
-                    expr: Box::new(m),
-                })],
-            )
-            .unwrap();
+        |ctx: &mut FromAstCtx| {
+            let exprs = vec![Stmt::Expr(ExprStmt {
+                span: Default::default(),
+                expr: Box::new(m),
+            })];
+            let blk = block_to_basic_blocks(ctx, exprs.iter()).unwrap();
 
-            Ok(())
+            Ok(blk)
         },
-    );
+    )
+    .unwrap();
 
-    bg.unwrap().clone()
+    ctx.functions.remove(&FunctionId(1)).unwrap()
 }
 
 pub fn test_basic_blocks(source: &str) -> BasicBlockGroup {

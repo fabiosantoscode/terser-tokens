@@ -132,27 +132,6 @@ impl JsType {
         }
     }
 
-    /// Returns a type that represents all values that are both `self` and `other`.
-    /// If the types are incompatible, returns `None`.
-    pub(crate) fn intersect(&self, other: &JsType) -> Option<JsType> {
-        if self == other {
-            Some(self.clone())
-        } else {
-            use JsType::*;
-
-            match (self, other) {
-                (Number, TheNumber(n)) | (TheNumber(n), Number) => Some(TheNumber(*n)),
-                (Boolean, TheBoolean(b)) | (TheBoolean(b), Boolean) => Some(TheBoolean(*b)),
-                (String, TheString(s)) | (TheString(s), String) => Some(TheString(s.clone())),
-                (Function, f @ TheFunction { .. }) | (f @ TheFunction { .. }, Function) => {
-                    Some(f.clone())
-                }
-                (Object, TheObject(pps)) | (TheObject(pps), Object) => Some(TheObject(pps.clone())),
-                _ => None,
-            }
-        }
-    }
-
     pub(crate) fn as_function_id(&self) -> Option<FunctionId> {
         match self {
             JsType::TheFunction(id, _) => Some(*id),

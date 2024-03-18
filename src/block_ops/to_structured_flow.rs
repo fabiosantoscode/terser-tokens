@@ -78,7 +78,10 @@ pub fn block_group_to_structured_flow(mut func: BTreeMap<usize, BasicBlock>) -> 
         *(func.first_key_value().expect("no blocks").0),
         *(func.last_key_value().expect("no blocks").0),
     );
-    let tree = StructuredFlow::Block(do_tree_chunk(&mut ctx, &mut func, first, last));
+    let tree = StructuredFlow::Block(
+        BreakableId(None),
+        do_tree_chunk(&mut ctx, &mut func, first, last),
+    );
 
     tree.simplify()
 }

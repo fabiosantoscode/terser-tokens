@@ -3,208 +3,18 @@ use swc_ecma_ast::{
     RestPat, SuperPropExpr,
 };
 
-use crate::{
-    basic_blocks::{
-        ArrayPatternPiece, BasicBlockExit, BasicBlockInstruction, ObjectKey, ObjectPatternPiece,
-        LHS,
-    },
-    from_ast::expr_to_basic_blocks,
+use crate::basic_blocks::{
+    ArrayPatternPiece, BasicBlockInstruction, BreakableId, ObjectKey, ObjectPatternPiece,
+    StructuredFlow, LHS,
 };
 
-use super::{to_basic_blocks_lhs, FromAstCtx};
+use super::{expr_to_basic_blocks, to_basic_blocks_lhs_tmp, FromAstCtx};
 
 #[derive(Clone, Copy, Debug)]
 pub enum PatType {
     Assign,
     VarDecl,
     FunArg,
-}
-
-pub fn pat_to_basic_blocks(
-    ctx: &mut FromAstCtx,
-    pat_type: PatType,
-    pat: &Pat,
-    input: usize,
-) -> usize {
-    match pat {
-        Pat::Ident(ident) => ident_pat(ctx, pat_type, &ident.id.sym.to_string(), input),
-        Pat::Assign(assign_pat) => {
-            let input = default_assign_pat(ctx, input, &assign_pat.right);
-            pat_to_basic_blocks(ctx, pat_type, &assign_pat.left, input)
-        }
-        Pat::Expr(expr) => pat_like_expr_to_basic_blocks(ctx, pat_type, expr, input),
-        Pat::Array(array_pat) => {
-            assert!(!array_pat.optional);
-
-            // First, take stock of what items exist and create an ArrayPattern
-            let items = array_pat
-                .elems
-                .iter()
-                .map(|elem| match elem {
-                    Some(elem) => match elem {
-                        Pat::Rest(_) => ArrayPatternPiece::Spread,
-                        _ => ArrayPatternPiece::Item,
-                    },
-                    None => ArrayPatternPiece::Item, // array hole
-                })
-                .collect::<Vec<_>>();
-
-            let pattern = ctx.push_instruction(BasicBlockInstruction::ArrayPattern(input, items));
-
-            // Then, we create an unpacker for each item
-            let unpackers = array_pat
-                .elems
-                .iter()
-                .enumerate()
-                .map(|(i, elem)| {
-                    let unpacker =
-                        ctx.push_instruction(BasicBlockInstruction::PatternUnpack(pattern, i));
-
-                    (elem, unpacker)
-                })
-                .collect::<Vec<_>>();
-
-            // Finally, we recurse on each item
-            for (elem, unpacked) in unpackers {
-                // unpack pattern_unpacker[i]
-                match elem {
-                    Some(Pat::Rest(RestPat { arg: elem, .. })) => {
-                        pat_to_basic_blocks(ctx, pat_type, elem, unpacked);
-                    }
-                    Some(elem) => {
-                        pat_to_basic_blocks(ctx, pat_type, elem, unpacked);
-                    }
-                    None => {
-                        // hole; this resulting instruction will be unused
-                    }
-                }
-            }
-
-            return input;
-        }
-        Pat::Object(object_pat) => {
-            assert!(!object_pat.optional);
-
-            // First, take stock of what items exist and create an ObjectPattern
-            let items = object_pat
-                .props
-                .iter()
-                .map(|prop| match prop {
-                    ObjectPatProp::KeyValue(kv) => match &kv.key {
-                        PropName::Computed(computed) => {
-                            let key = expr_to_basic_blocks(ctx, computed.expr.as_ref());
-                            ObjectPatternPiece::TakeComputedKey(key)
-                        }
-                        _ => ObjectPatternPiece::TakeKey(get_propname_normal_key(&kv.key)),
-                    },
-                    ObjectPatProp::Assign(a) => ObjectPatternPiece::TakeKey(a.key.sym.to_string()),
-                    ObjectPatProp::Rest(_r) => ObjectPatternPiece::Spread,
-                })
-                .collect::<Vec<_>>();
-
-            let pattern = ctx.push_instruction(BasicBlockInstruction::ObjectPattern(input, items));
-
-            // Then, we create an unpacker for each item
-            let unpackers = object_pat
-                .props
-                .iter()
-                .enumerate()
-                .map(|(i, elem)| {
-                    let unpacker =
-                        ctx.push_instruction(BasicBlockInstruction::PatternUnpack(pattern, i));
-
-                    (elem, unpacker)
-                })
-                .collect::<Vec<_>>();
-
-            // Finally, we recurse on each item
-            for (prop, unpacker) in unpackers {
-                match prop {
-                    ObjectPatProp::KeyValue(kv) => {
-                        pat_to_basic_blocks(ctx, pat_type, &kv.value, unpacker);
-                    }
-                    // AST representations of shorthand object keys are always weird.
-                    // So we'll create a virtual Pat::Ident or a Pat::Assign to recurse.
-                    ObjectPatProp::Assign(a) => {
-                        let ident = Pat::Ident(BindingIdent {
-                            id: a.key.clone(),
-                            type_ann: None,
-                        });
-
-                        if let Some(default_value) = &a.value {
-                            let ident = Pat::Assign(AssignPat {
-                                span: Default::default(),
-                                left: Box::new(ident),
-                                right: default_value.clone(),
-                            });
-                            pat_to_basic_blocks(ctx, pat_type, &ident, unpacker);
-                        } else {
-                            pat_to_basic_blocks(ctx, pat_type, &ident, unpacker);
-                        }
-                    }
-                    ObjectPatProp::Rest(rest) => {
-                        pat_to_basic_blocks(ctx, pat_type, &rest.arg, unpacker);
-                    }
-                }
-            }
-
-            ctx.wrap_up_block();
-
-            return input;
-        }
-        Pat::Rest(_) => unreachable!("handled in array/funargs pattern"),
-        Pat::Invalid(_) => unreachable!(),
-    }
-}
-
-/// Member expressions and identifiers can be treated like patterns
-pub fn pat_like_expr_to_basic_blocks(
-    ctx: &mut FromAstCtx,
-    pat_type: PatType,
-    expr: &Expr,
-    input: usize,
-) -> usize {
-    match expr {
-        Expr::Ident(ident) => ident_pat(ctx, pat_type, &ident.sym.to_string(), input),
-        Expr::SuperProp(SuperPropExpr { .. }) => todo!(),
-        Expr::MetaProp(_) => todo!(),
-        Expr::Member(MemberExpr { obj, prop, .. }) => {
-            let base = to_basic_blocks_lhs(ctx, obj.as_ref());
-            let prop = match &prop {
-                MemberProp::Ident(ident) => ObjectKey::NormalKey(ident.sym.to_string()),
-                MemberProp::PrivateName(pvt) => ObjectKey::Private(pvt.id.sym.to_string()),
-                MemberProp::Computed(comp) => {
-                    let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());
-                    ObjectKey::Computed(comp)
-                }
-            };
-
-            let memb = LHS::Member(Box::new(base), prop);
-
-            return ctx.push_instruction(BasicBlockInstruction::Write(memb, input));
-        }
-        _ => unreachable!(
-            "pattern expression must be an identifier or member expression, got: {:?}",
-            expr
-        ),
-    }
-}
-
-fn ident_pat(ctx: &mut FromAstCtx, pat_type: PatType, name: &str, input: usize) -> usize {
-    use PatType::*;
-
-    match pat_type {
-        VarDecl | FunArg => {
-            ctx.declare_name(name, input);
-
-            input
-        }
-        Assign => {
-            ctx.assign_name(name, input);
-
-            ctx.push_instruction(BasicBlockInstruction::Ref(input))
-        }
-    }
 }
 
 pub fn get_propname_normal_key(propname: &PropName) -> String {
@@ -221,48 +31,291 @@ pub fn get_propname_normal_key(propname: &PropName) -> String {
     }
 }
 
-pub fn convert_object_propname(ctx: &mut FromAstCtx, propname: &PropName) -> ObjectKey {
-    match propname {
-        PropName::Computed(comp) => {
-            let comp = expr_to_basic_blocks(ctx, comp.expr.as_ref());
-            ObjectKey::Computed(comp)
+pub fn pat_to_basic_blocks_tmp(
+    ctx: &mut FromAstCtx,
+    pat_type: PatType,
+    pat: &Pat,
+    input: usize,
+) -> Result<(Vec<StructuredFlow>, usize), String> {
+    match pat {
+        Pat::Ident(ident) => ident_pat_tmp(ctx, pat_type, &ident.id.sym.to_string(), input),
+        Pat::Assign(assign_pat) => {
+            let mut assign_flow = vec![];
+
+            let (flow, input) = default_assign_pat_tmp(ctx, input, &assign_pat.right)?;
+            assign_flow.extend(flow);
+
+            let (flow, input) = pat_to_basic_blocks_tmp(ctx, pat_type, &assign_pat.left, input)?;
+            assign_flow.extend(flow);
+
+            Ok((assign_flow, input))
         }
-        other => ObjectKey::NormalKey(get_propname_normal_key(other)),
+        Pat::Expr(expr) => pat_like_expr_to_basic_blocks_tmp(ctx, pat_type, expr, input),
+        Pat::Array(array_pat) => {
+            let mut array_pat_flow = vec![];
+
+            assert!(!array_pat.optional);
+
+            // First, take stock of what items exist and create an ArrayPattern
+            let items = array_pat
+                .elems
+                .iter()
+                .map(|elem| match elem {
+                    Some(elem) => match elem {
+                        Pat::Rest(_) => ArrayPatternPiece::Spread,
+                        _ => ArrayPatternPiece::Item,
+                    },
+                    None => ArrayPatternPiece::Item, // array hole
+                })
+                .collect::<Vec<_>>();
+
+            let (flow, pattern) =
+                ctx.push_instruction(BasicBlockInstruction::ArrayPattern(input, items));
+            array_pat_flow.extend(flow);
+
+            // Then, we create an unpacker for each item
+            let unpackers = array_pat
+                .elems
+                .iter()
+                .enumerate()
+                .map(|(i, elem)| {
+                    let (flow, unpacker) =
+                        ctx.push_instruction(BasicBlockInstruction::PatternUnpack(pattern, i));
+                    array_pat_flow.extend(flow);
+
+                    (elem, unpacker)
+                })
+                .collect::<Vec<_>>();
+
+            // Finally, we recurse on each item
+            for (elem, unpacked) in unpackers {
+                // unpack pattern_unpacker[i]
+                match elem {
+                    Some(Pat::Rest(RestPat { arg: elem, .. })) => {
+                        let (flow, _) = pat_to_basic_blocks_tmp(ctx, pat_type, elem, unpacked)?;
+                        array_pat_flow.extend(flow);
+                    }
+                    Some(elem) => {
+                        let (flow, _) = pat_to_basic_blocks_tmp(ctx, pat_type, elem, unpacked)?;
+                        array_pat_flow.extend(flow);
+                    }
+                    None => {
+                        // hole; this resulting instruction will be unused
+                    }
+                }
+            }
+
+            Ok((array_pat_flow, input))
+        }
+        Pat::Object(object_pat) => {
+            let mut object_pat_flow = vec![];
+
+            assert!(!object_pat.optional);
+
+            // First, take stock of what items exist and create an ObjectPattern
+            let items = object_pat
+                .props
+                .iter()
+                .map(|prop| match prop {
+                    ObjectPatProp::KeyValue(kv) => match &kv.key {
+                        PropName::Computed(computed) => {
+                            let (flow, key) = expr_to_basic_blocks(ctx, computed.expr.as_ref())?;
+                            object_pat_flow.extend(flow);
+
+                            Ok(ObjectPatternPiece::TakeComputedKey(key))
+                        }
+                        _ => Ok(ObjectPatternPiece::TakeKey(get_propname_normal_key(
+                            &kv.key,
+                        ))),
+                    },
+                    ObjectPatProp::Assign(a) => {
+                        Ok(ObjectPatternPiece::TakeKey(a.key.sym.to_string()))
+                    }
+                    ObjectPatProp::Rest(_r) => Ok(ObjectPatternPiece::Spread),
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+
+            let (flow, pattern) =
+                ctx.push_instruction(BasicBlockInstruction::ObjectPattern(input, items));
+            object_pat_flow.extend(flow);
+
+            // Then, we create an unpacker for each item
+            let unpackers = object_pat
+                .props
+                .iter()
+                .enumerate()
+                .map(|(i, elem)| {
+                    let (flow, unpacker) =
+                        ctx.push_instruction(BasicBlockInstruction::PatternUnpack(pattern, i));
+                    object_pat_flow.extend(flow);
+
+                    (elem, unpacker)
+                })
+                .collect::<Vec<_>>();
+
+            // Finally, we recurse on each item
+            for (prop, unpacker) in unpackers {
+                match prop {
+                    ObjectPatProp::KeyValue(kv) => {
+                        let (flow, _) =
+                            pat_to_basic_blocks_tmp(ctx, pat_type, &kv.value, unpacker)?;
+                        object_pat_flow.extend(flow);
+                    }
+                    // AST representations of shorthand object keys are always weird.
+                    // So we'll create a virtual Pat::Ident or a Pat::Assign to recurse.
+                    ObjectPatProp::Assign(a) => {
+                        let ident = Pat::Ident(BindingIdent {
+                            id: a.key.clone(),
+                            type_ann: None,
+                        });
+
+                        if let Some(default_value) = &a.value {
+                            let ident = Pat::Assign(AssignPat {
+                                span: Default::default(),
+                                left: Box::new(ident),
+                                right: default_value.clone(),
+                            });
+                            let (flow, _) =
+                                pat_to_basic_blocks_tmp(ctx, pat_type, &ident, unpacker)?;
+                            object_pat_flow.extend(flow);
+                        } else {
+                            let (flow, _) =
+                                pat_to_basic_blocks_tmp(ctx, pat_type, &ident, unpacker)?;
+                            object_pat_flow.extend(flow);
+                        }
+                    }
+                    ObjectPatProp::Rest(rest) => {
+                        let (flow, _) =
+                            pat_to_basic_blocks_tmp(ctx, pat_type, &rest.arg, unpacker)?;
+                        object_pat_flow.extend(flow);
+                    }
+                }
+            }
+
+            return Ok((object_pat_flow, input));
+        }
+        Pat::Rest(_) => unreachable!("handled in array/funargs pattern"),
+        Pat::Invalid(_) => unreachable!(),
     }
 }
 
-fn default_assign_pat(ctx: &mut FromAstCtx, input: usize, by_default: &Expr) -> usize {
-    let undef = ctx.push_instruction(BasicBlockInstruction::Undefined);
-    let test = ctx.push_instruction(BasicBlockInstruction::BinOp(BinaryOp::EqEqEq, input, undef));
-    let blockidx_before = ctx.wrap_up_block();
-    ctx.wrap_up_block();
+/// Member expressions and identifiers can be treated like patterns
+pub fn pat_like_expr_to_basic_blocks_tmp(
+    ctx: &mut FromAstCtx,
+    pat_type: PatType,
+    expr: &Expr,
+    input: usize,
+) -> Result<(Vec<StructuredFlow>, usize), String> {
+    match expr {
+        Expr::Ident(ident) => ident_pat_tmp(ctx, pat_type, &ident.sym.to_string(), input),
+        Expr::SuperProp(SuperPropExpr { .. }) => todo!(),
+        Expr::MetaProp(_) => todo!(),
+        Expr::Member(MemberExpr { obj, prop, .. }) => {
+            let mut ret_flow = Vec::new();
+
+            let (flow, base) = to_basic_blocks_lhs_tmp(ctx, obj.as_ref())?;
+            ret_flow.extend(flow);
+
+            let prop = match &prop {
+                MemberProp::Ident(ident) => ObjectKey::NormalKey(ident.sym.to_string()),
+                MemberProp::PrivateName(pvt) => ObjectKey::Private(pvt.id.sym.to_string()),
+                MemberProp::Computed(comp) => {
+                    let (flow, comp) = expr_to_basic_blocks(ctx, comp.expr.as_ref())?;
+                    ret_flow.extend(flow);
+
+                    ObjectKey::Computed(comp)
+                }
+            };
+
+            let memb = LHS::Member(Box::new(base), prop);
+
+            let (flow, write) = ctx.push_instruction(BasicBlockInstruction::Write(memb, input));
+            ret_flow.extend(flow);
+
+            Ok((ret_flow, write))
+        }
+        _ => unreachable!(
+            "pattern expression must be an identifier or member expression, got: {:?}",
+            expr
+        ),
+    }
+}
+
+fn ident_pat_tmp(
+    ctx: &mut FromAstCtx,
+    pat_type: PatType,
+    name: &str,
+    input: usize,
+) -> Result<(Vec<StructuredFlow>, usize), String> {
+    use PatType::*;
+
+    match pat_type {
+        VarDecl | FunArg => {
+            let (flow, _) = ctx.declare_name(name, input);
+
+            Ok((flow, input))
+        }
+        Assign => {
+            let mut ret_flow = Vec::new();
+
+            let (flow, input) = ctx.assign_name(name, input);
+            ret_flow.extend(flow);
+
+            let (flow, input) = ctx.push_instruction(BasicBlockInstruction::Ref(input));
+            ret_flow.extend(flow);
+
+            Ok((ret_flow, input))
+        }
+    }
+}
+
+pub fn convert_object_propname_tmp(
+    ctx: &mut FromAstCtx,
+    propname: &PropName,
+) -> Result<(Vec<StructuredFlow>, ObjectKey), String> {
+    match propname {
+        PropName::Computed(comp) => {
+            let (flow, comp) = expr_to_basic_blocks(ctx, comp.expr.as_ref())?;
+            Ok((flow, ObjectKey::Computed(comp)))
+        }
+        other => Ok((vec![], ObjectKey::NormalKey(get_propname_normal_key(other)))),
+    }
+}
+
+fn default_assign_pat_tmp(
+    ctx: &mut FromAstCtx,
+    input: usize,
+    by_default: &Expr,
+) -> Result<(Vec<StructuredFlow>, usize), String> {
+    let mut assign_flow = vec![];
+
+    let (flow, undef) = ctx.push_instruction(BasicBlockInstruction::Undefined);
+    assign_flow.extend(flow);
+    let (flow, test) =
+        ctx.push_instruction(BasicBlockInstruction::BinOp(BinaryOp::EqEqEq, input, undef));
+    assign_flow.extend(flow);
 
     ctx.enter_conditional_branch();
 
-    let blockidx_consequent_before = ctx.current_block_index();
-    let default_value = expr_to_basic_blocks(ctx, by_default);
-    let blockidx_consequent_after = ctx.current_block_index();
+    let (then_flow, default_value) = expr_to_basic_blocks(ctx, by_default)?;
 
-    let blockidx_alternate_before = ctx.wrap_up_block();
-    let input_value = ctx.push_instruction(BasicBlockInstruction::Ref(input));
-    let blockidx_alternate_after = ctx.current_block_index();
+    let (else_flow, input_value) = ctx.push_instruction(BasicBlockInstruction::Ref(input));
 
-    ctx.wrap_up_block();
+    assign_flow.push(StructuredFlow::Cond(
+        BreakableId(None),
+        test,
+        then_flow,
+        else_flow,
+    ));
 
-    ctx.leave_conditional_branch();
+    let flow = ctx.leave_conditional_branch_tmp();
+    assign_flow.extend(flow);
 
-    ctx.set_exit(
-        blockidx_before,
-        BasicBlockExit::Cond(
-            test,
-            blockidx_consequent_before,
-            blockidx_consequent_after,
-            blockidx_alternate_before,
-            blockidx_alternate_after,
-        ),
-    );
+    let (flow, phi) =
+        ctx.push_instruction(BasicBlockInstruction::Phi(vec![input_value, default_value]));
+    assign_flow.extend(flow);
 
-    ctx.push_instruction(BasicBlockInstruction::Phi(vec![input_value, default_value]))
+    Ok((assign_flow, phi))
 }
 
 #[cfg(test)]

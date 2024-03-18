@@ -123,8 +123,11 @@ fn generate_phi_nodes_inner(
 
                 out_recursive.push(StructuredFlow::BasicBlock(instructions));
             }
-            StructuredFlow::Block(contents) => {
-                out_recursive.extend(generate_phi_nodes_inner(ctx, contents));
+            StructuredFlow::Block(brk, contents) => {
+                out_recursive.push(StructuredFlow::Block(
+                    brk,
+                    generate_phi_nodes_inner(ctx, contents),
+                ));
             }
             StructuredFlow::Return(exit, exit_val) => {
                 out_recursive.push(StructuredFlow::Return(exit, ctx.read_name(exit_val)));
@@ -759,20 +762,24 @@ mod tests {
         insta::assert_debug_snapshot!(blocks.top_level_stats(),
         @r###"
         @0: {
-            exit = try @1 catch @2 finally @3..@3
+            exit = try @1 catch @3 finally @5..@5
         }
         @1: {
             $0 = 777
-            exit = catch @2..@3
         }
         @2: {
-            $1 = 888
-            exit = finally @3..@3
+            exit = catch @3..@5
         }
         @3: {
-            $2 = either($0, $1)
+            $1 = 888
         }
         @4: {
+            exit = finally @5..@5
+        }
+        @5: {
+            $2 = either($0, $1)
+        }
+        @6: {
             $4 = $2
             exit = return $4
         }

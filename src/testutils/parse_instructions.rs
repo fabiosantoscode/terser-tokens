@@ -96,7 +96,7 @@ fn parse_instructions_inner(input: &str) -> IResult<&str, BasicBlockGroup> {
 
         let (input, ret) = match word {
             "jump" => {
-                let (input, ref_) = parse_blockref(input)?;
+                let (input, _ref) = parse_blockref(input)?;
                 (input, BasicBlockExit::Fallthrough)
             }
             "break" => {

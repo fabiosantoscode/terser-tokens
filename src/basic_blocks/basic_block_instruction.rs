@@ -221,7 +221,7 @@ impl BasicBlockInstruction {
                     }
                 }
                 res
-            },
+            }
             BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],
             BasicBlockInstruction::TempExit(_, arg) => vec![arg],
             BasicBlockInstruction::CaughtError => vec![],

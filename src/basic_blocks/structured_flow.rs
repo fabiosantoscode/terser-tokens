@@ -20,7 +20,7 @@ impl std::fmt::Display for BreakableId {
 
 #[derive(Clone)]
 pub enum StructuredFlow {
-    Block(Vec<StructuredFlow>),
+    Block(BreakableId, Vec<StructuredFlow>),
     Loop(BreakableId, Vec<StructuredFlow>),
     ForInOfLoop(BreakableId, usize, ForInOfKind, Vec<StructuredFlow>),
     Cond(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
@@ -51,7 +51,7 @@ pub enum StructuredClassMember {
 
 impl Default for StructuredFlow {
     fn default() -> Self {
-        StructuredFlow::Block(vec![])
+        StructuredFlow::Block(BreakableId(None), vec![])
     }
 }
 
@@ -73,12 +73,18 @@ impl StructuredFlow {
             StructuredFlow::Continue(_) => "Continue".to_string(),
             StructuredFlow::Loop(_, _) => "Loop".to_string(),
             StructuredFlow::ForInOfLoop(_, _, _, _) => "ForInOfLoop".to_string(),
-            StructuredFlow::Block(_) => "Block".to_string(),
+            StructuredFlow::Block(_, _) => "Block".to_string(),
             StructuredFlow::Return(_, _) => "Return".to_string(),
             StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
             StructuredFlow::TryCatch(_, _, _, _) => "TryCatch".to_string(),
             StructuredFlow::Class(_, _) => "Class".to_string(),
             StructuredFlow::Debugger => "Debugger".to_string(),
+        }
+    }
+    pub fn from_vec(items: Vec<StructuredFlow>) -> StructuredFlow {
+        match items.len() {
+            1 => items.into_iter().next().unwrap(),
+            _ => StructuredFlow::Block(BreakableId(None), items),
         }
     }
     pub fn simplify(self) -> Self {
@@ -87,51 +93,52 @@ impl StructuredFlow {
         flat.remove_unused_break_ids(&break_targets);
         flat
     }
+    pub fn simplify_vec(items: Vec<StructuredFlow>) -> Vec<StructuredFlow> {
+        use StructuredFlow::*;
+
+        items
+            .into_iter()
+            .flat_map(|item| match item {
+                Block(BreakableId(None), items) => StructuredFlow::simplify_vec(items),
+                _ => vec![item.flatten()],
+            })
+            .fold(vec![], |mut acc, item| {
+                let prev = acc.last_mut();
+                match (prev, item) {
+                    (Some(Block(BreakableId(None), prev)), Block(BreakableId(None), items)) => {
+                        prev.extend(items.into_iter());
+                    }
+                    (Some(BasicBlock(prev)), BasicBlock(instructions)) => {
+                        prev.extend(instructions.into_iter());
+                    }
+                    (_, item) => {
+                        acc.push(item);
+                    }
+                }
+
+                acc
+            })
+    }
     fn flatten(self) -> StructuredFlow {
         use StructuredFlow::*;
 
-        let map = fix_fn::fix_fn!(|map, items: Vec<StructuredFlow>| -> Vec<StructuredFlow> {
-            items
-                .into_iter()
-                .flat_map(|item| match item {
-                    Block(items) => map(items),
-                    _ => vec![item.flatten()],
-                })
-                .fold(vec![], |mut acc, item| {
-                    let prev = acc.last_mut();
-                    match (prev, item) {
-                        (Some(Block(prev)), Block(items)) => {
-                            prev.extend(items.into_iter());
-                        }
-                        (Some(BasicBlock(prev)), BasicBlock(instructions)) => {
-                            prev.extend(instructions.into_iter());
-                        }
-                        (_, item) => {
-                            acc.push(item);
-                        }
-                    }
-
-                    acc
-                })
-        });
+        let map = |items: Vec<StructuredFlow>| -> Vec<StructuredFlow> {
+            StructuredFlow::simplify_vec(items)
+        };
 
         match self {
-            StructuredFlow::Block(items) => {
+            Block(brk, items) => {
                 let items = map(items);
-                if items.len() == 1 {
+                if items.len() == 1 && brk.0 == None {
                     items.into_iter().next().unwrap()
                 } else {
-                    StructuredFlow::Block(items)
+                    Block(brk, items)
                 }
             }
-            StructuredFlow::Cond(id, cond, cons, alt) => {
-                StructuredFlow::Cond(id, cond, map(cons), map(alt))
-            }
-            StructuredFlow::TryCatch(id, try_, catch, finally) => {
-                StructuredFlow::TryCatch(id, map(try_), map(catch), map(finally))
-            }
-            StructuredFlow::Loop(id, items) => StructuredFlow::Loop(id, map(items)),
-            StructuredFlow::Class(class_var, items) => StructuredFlow::Class(
+            Cond(id, cond, cons, alt) => Cond(id, cond, map(cons), map(alt)),
+            TryCatch(id, try_, catch, finally) => TryCatch(id, map(try_), map(catch), map(finally)),
+            Loop(id, items) => Loop(id, map(items)),
+            Class(class_var, items) => Class(
                 class_var,
                 items
                     .into_iter()
@@ -176,7 +183,7 @@ impl StructuredFlow {
             StructuredFlow::Continue(_) => vec![],
             StructuredFlow::Loop(_, body) => vec![body.iter().collect()],
             StructuredFlow::ForInOfLoop(_, _, _, body) => vec![body.iter().collect()],
-            StructuredFlow::Block(body) => vec![body.iter().collect()],
+            StructuredFlow::Block(_, body) => vec![body.iter().collect()],
             StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
@@ -216,7 +223,7 @@ impl StructuredFlow {
             StructuredFlow::Continue(_) => vec![],
             StructuredFlow::Loop(_, body) => vec![body.iter_mut().collect()],
             StructuredFlow::ForInOfLoop(_, _, _, body) => vec![body.iter_mut().collect()],
-            StructuredFlow::Block(body) => vec![body.iter_mut().collect()],
+            StructuredFlow::Block(_, body) => vec![body.iter_mut().collect()],
             StructuredFlow::Return(_, _) => vec![],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
@@ -305,7 +312,8 @@ impl StructuredFlow {
 
     fn breakable_id(&self) -> Option<BreakableId> {
         match self {
-            StructuredFlow::Cond(id, _, _, _)
+            StructuredFlow::Block(id, _)
+            | StructuredFlow::Cond(id, _, _, _)
             | StructuredFlow::Break(id)
             | StructuredFlow::Continue(id)
             | StructuredFlow::Loop(id, _)
@@ -332,7 +340,7 @@ impl StructuredFlow {
             StructuredFlow::Continue(_) => vec![],
             StructuredFlow::Loop(_, _) => vec![],
             StructuredFlow::ForInOfLoop(_, loop_var, _, _) => vec![*loop_var],
-            StructuredFlow::Block(_) => vec![],
+            StructuredFlow::Block(_, _) => vec![],
             StructuredFlow::Return(_, ret_val) => vec![*ret_val],
             StructuredFlow::BasicBlock(_) => vec![],
             StructuredFlow::TryCatch(_, _, _, _) => vec![],
@@ -380,7 +388,14 @@ impl Debug for StructuredFlow {
         };
 
         match self {
-            StructuredFlow::Block(items) => print_vec(f, items),
+            StructuredFlow::Block(brk, items) => {
+                if let Some(_) = brk.0 {
+                    write!(f, "block{} {{", print_brk(brk))?;
+                    print_vec(f, items)?;
+                    write!(f, "}}\n")?;
+                }
+                print_vec(f, items)
+            }
             StructuredFlow::Loop(brk, body) => {
                 write!(f, "loop{} ", print_brk(brk))?;
                 print_vec(f, body)
@@ -462,9 +477,13 @@ impl StructuredFlow {
         items.iter().all(|x| x.is_structured_flow_empty())
     }
 
+    pub fn is_structured_flow_vec_empty(items: &Vec<StructuredFlow>) -> bool {
+        Self::_all(items)
+    }
+
     pub fn is_structured_flow_empty(&self) -> bool {
         match self {
-            StructuredFlow::Block(items) => Self::_all(items),
+            StructuredFlow::Block(_, items) => Self::_all(items),
             StructuredFlow::Loop(_, body) => Self::_all(body),
             StructuredFlow::Cond(_, _, cons, alt) => Self::_all(cons) && Self::_all(alt),
             StructuredFlow::TryCatch(_, body, _, fin) => Self::_all(body) && Self::_all(fin),

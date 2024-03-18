@@ -41,9 +41,10 @@ pub fn parse_structured_flow(input: &str) -> StructuredFlow {
     }
 
     fn parse_braced_block(input: &str) -> IResult<&str, StructuredFlow> {
+        let (input, brk) = parse_brk(input)?;
         let (input, contents) = parse_many_braced(input)?;
 
-        Ok((input, StructuredFlow::Block(contents)))
+        Ok((input, StructuredFlow::Block(brk, contents)))
     }
 
     fn parse_instructions(input: &str) -> IResult<&str, StructuredFlow> {

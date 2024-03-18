@@ -1,50 +1,61 @@
 use swc_ecma_ast::{ArrowExpr, ClassMethod, FnDecl, FnExpr, MethodProp, Pat, PrivateMethod};
 
 use super::{
-    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
-    FuncBlockOrRetExpr, FunctionLike, PatType,
+    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks_tmp,
+    FromAstCtx, FuncBlockOrRetExpr, FunctionLike, PatType,
 };
 use crate::basic_blocks::{
-    BasicBlockEnvironment, BasicBlockExit, BasicBlockInstruction, ExitType, FunctionId, NonLocalId,
+    BasicBlockEnvironment, BasicBlockInstruction, ExitType, FunctionId, NonLocalId, StructuredFlow,
     LHS,
 };
 
-/// Convert a function to basic blocks. Function declarations are special because since they're hoisted, we don't want to create any variables here.
-pub fn function_to_basic_blocks(
-    ctx: &mut FromAstCtx,
+/// Convert a function to basic blocks. Function declarations are special because since they're hoisted, we don't create a variable for them. Instead, the caller provides it.
+pub fn function_to_basic_blocks_tmp<'a, 'decl>(
+    ctx: &'a mut FromAstCtx,
     function: FunctionLike,
-    fn_decl_varname: Option<usize>,
-) -> Result<(usize, FunctionId), String> {
+    mut fn_decl_varname: Option<usize>,
+) -> Result<(Vec<StructuredFlow>, usize, FunctionId), String> {
+    let mut function_flow = vec![];
+
     let fn_id = FunctionId(ctx.function_index.0 + 1); // future function name
 
     // Only a named FnExpr can have two simultaneous bindings. Outside (maybe) and inside.
     let (outer_varname, inner_varname) = match function {
         FunctionLike::ArrowExpr(_) | FunctionLike::FnExpr(FnExpr { ident: None, .. }) => {
-            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
+            let (flow, outer_varname) =
+                ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
+            function_flow.extend(flow);
 
             (outer_varname, None)
         }
         FunctionLike::FnExpr(FnExpr {
             ident: Some(ident), ..
         }) => {
-            let undef = ctx.push_instruction(BasicBlockInstruction::Undefined);
-            let non_local_id = NonLocalId(ctx.bump_var_index());
-            ctx.push_instruction(BasicBlockInstruction::Write(
+            let (flow, undef) = ctx.push_instruction(BasicBlockInstruction::Undefined);
+            function_flow.extend(flow);
+
+            let non_local_id = NonLocalId(ctx.get_var_index());
+            let (flow, _) = ctx.push_instruction(BasicBlockInstruction::Write(
                 LHS::NonLocal(non_local_id),
                 undef,
             ));
+            function_flow.extend(flow);
 
-            let outer_varname = ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
+            let (flow, outer_varname) =
+                ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
+            function_flow.extend(flow);
 
             let write_non_local =
                 BasicBlockInstruction::Write(LHS::NonLocal(non_local_id), outer_varname);
-            ctx.push_instruction(write_non_local);
+            let (flow, _) = ctx.push_instruction(write_non_local);
+            function_flow.extend(flow);
 
             (outer_varname, Some((ident.sym.to_string(), non_local_id)))
         }
         FunctionLike::FnDecl(_) => {
-            let outer_varname = fn_decl_varname.expect("FnDecl needs a reserved varname");
-            ctx.arbitrarily_set_id(outer_varname, BasicBlockInstruction::Function(fn_id));
+            let outer_varname = fn_decl_varname
+                .take()
+                .expect("FnDecl needs a reserved varname");
             (outer_varname, None)
         }
         FunctionLike::ClassMethod(_)
@@ -58,6 +69,11 @@ pub fn function_to_basic_blocks(
             (outer_varname, None)
         }
     };
+
+    assert!(
+        fn_decl_varname.is_none(),
+        "only FnDecl needs a reserved varname"
+    );
 
     let env = match function {
         FunctionLike::ArrowExpr(ArrowExpr {
@@ -80,41 +96,62 @@ pub fn function_to_basic_blocks(
         }
     };
 
-    ctx.go_into_function(env, Some(find_nonlocals(function.clone())), |ctx| {
-        function
-            .get_params()
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, pat)| match pat {
-                Pat::Rest(rest_pat) => {
-                    let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
-                    pat_to_basic_blocks(ctx, PatType::FunArg, &rest_pat.arg, arg);
-                }
-                _ => {
-                    let arg = ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
-                    pat_to_basic_blocks(ctx, PatType::FunArg, pat, arg);
-                }
-            });
+    ctx.go_into_function_tmp(env, Some(find_nonlocals(function.clone())), |ctx| {
+        let mut func_body = vec![];
+
+        function.get_params().into_iter().enumerate().try_for_each(
+            |(i, pat)| -> Result<(), String> {
+                match pat {
+                    Pat::Rest(rest_pat) => {
+                        let (flow, arg) =
+                            ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
+                        func_body.extend(flow);
+                        let (flow, _) =
+                            pat_to_basic_blocks_tmp(ctx, PatType::FunArg, &rest_pat.arg, arg)?;
+                        func_body.extend(flow);
+                    }
+                    _ => {
+                        let (flow, arg) =
+                            ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
+                        func_body.extend(flow);
+                        let (flow, _) = pat_to_basic_blocks_tmp(ctx, PatType::FunArg, pat, arg)?;
+                        func_body.extend(flow);
+                    }
+                };
+                Ok(())
+            },
+        )?;
 
         // If this is a named FnExpr, we need another binding here.
         if let Some((name, nloc)) = inner_varname {
-            let nloc = ctx.push_instruction(BasicBlockInstruction::Read(LHS::NonLocal(nloc)));
-            ctx.declare_name(&name, nloc);
+            let (flow, nloc) =
+                ctx.push_instruction(BasicBlockInstruction::Read(LHS::NonLocal(nloc)));
+            func_body.extend(flow);
+
+            let (flow, _) = ctx.declare_name(&name, nloc);
+            func_body.extend(flow);
         }
 
         match function.get_body() {
-            FuncBlockOrRetExpr::Block(block) => block_to_basic_blocks(ctx, &block.stmts)?,
+            FuncBlockOrRetExpr::Block(block) => {
+                let flow = block_to_basic_blocks(ctx, block.stmts.iter())?;
+                func_body.extend(flow);
+            }
             FuncBlockOrRetExpr::RetExpr(expr) => {
-                let varname = expr_to_basic_blocks(ctx, expr);
-                let block_ret = ctx.wrap_up_block();
-                ctx.set_exit(block_ret, BasicBlockExit::ExitFn(ExitType::Return, varname));
+                let (flow, varname) = expr_to_basic_blocks(ctx, expr)?;
+                func_body.extend(flow);
+                func_body.push(StructuredFlow::Return(ExitType::Return, varname));
             }
         };
 
-        Ok(())
+        Ok(func_body)
     })?;
 
-    Ok((outer_varname, fn_id))
+    Ok((
+        StructuredFlow::simplify_vec(function_flow),
+        outer_varname,
+        fn_id,
+    ))
 }
 
 #[cfg(test)]
@@ -133,9 +170,11 @@ mod tests {
             .expect_stmt()
             .expect_decl()
             .expect_fn_decl();
-        let fn_decl_varname = ctx.bump_var_index();
-        function_to_basic_blocks(&mut ctx, FunctionLike::FnDecl(&decl), Some(fn_decl_varname))
-            .unwrap();
+        let fn_decl_varname = Some(ctx.get_var_index());
+
+        let (_flow, _, _) =
+            function_to_basic_blocks_tmp(&mut ctx, FunctionLike::FnDecl(&decl), fn_decl_varname)
+                .unwrap();
 
         ctx.functions.into_iter().collect()
     }
@@ -149,9 +188,13 @@ mod tests {
             @0: {
                 $1 = arguments[0]
                 $2 = arguments[1]
+            }
+            @1: {
                 $3 = $1
                 $4 = $2
                 $5 = $3 + $4
+            }
+            @2: {
                 exit = return $5
             },
         }

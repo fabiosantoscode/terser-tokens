@@ -6,19 +6,23 @@ use swc_ecma_ast::{
 };
 
 use crate::basic_blocks::{
-    ArrayElement, BasicBlockExit, BasicBlockInstruction, ExitType, ForInOfKind, IncrDecr,
-    MethodKind, ObjectKey, ObjectProperty, ObjectValue, TempExitType, LHS,
+    ArrayElement, BasicBlockInstruction, BreakableId, ExitType, ForInOfKind, IncrDecr, MethodKind,
+    ObjectKey, ObjectProperty, ObjectValue, StructuredFlow, StructuredSwitchCase, TempExitType,
+    LHS,
 };
 
 use super::{
-    block_to_basic_blocks, class_to_basic_blocks, convert_object_propname,
-    function_to_basic_blocks, get_propname_normal_key, pat_to_basic_blocks, to_basic_blocks_lhs,
-    FromAstCtx, FunctionLike, NestedIntoStatement, PatType,
+    block_to_basic_blocks, class_to_basic_blocks_tmp, convert_object_propname_tmp,
+    function_to_basic_blocks_tmp, get_propname_normal_key, pat_to_basic_blocks_tmp,
+    to_basic_blocks_lhs_tmp, FromAstCtx, FunctionLike, NestedIntoStatement, PatType,
 };
 
 /// Turn a statement into basic blocks.
 /// wraps `stat_to_basic_blocks_inner` while passing it the label, if what we got was a labeled statement
-pub fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
+pub fn stat_to_basic_blocks(
+    ctx: &mut FromAstCtx,
+    stat: &Stmt,
+) -> Result<Vec<StructuredFlow>, String> {
     let can_break_without_label = |stat: &Stmt| {
         matches!(
             stat,
@@ -31,40 +35,46 @@ pub fn stat_to_basic_blocks(ctx: &mut FromAstCtx, stat: &Stmt) {
         )
     };
 
-    if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
-        ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
-        stat_to_basic_blocks_inner(ctx, body);
+    let ret = if let Stmt::Labeled(LabeledStmt { label, body, .. }) = stat {
+        let brk = ctx.push_label(NestedIntoStatement::Labelled(label.sym.to_string()));
+        stat_to_basic_blocks_inner(ctx, brk, body)
     } else if can_break_without_label(stat) {
-        ctx.push_label(NestedIntoStatement::Unlabelled);
-        stat_to_basic_blocks_inner(ctx, stat);
+        let brk = ctx.push_label(NestedIntoStatement::Unlabelled);
+        stat_to_basic_blocks_inner(ctx, brk, stat)
     } else {
-        stat_to_basic_blocks_inner(ctx, stat);
-        return; // not breakable
-    }
+        let ret = stat_to_basic_blocks_inner(ctx, BreakableId(None), stat);
+        return ret; // not breakable
+    };
 
-    let jumpers_towards_me = ctx.pop_label();
-    for jumper in jumpers_towards_me {
-        ctx.set_exit(jumper, BasicBlockExit::Break(ctx.current_block_index()))
-    }
+    ctx.pop_label();
+
+    ret
 }
 
 /// Turn a statement into basic blocks. Wrapped by `stat_to_basic_blocks` to handle labels.
-fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
+fn stat_to_basic_blocks_inner(
+    ctx: &mut FromAstCtx,
+    brk_id: BreakableId,
+    stat: &Stmt,
+) -> Result<Vec<StructuredFlow>, String> {
     match stat {
         Stmt::Expr(expr) => {
-            let _exprid = expr_to_basic_blocks(ctx, &expr.expr);
-
-            ctx.wrap_up_block();
+            let (flow, _expr) = expr_to_basic_blocks(ctx, &expr.expr)?;
+            return Ok(flow);
         }
         Stmt::Decl(Decl::Var(var)) => {
-            var_decl_to_basic_blocks(ctx, var);
+            return var_decl_to_basic_blocks_tmp(ctx, var);
         }
         Stmt::Decl(Decl::Fn(_)) => {
             unreachable!("function declarations should be handled by block_to_basic_blocks")
         }
         Stmt::Decl(Decl::Class(class)) => {
-            class_to_basic_blocks(ctx, class.class.as_ref(), Some(class.ident.sym.to_string()))
-                .expect("error in class_to_basic_blocks");
+            let (structured_class, _var) = class_to_basic_blocks_tmp(
+                ctx,
+                class.class.as_ref(),
+                Some(class.ident.sym.to_string()),
+            )?;
+            return Ok(structured_class);
         }
         // https://262.ecma-international.org/#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset
         Stmt::ForOf(ForOfStmt {
@@ -73,41 +83,47 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
         | Stmt::ForIn(ForInStmt {
             left, right, body, ..
         }) => {
-            ctx.wrap_up_block();
+            let mut before_loop = vec![];
+            let (looped_value_flow, looped_value) = expr_to_basic_blocks(ctx, &right)?;
 
-            // ForInOfLoop($right, {kind}, 1, 3)
-            // 1: (take and assign the ForInOfValue)
-            // 2: $body
-            // 3: Jump(1)
-            // 4: (outside now)
-
-            let right = expr_to_basic_blocks(ctx, &right);
-
-            let blockidx_loop_head = ctx.wrap_up_block(); // '0 ForInOfLoop(1..3)
+            before_loop.extend(looped_value_flow);
 
             ctx.enter_conditional_branch();
 
-            let blockidx_bind_start = ctx.wrap_up_block();
+            let mut loop_body = vec![];
 
-            let loop_value = ctx.push_instruction(BasicBlockInstruction::ForInOfValue);
+            let (loop_value_flow, loop_value) =
+                ctx.push_instruction(BasicBlockInstruction::ForInOfValue);
+            loop_body.extend(loop_value_flow);
+
             match left {
                 ForHead::VarDecl(var_decl) => {
                     assert_eq!(
                         var_decl.decls.len(),
                         1,
-                        "for-in/of var decls should have exactly one binding"
+                        "for-in/of var decl have exactly one binding"
                     );
                     let only_decl = &var_decl.decls[0];
 
                     match var_decl.kind {
                         VarDeclKind::Var => {
-                            pat_to_basic_blocks(ctx, PatType::VarDecl, &only_decl.name, loop_value)
+                            let (flow, _pat_var) = pat_to_basic_blocks_tmp(
+                                ctx,
+                                PatType::VarDecl,
+                                &only_decl.name,
+                                loop_value,
+                            )?;
+                            loop_body.extend(flow);
                         }
                         VarDeclKind::Let => todo!(),
                         VarDeclKind::Const => todo!(),
                     }
                 }
-                ForHead::Pat(ref pat) => pat_to_basic_blocks(ctx, PatType::Assign, pat, loop_value),
+                ForHead::Pat(ref pat) => {
+                    let (flow, _pat_var) =
+                        pat_to_basic_blocks_tmp(ctx, PatType::Assign, pat, loop_value)?;
+                    loop_body.extend(flow);
+                }
                 ForHead::UsingDecl(_) => todo!(),
             };
 
@@ -118,373 +134,278 @@ fn stat_to_basic_blocks_inner(ctx: &mut FromAstCtx, stat: &Stmt) {
                 _ => unreachable!(),
             };
 
-            stat_to_basic_blocks(ctx, body);
+            let body = stat_to_basic_blocks_inner(ctx, BreakableId(None), body)?;
+            loop_body.extend(body);
 
-            ctx.leave_conditional_branch();
+            loop_body.push(StructuredFlow::Continue(brk_id));
 
-            let blockidx_jump_back = ctx.wrap_up_block();
+            let after_loop = ctx.leave_conditional_branch_tmp();
 
-            ctx.set_exit(
-                blockidx_loop_head,
-                BasicBlockExit::ForInOfLoop(right, kind, blockidx_bind_start, blockidx_jump_back),
-            );
-
-            ctx.set_exit(
-                blockidx_jump_back,
-                BasicBlockExit::Continue(blockidx_bind_start),
-            );
+            return Ok(vec![
+                StructuredFlow::Block(BreakableId(None), before_loop),
+                StructuredFlow::ForInOfLoop(brk_id, looped_value, kind, loop_body),
+                StructuredFlow::Block(BreakableId(None), after_loop),
+            ]);
         }
         Stmt::For(for_loop) => {
-            // -1: $init
-            // 0: Loop(1, 4)
-            // 1: Cond($test, 2, 4)
-            // 2:   then: $body, $update
-            // 3:         Continue(1)
-            // 4:   else: Break(5)
-            // 5: (outside now)
-
-            match &for_loop.init {
-                Some(VarDeclOrExpr::VarDecl(decl)) => {
-                    var_decl_to_basic_blocks(ctx, decl);
-                }
-                Some(VarDeclOrExpr::Expr(expr)) => {
-                    expr_to_basic_blocks(ctx, &expr);
-                }
-                None => {}
+            let before_loop = match &for_loop.init {
+                Some(VarDeclOrExpr::VarDecl(decl)) => var_decl_to_basic_blocks_tmp(ctx, decl)?,
+                Some(VarDeclOrExpr::Expr(expr)) => expr_to_basic_blocks(ctx, &expr)?.0,
+                None => vec![],
             };
-
-            let blockidx_loop = ctx.wrap_up_block(); // '0 Loop(1..4)
 
             ctx.enter_conditional_branch();
 
-            let blockidx_cond = ctx.wrap_up_block(); // '1 Cond(2..3, 4..4)
+            let mut loop_body = vec![];
 
-            let test = if let Some(test) = &for_loop.test {
-                expr_to_basic_blocks(ctx, test)
+            let (test_flow, test) = if let Some(test) = &for_loop.test {
+                expr_to_basic_blocks(ctx, test)?
             } else {
                 ctx.push_instruction(BasicBlockInstruction::LitBool(true))
             };
+            loop_body.extend(test_flow);
 
-            let blockidx_body_start = ctx.wrap_up_block(); // '2 $body, $update
+            let mut loop_inner_body = vec![];
 
-            stat_to_basic_blocks(ctx, &for_loop.body);
+            let flow = stat_to_basic_blocks(ctx, &for_loop.body)?;
+            loop_inner_body.extend(flow);
+
             if let Some(update) = &for_loop.update {
-                expr_to_basic_blocks(ctx, update);
+                loop_inner_body.extend(expr_to_basic_blocks(ctx, update)?.0);
             }
 
-            let blockidx_loop_back = ctx.wrap_up_block(); // '3
+            loop_inner_body.push(StructuredFlow::Continue(brk_id));
 
-            let blockidx_cond_else = ctx.wrap_up_block(); // '4
+            loop_body.push(StructuredFlow::Cond(
+                BreakableId(None),
+                test,
+                loop_inner_body,
+                vec![StructuredFlow::Break(brk_id)],
+            ));
 
-            let blockidx_outside = ctx.wrap_up_block(); // '5
+            let after_loop = ctx.leave_conditional_branch_tmp();
 
-            ctx.leave_conditional_branch(); // insert phi nodes in '5
-
-            ctx.set_exit(
-                blockidx_loop,
-                BasicBlockExit::Loop(blockidx_cond, blockidx_cond_else),
-            );
-            ctx.set_exit(
-                blockidx_cond,
-                BasicBlockExit::Cond(
-                    test,
-                    blockidx_body_start,
-                    blockidx_loop_back,
-                    blockidx_cond_else,
-                    blockidx_cond_else,
-                ),
-            );
-            ctx.set_exit(blockidx_loop_back, BasicBlockExit::Continue(blockidx_cond));
-            ctx.set_exit(blockidx_cond_else, BasicBlockExit::Break(blockidx_outside));
+            return Ok(vec![
+                StructuredFlow::from_vec(before_loop),
+                StructuredFlow::Loop(brk_id, loop_body),
+                StructuredFlow::from_vec(after_loop),
+            ]);
         }
         Stmt::DoWhile(dowhil) => {
-            // Loop(1, 4)
-            // 1: $body
-            // 2: Cond($test, 3, 4)
-            // 3:   then: Continue(1)
-            // 4:   else: Break(5)
-            // 5: (outside now)
-
-            let blockidx_loop = ctx.wrap_up_block(); // '0 Loop(1..4)
-
-            let blockidx_body_start = ctx.wrap_up_block(); // '1 $body
-
-            stat_to_basic_blocks(ctx, &dowhil.body);
-
             ctx.enter_conditional_branch();
 
-            let blockidx_cond = ctx.wrap_up_block(); // '2 Cond(3..3, 4..4)
+            let mut loop_body = vec![];
 
-            let test = expr_to_basic_blocks(ctx, &dowhil.test);
+            let body = stat_to_basic_blocks(ctx, &dowhil.body)?;
+            loop_body.extend(body);
 
-            let blockidx_loop_back = ctx.wrap_up_block(); // '3
+            let (test_flow, test) = expr_to_basic_blocks(ctx, &dowhil.test)?;
+            loop_body.extend(test_flow);
 
-            let blockidx_cond_else = ctx.wrap_up_block(); // '4
+            loop_body.push(StructuredFlow::Cond(
+                BreakableId(None),
+                test,
+                vec![StructuredFlow::Continue(brk_id)],
+                vec![StructuredFlow::Break(brk_id)],
+            ));
 
-            let blockidx_outside = ctx.wrap_up_block(); // '5
+            let after = ctx.leave_conditional_branch_tmp();
 
-            ctx.leave_conditional_branch(); // insert phi nodes in '5
-
-            ctx.set_exit(
-                blockidx_loop,
-                BasicBlockExit::Loop(blockidx_body_start, blockidx_cond_else),
-            );
-            ctx.set_exit(
-                blockidx_cond,
-                BasicBlockExit::Cond(
-                    test,
-                    blockidx_loop_back,
-                    blockidx_loop_back,
-                    blockidx_cond_else,
-                    blockidx_cond_else,
-                ),
-            );
-            ctx.set_exit(
-                blockidx_loop_back,
-                BasicBlockExit::Continue(blockidx_body_start),
-            );
-            ctx.set_exit(blockidx_cond_else, BasicBlockExit::Break(blockidx_outside));
+            return Ok(vec![
+                StructuredFlow::Loop(brk_id, loop_body),
+                StructuredFlow::from_vec(after),
+            ]);
         }
         Stmt::While(whil) => {
-            // Loop(1, 4)
-            // 1: Cond($test, 2, 4)
-            // 2:   then: $body
-            // 3:         Continue(1)
-            // 4:   else: Break(5)
-            // 5: (outside now)
-
-            let blockidx_loop = ctx.wrap_up_block(); // '0 Loop(1..4)
-
             ctx.enter_conditional_branch();
 
-            let blockidx_cond = ctx.wrap_up_block(); // '1 Cond(2..3, 4..4)
+            let mut loop_body = vec![];
 
-            let test = expr_to_basic_blocks(ctx, &whil.test);
+            let (test_flow, test) = expr_to_basic_blocks(ctx, &whil.test)?;
+            loop_body.extend(test_flow);
 
-            let blockidx_body_start = ctx.wrap_up_block(); // '2 $body
+            let mut loop_inner_body = vec![];
+            loop_inner_body.extend(stat_to_basic_blocks(ctx, &whil.body)?);
+            loop_inner_body.push(StructuredFlow::Continue(brk_id));
 
-            stat_to_basic_blocks(ctx, &whil.body);
+            loop_body.push(StructuredFlow::Cond(
+                BreakableId(None),
+                test,
+                loop_inner_body,
+                vec![StructuredFlow::Break(brk_id)],
+            ));
 
-            let blockidx_loop_back = ctx.wrap_up_block(); // '3
+            let outside = ctx.leave_conditional_branch_tmp();
 
-            let blockidx_cond_else = ctx.wrap_up_block(); // '4
-
-            let blockidx_outside = ctx.wrap_up_block(); // '5
-
-            ctx.leave_conditional_branch(); // insert phi nodes in '5
-
-            ctx.set_exit(
-                blockidx_loop,
-                BasicBlockExit::Loop(blockidx_cond, blockidx_cond_else),
-            );
-            ctx.set_exit(
-                blockidx_cond,
-                BasicBlockExit::Cond(
-                    test,
-                    blockidx_body_start,
-                    blockidx_loop_back,
-                    blockidx_cond_else,
-                    blockidx_cond_else,
-                ),
-            );
-            ctx.set_exit(blockidx_loop_back, BasicBlockExit::Continue(blockidx_cond));
-            ctx.set_exit(blockidx_cond_else, BasicBlockExit::Break(blockidx_outside));
+            return Ok(vec![
+                StructuredFlow::Loop(brk_id, loop_body),
+                StructuredFlow::from_vec(outside),
+            ]);
         }
         Stmt::If(IfStmt {
             test, cons, alt, ..
         }) => {
-            ctx.wrap_up_block();
-
             // IF($test)
-            let test = expr_to_basic_blocks(ctx, &test);
-            let blockidx_before = ctx.wrap_up_block();
+            let (test_flow, test) = expr_to_basic_blocks(ctx, &test)?;
 
             ctx.enter_conditional_branch();
 
             // THEN
-            let blockidx_consequent_before = ctx.wrap_up_block();
-            stat_to_basic_blocks(ctx, &cons);
-            let blockidx_consequent_after = ctx.current_block_index();
+            let then_flow = stat_to_basic_blocks(ctx, &cons)?;
 
             // ELSE
-            let blockidx_alternate_before = ctx.wrap_up_block();
-            if let Some(alt) = alt {
-                stat_to_basic_blocks(ctx, &alt);
-            }
-            let blockidx_alternate_after = ctx.current_block_index();
+            let else_flow = if let Some(alt) = alt {
+                stat_to_basic_blocks(ctx, &alt)?
+            } else {
+                vec![Default::default()]
+            };
 
-            let after = ctx.wrap_up_block();
-            ctx.leave_conditional_branch();
+            let after_flow = ctx.leave_conditional_branch_tmp();
 
-            ctx.set_exit(
-                blockidx_before,
-                BasicBlockExit::Cond(
-                    test,
-                    blockidx_consequent_before,
-                    blockidx_consequent_after,
-                    blockidx_alternate_before,
-                    blockidx_alternate_after,
-                ),
-            );
+            let cond = StructuredFlow::Cond(brk_id, test, then_flow, else_flow);
+
+            return Ok(vec![
+                StructuredFlow::from_vec(test_flow),
+                cond,
+                StructuredFlow::from_vec(after_flow),
+            ]);
         }
         Stmt::Block(block) => {
-            block_to_basic_blocks(ctx, &block.stmts).expect("todo error handling")
+            let contents = block_to_basic_blocks(ctx, block.stmts.iter())?;
+            return Ok(vec![StructuredFlow::Block(brk_id, contents)]);
         }
         Stmt::Break(br) => {
-            ctx.register_break(&br.label);
+            if brk_id != BreakableId(None) {
+                todo!(
+                    "illegal statement with label {:?} in non-breakable context",
+                    brk_id
+                )
+            }
 
-            ctx.wrap_up_block();
+            let brk_id = ctx.label_to_break_id(&br.label);
+            return Ok(vec![StructuredFlow::Break(brk_id)]);
         }
         Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
-        Stmt::Debugger(_) => {
-            let index = ctx.wrap_up_block();
-            ctx.wrap_up_block();
-
-            ctx.set_exit(index, BasicBlockExit::Debugger);
-        }
+        Stmt::Debugger(_) => StructuredFlow::Debugger,
         Stmt::With(_) => todo!(),
         Stmt::Switch(switch) => {
-            let exp = expr_to_basic_blocks(ctx, &switch.discriminant);
+            let (before_switch, switch_exp) = expr_to_basic_blocks(ctx, &switch.discriminant)?;
 
-            let switch_start = ctx.current_block_index();
-            ctx.wrap_up_block();
+            ctx.enter_conditional_branch();
 
+            let mut switch_cases = vec![];
             for case in switch.cases.iter() {
-                let case_exp = if let Some(test) = &case.test {
-                    let case_exp_start = ctx.current_block_index();
-                    ctx.wrap_up_block();
+                let condition = if let Some(test) = &case.test {
+                    let (cond_flow, cond) = expr_to_basic_blocks(ctx, test)?;
 
-                    let ret = Some(expr_to_basic_blocks(ctx, test));
-                    let case_exp_end = ctx.current_block_index();
-                    ctx.wrap_up_block();
-
-                    ctx.set_exit(
-                        case_exp_start,
-                        BasicBlockExit::SwitchCaseExpression(case_exp_start + 1, case_exp_end),
-                    );
-
-                    ret
+                    Some((cond_flow, cond))
                 } else {
                     None
                 };
 
-                let case_start = ctx.current_block_index();
-                ctx.wrap_up_block();
+                let body = block_to_basic_blocks(ctx, case.cons.iter())?;
 
-                for stat in case.cons.iter() {
-                    stat_to_basic_blocks(ctx, stat);
-                }
-
-                let case_end = ctx.current_block_index();
-                ctx.wrap_up_block();
-
-                ctx.set_exit(
-                    case_start,
-                    BasicBlockExit::SwitchCase(case_exp, case_start + 1, case_end),
-                );
+                switch_cases.push(StructuredSwitchCase { condition, body });
             }
 
-            let switch_end = ctx.current_block_index();
-            ctx.wrap_up_block();
+            let after_switch = ctx.leave_conditional_branch_tmp();
 
-            ctx.set_exit(switch_end, BasicBlockExit::SwitchEnd);
-
-            ctx.set_exit(
-                switch_start,
-                BasicBlockExit::Switch(exp, switch_start + 1, switch_end),
-            );
+            return Ok(vec![
+                StructuredFlow::from_vec(before_switch),
+                StructuredFlow::Switch(brk_id, switch_exp, switch_cases),
+                StructuredFlow::from_vec(after_switch),
+            ]);
         }
         Stmt::Throw(ThrowStmt { arg, .. }) => {
-            ctx.wrap_up_block();
-            let arg = expr_to_basic_blocks(ctx, arg);
+            let (throw_flow, throw_val) = expr_to_basic_blocks(ctx, arg)?;
 
-            let throw_from = ctx.wrap_up_block();
-            ctx.set_exit(throw_from, BasicBlockExit::ExitFn(ExitType::Throw, arg));
-
-            ctx.wrap_up_block();
+            return Ok(vec![
+                StructuredFlow::Block(BreakableId(None), throw_flow),
+                StructuredFlow::Return(ExitType::Throw, throw_val),
+            ]);
         }
         Stmt::Return(ret) => {
-            ctx.wrap_up_block();
-            let expr = expr_to_basic_blocks(ctx, ret.arg.as_ref().unwrap());
+            let (expr_flow, expr) = expr_to_basic_blocks(ctx, ret.arg.as_ref().unwrap())?;
 
-            let return_from = ctx.wrap_up_block();
-            ctx.set_exit(return_from, BasicBlockExit::ExitFn(ExitType::Return, expr));
-
-            ctx.wrap_up_block();
+            return Ok(vec![
+                StructuredFlow::from_vec(expr_flow),
+                StructuredFlow::Return(ExitType::Return, expr),
+            ]);
         }
         Stmt::Try(ref stmt) => {
-            let catch_pusher_idx = ctx.wrap_up_block();
-            let try_idx = ctx.wrap_up_block();
+            ctx.enter_conditional_branch();
+
+            let try_flow = block_to_basic_blocks(ctx, stmt.block.stmts.iter())?;
 
             ctx.enter_conditional_branch();
 
-            block_to_basic_blocks(ctx, &stmt.block.stmts).expect("todo error handling");
-
-            let before_catch_idx = ctx.wrap_up_block();
-            let catch_idx = ctx.wrap_up_block();
-            ctx.enter_conditional_branch();
+            let mut catch_flow = vec![];
+            catch_flow.extend(ctx.leave_conditional_branch_tmp());
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
-                    let catcherr = ctx.push_instruction(BasicBlockInstruction::CaughtError);
-                    pat_to_basic_blocks(ctx, PatType::VarDecl, p, catcherr);
+                    let (err_flow, catcherr) =
+                        ctx.push_instruction(BasicBlockInstruction::CaughtError);
+                    catch_flow.extend(err_flow);
+
+                    let (pat_flow, _pat) =
+                        pat_to_basic_blocks_tmp(ctx, PatType::VarDecl, p, catcherr)?;
+                    catch_flow.extend(pat_flow);
                 }
-                block_to_basic_blocks(ctx, &handler.body.stmts).expect("todo error handling");
+
+                catch_flow.extend(block_to_basic_blocks(ctx, handler.body.stmts.iter())?);
             }
 
-            let after_catch_idx = ctx.wrap_up_block();
-            let finally_idx = ctx.wrap_up_block();
-
-            ctx.leave_conditional_branch();
+            let mut finally_flow = vec![];
+            finally_flow.extend(ctx.leave_conditional_branch_tmp());
 
             if let Some(ref finalizer) = stmt.finalizer {
-                block_to_basic_blocks(ctx, &finalizer.stmts).expect("todo error handling");
-            }
+                finally_flow.extend(block_to_basic_blocks(ctx, finalizer.stmts.iter())?);
+            };
 
-            let end_finally_idx = ctx.wrap_up_block();
-
-            ctx.leave_conditional_branch();
-
-            ctx.wrap_up_block();
-
-            // declare the trycatch
-            ctx.set_exit(
-                catch_pusher_idx,
-                BasicBlockExit::SetTryAndCatch(try_idx, catch_idx, finally_idx, end_finally_idx),
-            );
-            // catch the error
-            ctx.set_exit(
-                before_catch_idx,
-                BasicBlockExit::PopCatch(catch_idx, after_catch_idx),
-            );
-            // finally
-            ctx.set_exit(
-                after_catch_idx,
-                BasicBlockExit::PopFinally(finally_idx, end_finally_idx),
-            );
+            return Ok(vec![StructuredFlow::TryCatch(
+                brk_id,
+                try_flow,
+                catch_flow,
+                finally_flow,
+            )]);
         }
         Stmt::Empty(_) => {
-            ctx.wrap_up_block();
+            return Ok(vec![]);
         }
         Stmt::Decl(Decl::Using(_)) => unreachable!("using decl"),
         Stmt::Decl(
             Decl::TsInterface(_) | Decl::TsTypeAlias(_) | Decl::TsEnum(_) | Decl::TsModule(_),
         ) => unreachable!("typescript features"),
-    }
+    };
+
+    Ok(todo!("not all return paths are implemented"))
 }
 
-fn var_decl_to_basic_blocks(ctx: &mut FromAstCtx, var: &VarDecl) {
+fn var_decl_to_basic_blocks_tmp(
+    ctx: &mut FromAstCtx,
+    var: &VarDecl,
+) -> Result<Vec<StructuredFlow>, String> {
+    let mut var_flow = vec![];
+
     for decl in &var.decls {
-        let init = match decl.init.as_ref() {
-            Some(init) => expr_to_basic_blocks(ctx, &init.as_ref()),
+        let (flow, init) = match decl.init.as_ref() {
+            Some(init) => expr_to_basic_blocks(ctx, &init.as_ref())?,
             None => ctx.push_instruction(BasicBlockInstruction::Undefined),
         };
-        pat_to_basic_blocks(ctx, PatType::VarDecl, &decl.name, init);
+        var_flow.extend(flow);
+        let (flow, _) = pat_to_basic_blocks_tmp(ctx, PatType::VarDecl, &decl.name, init)?;
+        var_flow.extend(flow);
     }
+
+    Ok(var_flow)
 }
 
-pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
+pub fn expr_to_basic_blocks(
+    ctx: &mut FromAstCtx,
+    exp: &Expr,
+) -> Result<(Vec<StructuredFlow>, usize), String> {
     match exp {
         Expr::Lit(lit) => {
             let lit = match lit {
@@ -496,182 +417,239 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 Lit::Regex(_) => todo!(),
                 Lit::JSXText(_) => todo!(),
             };
-            return ctx.push_instruction(lit);
+            return Ok(ctx.push_instruction(lit));
         }
         Expr::Bin(bin) => {
-            let l = expr_to_basic_blocks(ctx, &bin.left);
+            let mut bin_flow = vec![];
+
+            let (flow, l) = expr_to_basic_blocks(ctx, &bin.left)?;
+            bin_flow.extend(flow);
 
             match &bin.op {
                 BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing => {
                     let condition = match bin.op {
                         BinaryOp::LogicalAnd => l,
                         BinaryOp::LogicalOr => {
-                            ctx.push_instruction(BasicBlockInstruction::UnaryOp(UnaryOp::Bang, l))
+                            let (flow, not_l) = ctx
+                                .push_instruction(BasicBlockInstruction::UnaryOp(UnaryOp::Bang, l));
+                            bin_flow.extend(flow);
+
+                            not_l
                         }
                         BinaryOp::NullishCoalescing => {
-                            let nil = ctx.push_instruction(BasicBlockInstruction::Null);
-                            ctx.push_instruction(BasicBlockInstruction::BinOp(
+                            let (flow, nil) = ctx.push_instruction(BasicBlockInstruction::Null);
+                            bin_flow.extend(flow);
+
+                            let (flow, binop) = ctx.push_instruction(BasicBlockInstruction::BinOp(
                                 BinaryOp::EqEq,
                                 l,
                                 nil,
-                            ))
+                            ));
+                            bin_flow.extend(flow);
+
+                            binop
                         }
                         _ => unreachable!(),
                     };
 
-                    let cond = ctx.current_block_index();
-                    ctx.wrap_up_block();
-
                     ctx.enter_conditional_branch();
 
-                    let r = expr_to_basic_blocks(ctx, &bin.right);
+                    let (then_side, r) = expr_to_basic_blocks(ctx, &bin.right)?;
 
-                    let empty_else = ctx.wrap_up_block();
+                    let (else_side, l) = ctx.push_instruction(BasicBlockInstruction::Ref(l));
 
-                    let l = ctx.push_instruction(BasicBlockInstruction::Ref(l));
+                    bin_flow.push(StructuredFlow::Cond(
+                        BreakableId(None),
+                        condition,
+                        then_side,
+                        else_side,
+                    ));
 
-                    ctx.wrap_up_block();
+                    let after_cond = ctx.leave_conditional_branch_tmp();
+                    bin_flow.extend(after_cond);
 
-                    ctx.leave_conditional_branch();
+                    let (flow, phi) = ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
+                    bin_flow.extend(flow);
 
-                    ctx.set_exit(
-                        cond,
-                        BasicBlockExit::Cond(
-                            condition,
-                            cond + 1,
-                            empty_else - 1,
-                            empty_else,
-                            empty_else,
-                        ),
-                    );
-
-                    return ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
+                    return Ok((bin_flow, phi));
                 }
                 BinaryOp::In | BinaryOp::InstanceOf => todo!("in/instanceof"),
                 _ => {
-                    let r = expr_to_basic_blocks(ctx, &bin.right);
-                    return ctx.push_instruction(BasicBlockInstruction::BinOp(
-                        bin.op.clone(),
-                        l,
-                        r,
-                    ));
+                    let (flow, r) = expr_to_basic_blocks(ctx, &bin.right)?;
+                    bin_flow.extend(flow);
+
+                    let (flow, op) =
+                        ctx.push_instruction(BasicBlockInstruction::BinOp(bin.op.clone(), l, r));
+                    bin_flow.extend(flow);
+
+                    return Ok((bin_flow, op));
                 }
             }
         }
         Expr::Assign(assign) => match &assign.left {
             PatOrExpr::Pat(pat) => {
-                let init = expr_to_basic_blocks(ctx, &assign.right);
-                return pat_to_basic_blocks(ctx, PatType::Assign, pat, init);
+                let mut ret_flow = vec![];
+
+                let (flow, init) = expr_to_basic_blocks(ctx, &assign.right)?;
+                ret_flow.extend(flow);
+
+                let (flow, ret) = pat_to_basic_blocks_tmp(ctx, PatType::Assign, pat, init)?;
+                ret_flow.extend(flow);
+
+                return Ok((ret_flow, ret));
             }
             _ => todo!(),
         },
         Expr::Paren(paren) => return expr_to_basic_blocks(ctx, &paren.expr),
         Expr::Seq(seq) => {
+            let mut seq_flow = vec![];
+
             let mut last = None;
             for expr in &seq.exprs {
-                last = Some(expr_to_basic_blocks(ctx, expr));
+                let (flow, exp) = expr_to_basic_blocks(ctx, expr)?;
+                seq_flow.extend(flow);
+
+                last = Some(exp);
             }
-            return last.expect("Seq must have 1+ exprs");
+
+            return Ok((seq_flow, last.expect("Seq must have 1+ exprs")));
         }
         Expr::Cond(cond_expr) => {
-            let test = expr_to_basic_blocks(ctx, &cond_expr.test);
-            let blockidx_before = ctx.current_block_index();
-            ctx.wrap_up_block();
+            let mut cond_flow = vec![];
+
+            let (flow, test) = expr_to_basic_blocks(ctx, &cond_expr.test)?;
+            cond_flow.extend(flow);
 
             ctx.enter_conditional_branch();
 
-            let blockidx_consequent_before = ctx.current_block_index();
-            let cons = expr_to_basic_blocks(ctx, &cond_expr.cons);
-            let blockidx_consequent_after = ctx.current_block_index();
+            let (cons_flow, cons) = expr_to_basic_blocks(ctx, &cond_expr.cons)?;
+            let (alt_flow, alt) = expr_to_basic_blocks(ctx, &cond_expr.alt)?;
 
-            let blockidx_alternate_before = ctx.wrap_up_block();
-            let alt = expr_to_basic_blocks(ctx, &cond_expr.alt);
-            let blockidx_alternate_after = ctx.current_block_index();
+            cond_flow.push(StructuredFlow::Cond(
+                BreakableId(None),
+                test,
+                cons_flow,
+                alt_flow,
+            ));
 
-            ctx.wrap_up_block();
-
-            ctx.leave_conditional_branch();
-
-            // block before gets a Cond node added
-            ctx.set_exit(
-                blockidx_before,
-                BasicBlockExit::Cond(
-                    test,
-                    blockidx_consequent_before,
-                    blockidx_consequent_after,
-                    blockidx_alternate_before,
-                    blockidx_alternate_after,
-                ),
-            );
+            let after_flow = ctx.leave_conditional_branch_tmp();
+            cond_flow.extend(after_flow);
 
             // the retval of our ternary is a phi node
-            return ctx.push_instruction(BasicBlockInstruction::Phi(vec![cons, alt]));
+            let (flow, phi) = ctx.push_instruction(BasicBlockInstruction::Phi(vec![cons, alt]));
+            cond_flow.extend(flow);
+
+            return Ok((cond_flow, phi));
         }
         Expr::Ident(ident) => {
+            let mut ident_flow = vec![];
+
             let ident = ident.sym.to_string();
-            let instruction = match ident.as_str() {
-                "undefined" => BasicBlockInstruction::Undefined,
-                "Infinity" => BasicBlockInstruction::LitNumber(f64::INFINITY),
+            let (flow, instruction) = match ident.as_str() {
+                "undefined" => (vec![], BasicBlockInstruction::Undefined),
+                "Infinity" => (vec![], BasicBlockInstruction::LitNumber(f64::INFINITY)),
                 ident => {
                     if ctx.is_global_name(ident) {
-                        BasicBlockInstruction::Read(LHS::Global(ident.to_string()))
+                        (
+                            vec![],
+                            BasicBlockInstruction::Read(LHS::Global(ident.to_string())),
+                        )
                     } else if let Some(nonloc) = ctx.is_nonlocal(ident) {
-                        BasicBlockInstruction::Read(LHS::NonLocal(nonloc))
+                        (vec![], BasicBlockInstruction::Read(LHS::NonLocal(nonloc)))
                     } else {
-                        BasicBlockInstruction::Ref(ctx.read_name(ident))
+                        let (flow, ident) = ctx.read_name_tmp(ident);
+
+                        (flow, BasicBlockInstruction::Ref(ident))
                     }
                 }
             };
+            ident_flow.extend(flow);
 
-            return ctx.push_instruction(instruction);
+            // todo!("can I make the code coming out shorter?");
+
+            let (flow, ident_var) = ctx.push_instruction(instruction);
+            ident_flow.extend(flow);
+
+            return Ok((ident_flow, ident_var));
         }
-        Expr::This(_) => return ctx.push_instruction(BasicBlockInstruction::This),
+        Expr::This(_) => return Ok(ctx.push_instruction(BasicBlockInstruction::This)),
         Expr::Array(array_lit) => {
+            let mut array_flow = vec![];
             let mut elements = Vec::with_capacity(array_lit.elems.len());
 
             for elem in &array_lit.elems {
                 let elem = match elem {
-                    Some(ExprOrSpread { spread, expr }) => match spread {
-                        None => ArrayElement::Item(expr_to_basic_blocks(ctx, expr)),
-                        Some(_) => ArrayElement::Spread(expr_to_basic_blocks(ctx, expr)),
-                    },
+                    Some(ExprOrSpread { spread, expr }) => {
+                        let (flow, expr) = expr_to_basic_blocks(ctx, expr)?;
+                        array_flow.extend(flow);
+
+                        match spread {
+                            None => ArrayElement::Item(expr),
+                            Some(_) => ArrayElement::Spread(expr),
+                        }
+                    }
                     None => ArrayElement::Hole,
                 };
 
                 elements.push(elem);
             }
 
-            return ctx.push_instruction(BasicBlockInstruction::Array(elements));
+            let (flow, array_var) = ctx.push_instruction(BasicBlockInstruction::Array(elements));
+            array_flow.extend(flow);
+
+            return Ok((array_flow, array_var));
         }
         Expr::Object(ObjectLit { props, .. }) => {
+            let mut object_flow = vec![];
+
             let mut kvs = vec![];
             let mut proto = None;
             for prop in props {
                 match prop {
-                    PropOrSpread::Spread(spread) => kvs.push(ObjectProperty::Spread(
-                        expr_to_basic_blocks(ctx, &spread.expr),
-                    )),
+                    PropOrSpread::Spread(spread) => {
+                        let (flow, spread) = expr_to_basic_blocks(ctx, &spread.expr)?;
+                        object_flow.extend(flow);
+
+                        kvs.push(ObjectProperty::Spread(spread))
+                    }
                     PropOrSpread::Prop(prop) => match prop.as_ref() {
                         Prop::Shorthand(ident) => {
-                            let value = expr_to_basic_blocks(ctx, &Expr::Ident(ident.clone()));
+                            let (flow, value) =
+                                expr_to_basic_blocks(ctx, &Expr::Ident(ident.clone()))?;
+                            object_flow.extend(flow);
+
                             kvs.push(ObjectProperty::KeyValue(
                                 ObjectKey::NormalKey(ident.sym.to_string()),
                                 ObjectValue::Property(value),
                             ));
                         }
                         Prop::KeyValue(kv) => match &kv.key {
-                            PropName::Computed(expr) => kvs.push(ObjectProperty::KeyValue(
-                                ObjectKey::Computed(expr_to_basic_blocks(ctx, &expr.expr)),
-                                ObjectValue::Property(expr_to_basic_blocks(ctx, &kv.value)),
-                            )),
+                            PropName::Computed(expr) => {
+                                let (flow, expr) = expr_to_basic_blocks(ctx, &expr.expr)?;
+                                object_flow.extend(flow);
+
+                                let (flow, value) = expr_to_basic_blocks(ctx, &kv.value)?;
+                                object_flow.extend(flow);
+
+                                kvs.push(ObjectProperty::KeyValue(
+                                    ObjectKey::Computed(expr),
+                                    ObjectValue::Property(value),
+                                ))
+                            }
                             _ => {
                                 let prop_name = get_propname_normal_key(&kv.key);
                                 if &prop_name == "__proto__" {
-                                    proto = Some(expr_to_basic_blocks(ctx, &kv.value));
+                                    let (flow, proto_val) = expr_to_basic_blocks(ctx, &kv.value)?;
+                                    object_flow.extend(flow);
+
+                                    proto = Some(proto_val);
                                 } else {
+                                    let (flow, value) = expr_to_basic_blocks(ctx, &kv.value)?;
+                                    object_flow.extend(flow);
+
                                     kvs.push(ObjectProperty::KeyValue(
                                         ObjectKey::NormalKey(prop_name),
-                                        ObjectValue::Property(expr_to_basic_blocks(ctx, &kv.value)),
+                                        ObjectValue::Property(value),
                                     ));
                                 }
                             }
@@ -679,7 +657,9 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                         Prop::Getter(GetterProp { key, .. })
                         | Prop::Setter(SetterProp { key, .. })
                         | Prop::Method(MethodProp { key, .. }) => {
-                            let key = convert_object_propname(ctx, key);
+                            let (flow, key) = convert_object_propname_tmp(ctx, key)?;
+                            object_flow.extend(flow);
+
                             let (method_kind, func) = match prop.as_ref() {
                                 Prop::Getter(getter) => {
                                     (MethodKind::Getter, FunctionLike::ObjectGetter(&getter))
@@ -693,8 +673,8 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                                 _ => unreachable!(),
                             };
 
-                            let (_varname, fn_id) = function_to_basic_blocks(ctx, func, None)
-                                .expect("todo error handling");
+                            let (flow, _, fn_id) = function_to_basic_blocks_tmp(ctx, func, None)?;
+                            object_flow.extend(flow);
 
                             kvs.push(ObjectProperty::KeyValue(
                                 key,
@@ -706,54 +686,103 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                 }
             }
 
-            return ctx.push_instruction(BasicBlockInstruction::Object(proto, kvs));
+            let (flow, object_var) =
+                ctx.push_instruction(BasicBlockInstruction::Object(proto, kvs));
+            object_flow.extend(flow);
+
+            return Ok((object_flow, object_var));
         }
         Expr::Unary(unary_expr) => match unary_expr.op {
             UnaryOp::TypeOf => {
+                let mut typeof_flow = vec![];
+
                 if let Expr::Ident(global_ident) = &unary_expr.arg.as_ref() {
                     let s = global_ident.sym.to_string();
                     if ctx.is_global_name(&s) {
-                        return ctx.push_instruction(BasicBlockInstruction::TypeOfGlobal(s));
+                        return Ok(ctx.push_instruction(BasicBlockInstruction::TypeOfGlobal(s)));
                     }
                 }
-                let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
-                return ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
+                let (flow, expr) = expr_to_basic_blocks(ctx, &unary_expr.arg)?;
+                typeof_flow.extend(flow);
+
+                let (flow, type_of) = ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
+                typeof_flow.extend(flow);
+
+                return Ok((typeof_flow, type_of));
             }
             UnaryOp::Delete => {
-                let lhs = to_basic_blocks_lhs(ctx, &unary_expr.arg);
-                return ctx.push_instruction(BasicBlockInstruction::Delete(lhs));
+                let mut delete_flow = vec![];
+
+                let (flow, lhs) = to_basic_blocks_lhs_tmp(ctx, &unary_expr.arg)?;
+                delete_flow.extend(flow);
+
+                let (flow, del) = ctx.push_instruction(BasicBlockInstruction::Delete(lhs));
+                delete_flow.extend(flow);
+
+                return Ok((delete_flow, del));
             }
             UnaryOp::Void => {
-                expr_to_basic_blocks(ctx, &unary_expr.arg);
-                return ctx.push_instruction(BasicBlockInstruction::Undefined);
+                let mut void_flow = vec![];
+
+                let (flow, _) = expr_to_basic_blocks(ctx, &unary_expr.arg)?;
+                void_flow.extend(flow);
+
+                let (flow, undef) = ctx.push_instruction(BasicBlockInstruction::Undefined);
+                void_flow.extend(flow);
+
+                return Ok((void_flow, undef));
             }
             UnaryOp::Minus | UnaryOp::Plus | UnaryOp::Bang | UnaryOp::Tilde => {
-                let expr = expr_to_basic_blocks(ctx, &unary_expr.arg);
-                return ctx.push_instruction(BasicBlockInstruction::UnaryOp(unary_expr.op, expr));
+                let mut unary_flow = vec![];
+
+                let (flow, expr) = expr_to_basic_blocks(ctx, &unary_expr.arg)?;
+                unary_flow.extend(flow);
+
+                let (flow, res) =
+                    ctx.push_instruction(BasicBlockInstruction::UnaryOp(unary_expr.op, expr));
+                unary_flow.extend(flow);
+
+                return Ok((unary_flow, res));
             }
         },
         Expr::Update(UpdateExpr {
             op, prefix, arg, ..
         }) => {
-            let lhs = to_basic_blocks_lhs(ctx, arg);
+            let mut update_flow = vec![];
+
+            let (flow, lhs) = to_basic_blocks_lhs_tmp(ctx, arg)?;
+            update_flow.extend(flow);
+
             let op = match op {
                 UpdateOp::PlusPlus => IncrDecr::Incr,
                 UpdateOp::MinusMinus => IncrDecr::Decr,
             };
-            let ins = if *prefix {
-                BasicBlockInstruction::IncrDecr(lhs, op)
-            } else {
-                BasicBlockInstruction::IncrDecrPostfix(lhs, op)
+            let ins = match *prefix {
+                true => BasicBlockInstruction::IncrDecr(lhs, op),
+                false => BasicBlockInstruction::IncrDecrPostfix(lhs, op),
             };
-            return ctx.push_instruction(ins);
+
+            let (flow, ins) = ctx.push_instruction(ins);
+            update_flow.extend(flow);
+
+            return Ok((update_flow, ins));
         }
         Expr::Member(_) => {
-            let lhs = to_basic_blocks_lhs(ctx, exp);
+            let mut member_flow = vec![];
 
-            return ctx.push_instruction(BasicBlockInstruction::Read(lhs));
+            let (flow, lhs) = to_basic_blocks_lhs_tmp(ctx, exp)?;
+            member_flow.extend(flow);
+
+            let (flow, read) = ctx.push_instruction(BasicBlockInstruction::Read(lhs));
+            member_flow.extend(flow);
+
+            return Ok((member_flow, read));
         }
         Expr::SuperProp(sp) => {
-            let sup = ctx.push_instruction(BasicBlockInstruction::Super);
+            let mut super_prop_flow = vec![];
+
+            let (flow, sup) = ctx.push_instruction(BasicBlockInstruction::Super);
+            super_prop_flow.extend(flow);
 
             let lhs = match &sp.prop {
                 swc_ecma_ast::SuperProp::Ident(ident) => {
@@ -761,86 +790,132 @@ pub fn expr_to_basic_blocks(ctx: &mut FromAstCtx, exp: &Expr) -> usize {
                     LHS::Member(Box::new(LHS::Local(sup)), ObjectKey::NormalKey(prop))
                 }
                 swc_ecma_ast::SuperProp::Computed(computed) => {
-                    let expr = expr_to_basic_blocks(ctx, &computed.expr);
+                    let (flow, expr) = expr_to_basic_blocks(ctx, &computed.expr)?;
+                    super_prop_flow.extend(flow);
+
                     LHS::Member(Box::new(LHS::Local(expr)), ObjectKey::Computed(expr))
                 }
             };
 
-            return ctx.push_instruction(BasicBlockInstruction::Read(lhs));
+            let (flow, read) = ctx.push_instruction(BasicBlockInstruction::Read(lhs));
+            super_prop_flow.extend(flow);
+
+            return Ok((super_prop_flow, read));
         }
         Expr::Arrow(arrow_expr) => {
-            let (varname, _fn_id) =
-                function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
+            let (flow, varname, _fn_id) =
+                function_to_basic_blocks_tmp(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
                     .expect("todo error handling");
-            return varname;
+            return Ok((flow, varname));
         }
         Expr::Fn(fn_expr) => {
-            let (varname, _fn_id) =
-                function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr), None)
+            let (flow, varname, _fn_id) =
+                function_to_basic_blocks_tmp(ctx, FunctionLike::FnExpr(fn_expr), None)
                     .expect("todo error handling");
 
-            return varname;
+            return Ok((flow, varname));
         }
         Expr::Call(call) => {
+            let mut call_flow = vec![];
+
             // TODO non-expr callees (super, import)
             let callee = match &call.callee {
                 swc_ecma_ast::Callee::Super(_) => {
-                    ctx.push_instruction(BasicBlockInstruction::Super)
+                    let (flow, callee) = ctx.push_instruction(BasicBlockInstruction::Super);
+                    call_flow.extend(flow);
+
+                    callee
                 }
                 swc_ecma_ast::Callee::Import(_) => todo!("import()"),
-                swc_ecma_ast::Callee::Expr(expr) => expr_to_basic_blocks(ctx, &expr),
+                swc_ecma_ast::Callee::Expr(expr) => {
+                    let (flow, callee) = expr_to_basic_blocks(ctx, &expr)?;
+                    call_flow.extend(flow);
+
+                    callee
+                }
             };
 
             let mut args = Vec::with_capacity(call.args.len());
             for arg in &call.args {
                 match arg.spread {
                     Some(_) => todo!("spread args"),
-                    None => args.push(expr_to_basic_blocks(ctx, arg.expr.as_ref())),
+                    None => {
+                        let (arg_flow, arg_expr) = expr_to_basic_blocks(ctx, &arg.expr)?;
+                        call_flow.extend(arg_flow);
+
+                        args.push(arg_expr)
+                    }
                 }
             }
 
-            return ctx.push_instruction(BasicBlockInstruction::Call(callee, args));
+            let (flow, call) = ctx.push_instruction(BasicBlockInstruction::Call(callee, args));
+            call_flow.extend(flow);
+
+            return Ok((call_flow, call));
         }
         Expr::New(new_expr) => {
-            let callee = expr_to_basic_blocks(ctx, &new_expr.callee);
+            let mut new_flow = vec![];
+
+            let (flow, callee) = expr_to_basic_blocks(ctx, &new_expr.callee)?;
+            new_flow.extend(flow);
 
             let mut out_args = vec![];
             if let Some(args) = &new_expr.args {
                 for arg in args {
                     match arg.spread {
                         Some(_) => todo!("spread args"),
-                        None => out_args.push(expr_to_basic_blocks(ctx, arg.expr.as_ref())),
+                        None => {
+                            let (flow, callee) = expr_to_basic_blocks(ctx, arg.expr.as_ref())?;
+                            new_flow.extend(flow);
+
+                            out_args.push(callee);
+                        }
                     }
                 }
             }
 
-            return ctx.push_instruction(BasicBlockInstruction::New(callee, out_args));
+            let (flow, new) = ctx.push_instruction(BasicBlockInstruction::New(callee, out_args));
+            new_flow.extend(flow);
+
+            return Ok((new_flow, new));
         }
         Expr::Tpl(_) => todo!(),
         Expr::TaggedTpl(_) => todo!(),
         Expr::Class(class) => {
             let class_name = class.ident.as_ref().map(|id| id.sym.to_string());
-            return class_to_basic_blocks(ctx, class.class.as_ref(), class_name).unwrap();
+            return class_to_basic_blocks_tmp(ctx, class.class.as_ref(), class_name);
         }
         Expr::MetaProp(_) => todo!(),
         Expr::Yield(YieldExpr { arg, delegate, .. }) => {
-            let typ = if *delegate {
-                TempExitType::YieldStar
-            } else {
-                TempExitType::Yield
+            let mut yield_flow = vec![];
+
+            let typ = match *delegate {
+                true => TempExitType::YieldStar,
+                false => TempExitType::Yield,
             };
 
-            let arg = match arg {
-                Some(arg) => expr_to_basic_blocks(ctx, arg),
-                None => ctx.current_block_index(),
+            let (flow, arg) = match arg {
+                Some(arg) => expr_to_basic_blocks(ctx, arg)?,
+                None => ctx.push_instruction(BasicBlockInstruction::Undefined),
             };
+            yield_flow.extend(flow);
 
-            return ctx.push_instruction(BasicBlockInstruction::TempExit(typ, arg));
+            let (flow, exit) = ctx.push_instruction(BasicBlockInstruction::TempExit(typ, arg));
+            yield_flow.extend(flow);
+
+            return Ok((yield_flow, exit));
         }
         Expr::Await(AwaitExpr { arg, .. }) => {
-            let arg = expr_to_basic_blocks(ctx, arg);
+            let mut await_flow = vec![];
 
-            return ctx.push_instruction(BasicBlockInstruction::TempExit(TempExitType::Await, arg));
+            let (flow, arg) = expr_to_basic_blocks(ctx, arg)?;
+            await_flow.extend(flow);
+
+            let (flow, exit) =
+                ctx.push_instruction(BasicBlockInstruction::TempExit(TempExitType::Await, arg));
+            await_flow.extend(flow);
+
+            return Ok((await_flow, exit));
         }
         Expr::OptChain(_) => todo!(),
         Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
@@ -1690,8 +1765,6 @@ mod tests {
         @2: {
             $2 = 789
         }
-        @3: {
-        }
         "###);
     }
 
@@ -1710,7 +1783,7 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 123
-            exit = cond $0 ? @1..@4 : @5..@5
+            exit = cond $0 ? @1..@3 : @4..@4
         }
         @1: {
             $1 = 456
@@ -1722,11 +1795,7 @@ mod tests {
         @3: {
         }
         @4: {
-        }
-        @5: {
             $3 = 999
-        }
-        @6: {
         }
         "###);
     }
@@ -1742,19 +1811,21 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @3..@3
+            exit = try @1 catch @3 finally @5..@5
         }
         @1: {
             $0 = 777
-            exit = catch @2..@3
         }
         @2: {
-            $1 = 888
-            exit = finally @3..@3
+            exit = catch @3..@5
         }
         @3: {
+            $1 = 888
         }
         @4: {
+            exit = finally @5..@5
+        }
+        @5: {
         }
         "###);
     }
@@ -1770,23 +1841,23 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @4..@4
+            exit = try @1 catch @3 finally @5..@5
         }
         @1: {
             $0 = 777
-            exit = catch @2..@4
         }
         @2: {
+            exit = catch @3..@5
+        }
+        @3: {
             $1 = caught_error()
             $2 = pack $1 {message: _}
             $3 = unpack $2[0]
             $4 = $3
             exit = return $4
         }
-        @3: {
-            exit = finally @4..@4
-        }
         @4: {
+            exit = finally @5..@5
         }
         @5: {
         }
@@ -1805,22 +1876,26 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @3..@3
+            exit = try @1 catch @3 finally @5..@5
         }
         @1: {
             $0 = 777
-            exit = catch @2..@3
         }
         @2: {
-            $1 = 888
-            exit = finally @3..@3
+            exit = catch @3..@5
         }
         @3: {
-            $2 = either($0, $1)
+            $1 = 888
         }
         @4: {
-            $4 = $2
-            exit = return $4
+            exit = finally @5..@5
+        }
+        @5: {
+            $2 = either($0, $1)
+        }
+        @6: {
+            $3 = $2
+            exit = return $3
         }
         "###);
     }
@@ -1838,20 +1913,22 @@ mod tests {
         );
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
-            exit = try @1 catch @2 finally @3..@3
+            exit = try @1 catch @3 finally @5..@5
         }
         @1: {
             $0 = 777
-            exit = catch @2..@3
         }
         @2: {
-            $1 = 888
-            exit = finally @3..@3
+            exit = catch @3..@5
         }
         @3: {
-            $2 = 999
+            $1 = 888
         }
         @4: {
+            exit = finally @5..@5
+        }
+        @5: {
+            $2 = 999
         }
         "###);
     }
@@ -1876,7 +1953,7 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 10
-            exit = try @1 catch @5 finally @12..@12
+            exit = try @1 catch @6 finally @14..@14
         }
         @1: {
             $1 = $0
@@ -1891,35 +1968,39 @@ mod tests {
         @3: {
         }
         @4: {
-            exit = catch @5..@12
         }
         @5: {
-            $5 = caught_error()
-            exit = try @6 catch @8 finally @10..@10
+            exit = catch @6..@14
         }
         @6: {
+            $5 = caught_error()
+            exit = try @7 catch @9 finally @11..@11
+        }
+        @7: {
             $6 = 456
             exit = return $6
         }
-        @7: {
-            exit = catch @8..@10
-        }
         @8: {
+            exit = catch @9..@11
+        }
+        @9: {
             $7 = caught_error()
             $8 = 789
             exit = return $8
         }
-        @9: {
-            exit = finally @10..@10
-        }
         @10: {
+            exit = finally @11..@11
         }
         @11: {
-            exit = finally @12..@12
         }
         @12: {
         }
         @13: {
+            exit = finally @14..@14
+        }
+        @14: {
+        }
+        @15: {
             $9 = $0
             exit = return $9
         }
@@ -1943,8 +2024,6 @@ mod tests {
             $2 = $1
             $3 = call $2()
             exit = continue @1
-        }
-        @2: {
         }
         "###);
     }

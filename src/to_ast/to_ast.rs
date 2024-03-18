@@ -62,7 +62,20 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
     };
 
     match node {
-        StructuredFlow::Block(stats) => to_stat_vec(ctx, stats),
+        StructuredFlow::Block(brk, stats) => {
+            if brk.0.is_some() {
+                let stmt = ctx.enter_breakable(brk, true, |ctx| {
+                    Stmt::Block(BlockStmt {
+                        span: Default::default(),
+                        stmts: to_stat_vec(ctx, stats),
+                    })
+                });
+
+                vec![stmt]
+            } else {
+                to_stat_vec(ctx, stats)
+            }
+        }
         StructuredFlow::BasicBlock(ins) => ins
             .iter()
             .flat_map(|(varname, ins)| match ins {
