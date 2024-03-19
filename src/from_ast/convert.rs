@@ -12,9 +12,9 @@ use crate::basic_blocks::{
 };
 
 use super::{
-    block_to_basic_blocks, class_to_basic_blocks_tmp, convert_object_propname_tmp,
-    function_to_basic_blocks_tmp, get_propname_normal_key, pat_to_basic_blocks_tmp,
-    to_basic_blocks_lhs_tmp, FromAstCtx, FunctionLike, NestedIntoStatement, PatType,
+    block_to_basic_blocks, class_to_basic_blocks, convert_object_propname,
+    function_to_basic_blocks, get_propname_normal_key, pat_to_basic_blocks, to_basic_blocks_lhs,
+    FromAstCtx, FunctionLike, NestedIntoStatement, PatType,
 };
 
 /// Turn a statement into basic blocks.
@@ -63,13 +63,13 @@ fn stat_to_basic_blocks_inner(
             return Ok(flow);
         }
         Stmt::Decl(Decl::Var(var)) => {
-            return var_decl_to_basic_blocks_tmp(ctx, var);
+            return var_decl_to_basic_blocks(ctx, var);
         }
         Stmt::Decl(Decl::Fn(_)) => {
             unreachable!("function declarations should be handled by block_to_basic_blocks")
         }
         Stmt::Decl(Decl::Class(class)) => {
-            let (structured_class, _var) = class_to_basic_blocks_tmp(
+            let (structured_class, _var) = class_to_basic_blocks(
                 ctx,
                 class.class.as_ref(),
                 Some(class.ident.sym.to_string()),
@@ -107,7 +107,7 @@ fn stat_to_basic_blocks_inner(
 
                     match var_decl.kind {
                         VarDeclKind::Var => {
-                            let (flow, _pat_var) = pat_to_basic_blocks_tmp(
+                            let (flow, _pat_var) = pat_to_basic_blocks(
                                 ctx,
                                 PatType::VarDecl,
                                 &only_decl.name,
@@ -121,7 +121,7 @@ fn stat_to_basic_blocks_inner(
                 }
                 ForHead::Pat(ref pat) => {
                     let (flow, _pat_var) =
-                        pat_to_basic_blocks_tmp(ctx, PatType::Assign, pat, loop_value)?;
+                        pat_to_basic_blocks(ctx, PatType::Assign, pat, loop_value)?;
                     loop_body.extend(flow);
                 }
                 ForHead::UsingDecl(_) => todo!(),
@@ -139,7 +139,7 @@ fn stat_to_basic_blocks_inner(
 
             loop_body.push(StructuredFlow::Continue(brk_id));
 
-            let after_loop = ctx.leave_conditional_branch_tmp();
+            let after_loop = ctx.leave_conditional_branch();
 
             return Ok(vec![
                 StructuredFlow::Block(BreakableId(None), before_loop),
@@ -149,7 +149,7 @@ fn stat_to_basic_blocks_inner(
         }
         Stmt::For(for_loop) => {
             let before_loop = match &for_loop.init {
-                Some(VarDeclOrExpr::VarDecl(decl)) => var_decl_to_basic_blocks_tmp(ctx, decl)?,
+                Some(VarDeclOrExpr::VarDecl(decl)) => var_decl_to_basic_blocks(ctx, decl)?,
                 Some(VarDeclOrExpr::Expr(expr)) => expr_to_basic_blocks(ctx, &expr)?.0,
                 None => vec![],
             };
@@ -183,7 +183,7 @@ fn stat_to_basic_blocks_inner(
                 vec![StructuredFlow::Break(brk_id)],
             ));
 
-            let after_loop = ctx.leave_conditional_branch_tmp();
+            let after_loop = ctx.leave_conditional_branch();
 
             return Ok(vec![
                 StructuredFlow::from_vec(before_loop),
@@ -209,7 +209,7 @@ fn stat_to_basic_blocks_inner(
                 vec![StructuredFlow::Break(brk_id)],
             ));
 
-            let after = ctx.leave_conditional_branch_tmp();
+            let after = ctx.leave_conditional_branch();
 
             return Ok(vec![
                 StructuredFlow::Loop(brk_id, loop_body),
@@ -235,7 +235,7 @@ fn stat_to_basic_blocks_inner(
                 vec![StructuredFlow::Break(brk_id)],
             ));
 
-            let outside = ctx.leave_conditional_branch_tmp();
+            let outside = ctx.leave_conditional_branch();
 
             return Ok(vec![
                 StructuredFlow::Loop(brk_id, loop_body),
@@ -260,7 +260,7 @@ fn stat_to_basic_blocks_inner(
                 vec![Default::default()]
             };
 
-            let after_flow = ctx.leave_conditional_branch_tmp();
+            let after_flow = ctx.leave_conditional_branch();
 
             let cond = StructuredFlow::Cond(brk_id, test, then_flow, else_flow);
 
@@ -309,7 +309,7 @@ fn stat_to_basic_blocks_inner(
                 switch_cases.push(StructuredSwitchCase { condition, body });
             }
 
-            let after_switch = ctx.leave_conditional_branch_tmp();
+            let after_switch = ctx.leave_conditional_branch();
 
             return Ok(vec![
                 StructuredFlow::from_vec(before_switch),
@@ -341,7 +341,7 @@ fn stat_to_basic_blocks_inner(
             ctx.enter_conditional_branch();
 
             let mut catch_flow = vec![];
-            catch_flow.extend(ctx.leave_conditional_branch_tmp());
+            catch_flow.extend(ctx.leave_conditional_branch());
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
@@ -349,8 +349,7 @@ fn stat_to_basic_blocks_inner(
                         ctx.push_instruction(BasicBlockInstruction::CaughtError);
                     catch_flow.extend(err_flow);
 
-                    let (pat_flow, _pat) =
-                        pat_to_basic_blocks_tmp(ctx, PatType::VarDecl, p, catcherr)?;
+                    let (pat_flow, _pat) = pat_to_basic_blocks(ctx, PatType::VarDecl, p, catcherr)?;
                     catch_flow.extend(pat_flow);
                 }
 
@@ -358,7 +357,7 @@ fn stat_to_basic_blocks_inner(
             }
 
             let mut finally_flow = vec![];
-            finally_flow.extend(ctx.leave_conditional_branch_tmp());
+            finally_flow.extend(ctx.leave_conditional_branch());
 
             if let Some(ref finalizer) = stmt.finalizer {
                 finally_flow.extend(block_to_basic_blocks(ctx, finalizer.stmts.iter())?);
@@ -383,7 +382,7 @@ fn stat_to_basic_blocks_inner(
     Ok(todo!("not all return paths are implemented"))
 }
 
-fn var_decl_to_basic_blocks_tmp(
+fn var_decl_to_basic_blocks(
     ctx: &mut FromAstCtx,
     var: &VarDecl,
 ) -> Result<Vec<StructuredFlow>, String> {
@@ -395,7 +394,7 @@ fn var_decl_to_basic_blocks_tmp(
             None => ctx.push_instruction(BasicBlockInstruction::Undefined),
         };
         var_flow.extend(flow);
-        let (flow, _) = pat_to_basic_blocks_tmp(ctx, PatType::VarDecl, &decl.name, init)?;
+        let (flow, _) = pat_to_basic_blocks(ctx, PatType::VarDecl, &decl.name, init)?;
         var_flow.extend(flow);
     }
 
@@ -465,7 +464,7 @@ pub fn expr_to_basic_blocks(
                         else_side,
                     ));
 
-                    let after_cond = ctx.leave_conditional_branch_tmp();
+                    let after_cond = ctx.leave_conditional_branch();
                     bin_flow.extend(after_cond);
 
                     let (flow, phi) = ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
@@ -493,7 +492,7 @@ pub fn expr_to_basic_blocks(
                 let (flow, init) = expr_to_basic_blocks(ctx, &assign.right)?;
                 ret_flow.extend(flow);
 
-                let (flow, ret) = pat_to_basic_blocks_tmp(ctx, PatType::Assign, pat, init)?;
+                let (flow, ret) = pat_to_basic_blocks(ctx, PatType::Assign, pat, init)?;
                 ret_flow.extend(flow);
 
                 return Ok((ret_flow, ret));
@@ -532,7 +531,7 @@ pub fn expr_to_basic_blocks(
                 alt_flow,
             ));
 
-            let after_flow = ctx.leave_conditional_branch_tmp();
+            let after_flow = ctx.leave_conditional_branch();
             cond_flow.extend(after_flow);
 
             // the retval of our ternary is a phi node
@@ -557,7 +556,7 @@ pub fn expr_to_basic_blocks(
                     } else if let Some(nonloc) = ctx.is_nonlocal(ident) {
                         (vec![], BasicBlockInstruction::Read(LHS::NonLocal(nonloc)))
                     } else {
-                        let (flow, ident) = ctx.read_name_tmp(ident);
+                        let (flow, ident) = ctx.read_name(ident);
 
                         (flow, BasicBlockInstruction::Ref(ident))
                     }
@@ -657,7 +656,7 @@ pub fn expr_to_basic_blocks(
                         Prop::Getter(GetterProp { key, .. })
                         | Prop::Setter(SetterProp { key, .. })
                         | Prop::Method(MethodProp { key, .. }) => {
-                            let (flow, key) = convert_object_propname_tmp(ctx, key)?;
+                            let (flow, key) = convert_object_propname(ctx, key)?;
                             object_flow.extend(flow);
 
                             let (method_kind, func) = match prop.as_ref() {
@@ -673,7 +672,7 @@ pub fn expr_to_basic_blocks(
                                 _ => unreachable!(),
                             };
 
-                            let (flow, _, fn_id) = function_to_basic_blocks_tmp(ctx, func, None)?;
+                            let (flow, _, fn_id) = function_to_basic_blocks(ctx, func, None)?;
                             object_flow.extend(flow);
 
                             kvs.push(ObjectProperty::KeyValue(
@@ -713,7 +712,7 @@ pub fn expr_to_basic_blocks(
             UnaryOp::Delete => {
                 let mut delete_flow = vec![];
 
-                let (flow, lhs) = to_basic_blocks_lhs_tmp(ctx, &unary_expr.arg)?;
+                let (flow, lhs) = to_basic_blocks_lhs(ctx, &unary_expr.arg)?;
                 delete_flow.extend(flow);
 
                 let (flow, del) = ctx.push_instruction(BasicBlockInstruction::Delete(lhs));
@@ -750,7 +749,7 @@ pub fn expr_to_basic_blocks(
         }) => {
             let mut update_flow = vec![];
 
-            let (flow, lhs) = to_basic_blocks_lhs_tmp(ctx, arg)?;
+            let (flow, lhs) = to_basic_blocks_lhs(ctx, arg)?;
             update_flow.extend(flow);
 
             let op = match op {
@@ -770,7 +769,7 @@ pub fn expr_to_basic_blocks(
         Expr::Member(_) => {
             let mut member_flow = vec![];
 
-            let (flow, lhs) = to_basic_blocks_lhs_tmp(ctx, exp)?;
+            let (flow, lhs) = to_basic_blocks_lhs(ctx, exp)?;
             member_flow.extend(flow);
 
             let (flow, read) = ctx.push_instruction(BasicBlockInstruction::Read(lhs));
@@ -804,13 +803,13 @@ pub fn expr_to_basic_blocks(
         }
         Expr::Arrow(arrow_expr) => {
             let (flow, varname, _fn_id) =
-                function_to_basic_blocks_tmp(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
+                function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
                     .expect("todo error handling");
             return Ok((flow, varname));
         }
         Expr::Fn(fn_expr) => {
             let (flow, varname, _fn_id) =
-                function_to_basic_blocks_tmp(ctx, FunctionLike::FnExpr(fn_expr), None)
+                function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr), None)
                     .expect("todo error handling");
 
             return Ok((flow, varname));
@@ -883,7 +882,7 @@ pub fn expr_to_basic_blocks(
         Expr::TaggedTpl(_) => todo!(),
         Expr::Class(class) => {
             let class_name = class.ident.as_ref().map(|id| id.sym.to_string());
-            return class_to_basic_blocks_tmp(ctx, class.class.as_ref(), class_name);
+            return class_to_basic_blocks(ctx, class.class.as_ref(), class_name);
         }
         Expr::MetaProp(_) => todo!(),
         Expr::Yield(YieldExpr { arg, delegate, .. }) => {

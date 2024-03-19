@@ -71,7 +71,7 @@ impl FromAstCtx {
         }
     }
 
-    pub fn read_name_tmp(&mut self, name: &str) -> (Vec<StructuredFlow>, usize) {
+    pub fn read_name(&mut self, name: &str) -> (Vec<StructuredFlow>, usize) {
         if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
             self.push_instruction(BasicBlockInstruction::Read(LHS::NonLocal(nonlocal)))
         } else if self.is_unwritten_funscoped(name) {
@@ -135,7 +135,7 @@ impl FromAstCtx {
         });
     }
 
-    pub fn leave_conditional_branch_tmp(&mut self) -> Vec<StructuredFlow> {
+    pub fn leave_conditional_branch(&mut self) -> Vec<StructuredFlow> {
         // phi nodes for conditionally assigned variables
         let to_phi = self
             .conditionals
@@ -172,7 +172,7 @@ impl FromAstCtx {
         out
     }
 
-    pub fn embed_nonlocals_tmp<'b>(
+    pub fn embed_nonlocals<'b>(
         &mut self,
         mut nonlocalinfo: NonLocalInfo,
         parent: Option<&'b NonLocalInfo>,
@@ -373,7 +373,7 @@ mod tests {
         ctx.declare_name("conditional_varname", 456);
         ctx.assign_name("conditional_varname", 789);
 
-        ctx.go_into_function_tmp(BasicBlockEnvironment::Function(false, false), None, |ctx| {
+        ctx.go_into_function(BasicBlockEnvironment::Function(false, false), None, |ctx| {
             ctx.assign_name("conditional_varname", 999);
 
             insta::assert_debug_snapshot!(ctx.conditionals, @"[]");

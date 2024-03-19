@@ -8,7 +8,7 @@ use crate::basic_blocks::{
     StructuredFlow, LHS,
 };
 
-use super::{expr_to_basic_blocks, to_basic_blocks_lhs_tmp, FromAstCtx};
+use super::{expr_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx};
 
 #[derive(Clone, Copy, Debug)]
 pub enum PatType {
@@ -31,26 +31,26 @@ pub fn get_propname_normal_key(propname: &PropName) -> String {
     }
 }
 
-pub fn pat_to_basic_blocks_tmp(
+pub fn pat_to_basic_blocks(
     ctx: &mut FromAstCtx,
     pat_type: PatType,
     pat: &Pat,
     input: usize,
 ) -> Result<(Vec<StructuredFlow>, usize), String> {
     match pat {
-        Pat::Ident(ident) => ident_pat_tmp(ctx, pat_type, &ident.id.sym.to_string(), input),
+        Pat::Ident(ident) => ident_pat(ctx, pat_type, &ident.id.sym.to_string(), input),
         Pat::Assign(assign_pat) => {
             let mut assign_flow = vec![];
 
-            let (flow, input) = default_assign_pat_tmp(ctx, input, &assign_pat.right)?;
+            let (flow, input) = default_assign_pat(ctx, input, &assign_pat.right)?;
             assign_flow.extend(flow);
 
-            let (flow, input) = pat_to_basic_blocks_tmp(ctx, pat_type, &assign_pat.left, input)?;
+            let (flow, input) = pat_to_basic_blocks(ctx, pat_type, &assign_pat.left, input)?;
             assign_flow.extend(flow);
 
             Ok((assign_flow, input))
         }
-        Pat::Expr(expr) => pat_like_expr_to_basic_blocks_tmp(ctx, pat_type, expr, input),
+        Pat::Expr(expr) => pat_like_expr_to_basic_blocks(ctx, pat_type, expr, input),
         Pat::Array(array_pat) => {
             let mut array_pat_flow = vec![];
 
@@ -92,11 +92,11 @@ pub fn pat_to_basic_blocks_tmp(
                 // unpack pattern_unpacker[i]
                 match elem {
                     Some(Pat::Rest(RestPat { arg: elem, .. })) => {
-                        let (flow, _) = pat_to_basic_blocks_tmp(ctx, pat_type, elem, unpacked)?;
+                        let (flow, _) = pat_to_basic_blocks(ctx, pat_type, elem, unpacked)?;
                         array_pat_flow.extend(flow);
                     }
                     Some(elem) => {
-                        let (flow, _) = pat_to_basic_blocks_tmp(ctx, pat_type, elem, unpacked)?;
+                        let (flow, _) = pat_to_basic_blocks(ctx, pat_type, elem, unpacked)?;
                         array_pat_flow.extend(flow);
                     }
                     None => {
@@ -157,8 +157,7 @@ pub fn pat_to_basic_blocks_tmp(
             for (prop, unpacker) in unpackers {
                 match prop {
                     ObjectPatProp::KeyValue(kv) => {
-                        let (flow, _) =
-                            pat_to_basic_blocks_tmp(ctx, pat_type, &kv.value, unpacker)?;
+                        let (flow, _) = pat_to_basic_blocks(ctx, pat_type, &kv.value, unpacker)?;
                         object_pat_flow.extend(flow);
                     }
                     // AST representations of shorthand object keys are always weird.
@@ -175,18 +174,15 @@ pub fn pat_to_basic_blocks_tmp(
                                 left: Box::new(ident),
                                 right: default_value.clone(),
                             });
-                            let (flow, _) =
-                                pat_to_basic_blocks_tmp(ctx, pat_type, &ident, unpacker)?;
+                            let (flow, _) = pat_to_basic_blocks(ctx, pat_type, &ident, unpacker)?;
                             object_pat_flow.extend(flow);
                         } else {
-                            let (flow, _) =
-                                pat_to_basic_blocks_tmp(ctx, pat_type, &ident, unpacker)?;
+                            let (flow, _) = pat_to_basic_blocks(ctx, pat_type, &ident, unpacker)?;
                             object_pat_flow.extend(flow);
                         }
                     }
                     ObjectPatProp::Rest(rest) => {
-                        let (flow, _) =
-                            pat_to_basic_blocks_tmp(ctx, pat_type, &rest.arg, unpacker)?;
+                        let (flow, _) = pat_to_basic_blocks(ctx, pat_type, &rest.arg, unpacker)?;
                         object_pat_flow.extend(flow);
                     }
                 }
@@ -200,20 +196,20 @@ pub fn pat_to_basic_blocks_tmp(
 }
 
 /// Member expressions and identifiers can be treated like patterns
-pub fn pat_like_expr_to_basic_blocks_tmp(
+pub fn pat_like_expr_to_basic_blocks(
     ctx: &mut FromAstCtx,
     pat_type: PatType,
     expr: &Expr,
     input: usize,
 ) -> Result<(Vec<StructuredFlow>, usize), String> {
     match expr {
-        Expr::Ident(ident) => ident_pat_tmp(ctx, pat_type, &ident.sym.to_string(), input),
+        Expr::Ident(ident) => ident_pat(ctx, pat_type, &ident.sym.to_string(), input),
         Expr::SuperProp(SuperPropExpr { .. }) => todo!(),
         Expr::MetaProp(_) => todo!(),
         Expr::Member(MemberExpr { obj, prop, .. }) => {
             let mut ret_flow = Vec::new();
 
-            let (flow, base) = to_basic_blocks_lhs_tmp(ctx, obj.as_ref())?;
+            let (flow, base) = to_basic_blocks_lhs(ctx, obj.as_ref())?;
             ret_flow.extend(flow);
 
             let prop = match &prop {
@@ -241,7 +237,7 @@ pub fn pat_like_expr_to_basic_blocks_tmp(
     }
 }
 
-fn ident_pat_tmp(
+fn ident_pat(
     ctx: &mut FromAstCtx,
     pat_type: PatType,
     name: &str,
@@ -269,7 +265,7 @@ fn ident_pat_tmp(
     }
 }
 
-pub fn convert_object_propname_tmp(
+pub fn convert_object_propname(
     ctx: &mut FromAstCtx,
     propname: &PropName,
 ) -> Result<(Vec<StructuredFlow>, ObjectKey), String> {
@@ -282,7 +278,7 @@ pub fn convert_object_propname_tmp(
     }
 }
 
-fn default_assign_pat_tmp(
+fn default_assign_pat(
     ctx: &mut FromAstCtx,
     input: usize,
     by_default: &Expr,
@@ -308,7 +304,7 @@ fn default_assign_pat_tmp(
         else_flow,
     ));
 
-    let flow = ctx.leave_conditional_branch_tmp();
+    let flow = ctx.leave_conditional_branch();
     assign_flow.extend(flow);
 
     let (flow, phi) =

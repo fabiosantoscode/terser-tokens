@@ -2,7 +2,7 @@ use swc_ecma_ast::{Decl, FnDecl, Stmt};
 
 use crate::basic_blocks::{BasicBlockInstruction, StructuredFlow};
 
-use super::{function_to_basic_blocks_tmp, stat_to_basic_blocks, FromAstCtx, FunctionLike};
+use super::{function_to_basic_blocks, stat_to_basic_blocks, FromAstCtx, FunctionLike};
 
 /// Turn a block into basic blocks, but operates on StructuredFlow
 pub fn block_to_basic_blocks<'a, Stats>(
@@ -30,7 +30,7 @@ where
         let varname = ctx.get_var_index(); // get a name for a future Function() instruction
 
         let (flow, varname, fn_id) =
-            function_to_basic_blocks_tmp(ctx, FunctionLike::FnDecl(fn_decl), Some(varname))?;
+            function_to_basic_blocks(ctx, FunctionLike::FnDecl(fn_decl), Some(varname))?;
 
         assert_eq!(flow.len(), 0);
         out_flow.push(StructuredFlow::Instruction(

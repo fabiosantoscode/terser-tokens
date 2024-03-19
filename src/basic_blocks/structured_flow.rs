@@ -3,7 +3,7 @@ use std::fmt::{Debug, Formatter};
 
 use crate::basic_blocks::{BasicBlockInstruction, ClassProperty, ExitType, FunctionId};
 
-use super::ForInOfKind;
+use super::{BasicBlockEnvironment, Export, ForInOfKind, Import, ModuleSummary};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct BreakableId(pub Option<usize>);
@@ -39,6 +39,19 @@ pub enum StructuredFlow {
     /// (class_var, class_members)
     Class(usize, Vec<StructuredClassMember>),
     Debugger,
+}
+
+pub struct StructuredFunction {
+    pub id: FunctionId,
+    pub blocks: Vec<StructuredFlow>,
+    pub environment: BasicBlockEnvironment,
+}
+
+pub struct StructuredModule {
+    summary: ModuleSummary,
+    exports: Vec<Export>,
+    imports: Vec<Import>,
+    functions: Vec<StructuredFunction>,
 }
 
 /// A "thing" inside a class

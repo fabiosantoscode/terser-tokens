@@ -37,7 +37,7 @@ pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
     let m = parse_expression(source);
 
     let mut ctx = FromAstCtx::new();
-    ctx.go_into_function_tmp(
+    ctx.go_into_function(
         BasicBlockEnvironment::Function(false, false),
         None,
         |ctx: &mut FromAstCtx| {

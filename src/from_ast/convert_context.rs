@@ -143,7 +143,7 @@ impl FromAstCtx {
         module
     }
 
-    pub fn go_into_function_tmp<C>(
+    pub fn go_into_function<C>(
         &mut self,
         environment: BasicBlockEnvironment,
         nonlocalinfo: Option<NonLocalInfo>,
@@ -178,7 +178,7 @@ impl FromAstCtx {
         let mut func_flow = vec![];
 
         if let Some(nonlocalinfo) = nonlocalinfo {
-            let flow = inner_ctx.embed_nonlocals_tmp(nonlocalinfo, self.nonlocalinfo.as_ref());
+            let flow = inner_ctx.embed_nonlocals(nonlocalinfo, self.nonlocalinfo.as_ref());
             func_flow.extend(flow);
         }
 

@@ -1,19 +1,18 @@
 use swc_ecma_ast::{Class, ClassMember, StaticBlock};
 
 use super::{
-    block_to_basic_blocks, convert_object_propname_tmp, expr_to_basic_blocks, FromAstCtx,
-    FunctionLike,
+    block_to_basic_blocks, convert_object_propname, expr_to_basic_blocks, FromAstCtx, FunctionLike,
 };
 use crate::{
     basic_blocks::{
         BasicBlockInstruction, ClassProperty, MethodKind, ObjectKey, ObjectValue,
         StructuredClassMember, StructuredFlow,
     },
-    from_ast::function_to_basic_blocks_tmp,
+    from_ast::function_to_basic_blocks,
 };
 
 /// Convert a class to basic blocks.
-pub fn class_to_basic_blocks_tmp(
+pub fn class_to_basic_blocks(
     ctx: &mut FromAstCtx,
     class: &Class,
     optional_name: Option<String>,
@@ -44,7 +43,7 @@ pub fn class_to_basic_blocks_tmp(
             ClassMember::ClassProp(class_prop) => {
                 let mut prop_flow = vec![];
 
-                let (flow, key) = convert_object_propname_tmp(ctx, &class_prop.key)?;
+                let (flow, key) = convert_object_propname(ctx, &class_prop.key)?;
                 prop_flow.extend(flow);
 
                 let (flow, value) = match &class_prop.value {
@@ -96,11 +95,11 @@ pub fn class_to_basic_blocks_tmp(
             ClassMember::Method(method) => {
                 let mut prop_flow = vec![];
 
-                let (flow, key) = convert_object_propname_tmp(ctx, &method.key)?;
+                let (flow, key) = convert_object_propname(ctx, &method.key)?;
                 prop_flow.extend(flow);
 
                 let (flow, _, fn_id) =
-                    function_to_basic_blocks_tmp(ctx, FunctionLike::ClassMethod(&method), None)?;
+                    function_to_basic_blocks(ctx, FunctionLike::ClassMethod(&method), None)?;
                 assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
 
                 members.push(StructuredClassMember::Property(
@@ -116,7 +115,7 @@ pub fn class_to_basic_blocks_tmp(
                 let key = ObjectKey::Private(method.key.id.sym.to_string());
 
                 let (flow, _fn_varname, fn_id) =
-                    function_to_basic_blocks_tmp(ctx, FunctionLike::PrivateMethod(&method), None)?;
+                    function_to_basic_blocks(ctx, FunctionLike::PrivateMethod(&method), None)?;
                 assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
 
                 members.push(StructuredClassMember::Property(
@@ -129,11 +128,8 @@ pub fn class_to_basic_blocks_tmp(
                 ));
             }
             ClassMember::Constructor(method) => {
-                let (flow, _fn_varname, fn_id) = function_to_basic_blocks_tmp(
-                    ctx,
-                    FunctionLike::ClassConstructor(&method),
-                    None,
-                )?;
+                let (flow, _fn_varname, fn_id) =
+                    function_to_basic_blocks(ctx, FunctionLike::ClassConstructor(&method), None)?;
 
                 assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
 
@@ -156,10 +152,9 @@ pub fn class_to_basic_blocks_tmp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::basic_blocks::BasicBlockGroup;
     use crate::swc_parse::swc_parse;
 
-    fn conv_class(src: &str) -> BasicBlockGroup {
+    fn conv_class(src: &str) -> StructuredFlow {
         let mut ctx = FromAstCtx::new();
         let func = swc_parse(src);
         let decl = func.body[0]
@@ -169,24 +164,20 @@ mod tests {
             .expect_class();
 
         let (cls, _) =
-            class_to_basic_blocks_tmp(&mut ctx, &*decl.class, Some(decl.ident.sym.to_string()))
+            class_to_basic_blocks(&mut ctx, &*decl.class, Some(decl.ident.sym.to_string()))
                 .unwrap();
 
-        return ctx
-            .wrap_up_module(Default::default(), cls)
-            .take_top_level_stats();
+        StructuredFlow::from_vec(cls)
     }
 
     #[test]
     fn conv_class_empty() {
         let func = conv_class("class Foo {}");
         insta::assert_debug_snapshot!(func, @r###"
-        @0: {
+        {
             $0 = class
-            exit = class $0 @1..@1
-        }
-        @1: {
-            exit = class end
+            class $0 {
+            }
         }
         "###);
     }
@@ -203,44 +194,22 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(func, @r###"
-        @0: {
+        {
             $0 = class
-            exit = class $0 @1..@11
-        }
-        @1: {
-            $1 = 1
-        }
-        @2: {
-            exit = class property ClassProperty { is_static: false, key: .prop1, value: $1 }
-        }
-        @3: {
-            $2 = 2
-        }
-        @4: {
-            exit = class property ClassProperty { is_static: true, key: .prop2, value: $2 }
-        }
-        @5: {
-            $3 = "prop3"
-            $4 = 3
-        }
-        @6: {
-            exit = class property ClassProperty { is_static: false, key: [$3], value: $4 }
-        }
-        @7: {
-            $5 = "prop4"
-            $6 = 4
-        }
-        @8: {
-            exit = class property ClassProperty { is_static: true, key: [$5], value: $6 }
-        }
-        @9: {
-            $7 = 5
-        }
-        @10: {
-            exit = class property ClassProperty { is_static: false, key: .123, value: $7 }
-        }
-        @11: {
-            exit = class end
+            class $0 {
+                Property([$1 = 1
+                ], ClassProperty { is_static: false, key: .prop1, value: $1 })
+                Property([$2 = 2
+                ], ClassProperty { is_static: true, key: .prop2, value: $2 })
+                Property([$3 = "prop3"
+                , $4 = 3
+                ], ClassProperty { is_static: false, key: [$3], value: $4 })
+                Property([$5 = "prop4"
+                , $6 = 4
+                ], ClassProperty { is_static: true, key: [$5], value: $6 })
+                Property([$7 = 5
+                ], ClassProperty { is_static: false, key: .123, value: $7 })
+            }
         }
         "###);
     }
@@ -255,18 +224,12 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(func, @r###"
-        @0: {
+        {
             $0 = class
-            exit = class $0 @1..@3
-        }
-        @1: {
-            exit = class static block @2..@3
-        }
-        @2: {
-            $1 = 1
-        }
-        @3: {
-            exit = class end
+            class $0 {
+                StaticBlock([$1 = 1
+                ])
+            }
         }
         "###);
     }
@@ -281,15 +244,11 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(func, @r###"
-        @0: {
+        {
             $0 = class
-            exit = class $0 @1..@2
-        }
-        @1: {
-            exit = class constructor FunctionId(1)
-        }
-        @2: {
-            exit = class end
+            class $0 {
+                Constructor(FunctionId(1))
+            }
         }
         "###);
     }
@@ -303,22 +262,12 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(func, @r###"
-        @0: {
+        {
             $0 = class
-            exit = class $0 @1..@5
-        }
-        @1: {
-        }
-        @2: {
-            exit = class property ClassProperty { is_static: false, key: .prop, value: getter FunctionId(1) }
-        }
-        @3: {
-        }
-        @4: {
-            exit = class property ClassProperty { is_static: false, key: .prop, value: setter FunctionId(2) }
-        }
-        @5: {
-            exit = class end
+            class $0 {
+                Property([], ClassProperty { is_static: false, key: .prop, value: getter FunctionId(1) })
+                Property([], ClassProperty { is_static: false, key: .prop, value: setter FunctionId(2) })
+            }
         }
         "###);
     }

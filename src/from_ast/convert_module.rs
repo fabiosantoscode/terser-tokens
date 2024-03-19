@@ -11,7 +11,7 @@ pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBl
 
     let mut module_flow = vec![];
 
-    let flow = ctx.embed_nonlocals_tmp(find_module_nonlocals(module), None);
+    let flow = ctx.embed_nonlocals(find_module_nonlocals(module), None);
     module_flow.extend(flow);
 
     let top_level_stats: Vec<&Stmt> = module

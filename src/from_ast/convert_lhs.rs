@@ -4,7 +4,7 @@ use crate::basic_blocks::{ObjectKey, StructuredFlow, LHS};
 
 use super::{expr_to_basic_blocks, FromAstCtx};
 
-pub fn to_basic_blocks_lhs_tmp(
+pub fn to_basic_blocks_lhs(
     ctx: &mut FromAstCtx,
     expr: &Expr,
 ) -> Result<(Vec<StructuredFlow>, LHS), String> {
@@ -13,7 +13,7 @@ pub fn to_basic_blocks_lhs_tmp(
         Expr::Member(MemberExpr { obj, prop, .. }) => {
             let mut member_flow = Vec::new();
 
-            let (flow, obj) = to_basic_blocks_lhs_tmp(ctx, &obj)?;
+            let (flow, obj) = to_basic_blocks_lhs(ctx, &obj)?;
             member_flow.extend(flow);
 
             let prop = match prop {

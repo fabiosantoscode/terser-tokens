@@ -1,8 +1,8 @@
 use swc_ecma_ast::{ArrowExpr, ClassMethod, FnDecl, FnExpr, MethodProp, Pat, PrivateMethod};
 
 use super::{
-    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks_tmp,
-    FromAstCtx, FuncBlockOrRetExpr, FunctionLike, PatType,
+    block_to_basic_blocks, expr_to_basic_blocks, find_nonlocals, pat_to_basic_blocks, FromAstCtx,
+    FuncBlockOrRetExpr, FunctionLike, PatType,
 };
 use crate::basic_blocks::{
     BasicBlockEnvironment, BasicBlockInstruction, ExitType, FunctionId, NonLocalId, StructuredFlow,
@@ -10,7 +10,7 @@ use crate::basic_blocks::{
 };
 
 /// Convert a function to basic blocks. Function declarations are special because since they're hoisted, we don't create a variable for them. Instead, the caller provides it.
-pub fn function_to_basic_blocks_tmp<'a, 'decl>(
+pub fn function_to_basic_blocks<'a, 'decl>(
     ctx: &'a mut FromAstCtx,
     function: FunctionLike,
     mut fn_decl_varname: Option<usize>,
@@ -96,7 +96,7 @@ pub fn function_to_basic_blocks_tmp<'a, 'decl>(
         }
     };
 
-    ctx.go_into_function_tmp(env, Some(find_nonlocals(function.clone())), |ctx| {
+    ctx.go_into_function(env, Some(find_nonlocals(function.clone())), |ctx| {
         let mut func_body = vec![];
 
         function.get_params().into_iter().enumerate().try_for_each(
@@ -107,14 +107,14 @@ pub fn function_to_basic_blocks_tmp<'a, 'decl>(
                             ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
                         func_body.extend(flow);
                         let (flow, _) =
-                            pat_to_basic_blocks_tmp(ctx, PatType::FunArg, &rest_pat.arg, arg)?;
+                            pat_to_basic_blocks(ctx, PatType::FunArg, &rest_pat.arg, arg)?;
                         func_body.extend(flow);
                     }
                     _ => {
                         let (flow, arg) =
                             ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
                         func_body.extend(flow);
-                        let (flow, _) = pat_to_basic_blocks_tmp(ctx, PatType::FunArg, pat, arg)?;
+                        let (flow, _) = pat_to_basic_blocks(ctx, PatType::FunArg, pat, arg)?;
                         func_body.extend(flow);
                     }
                 };
@@ -173,7 +173,7 @@ mod tests {
         let fn_decl_varname = Some(ctx.get_var_index());
 
         let (_flow, _, _) =
-            function_to_basic_blocks_tmp(&mut ctx, FunctionLike::FnDecl(&decl), fn_decl_varname)
+            function_to_basic_blocks(&mut ctx, FunctionLike::FnDecl(&decl), fn_decl_varname)
                 .unwrap();
 
         ctx.functions.into_iter().collect()
