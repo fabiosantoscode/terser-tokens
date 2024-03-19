@@ -33,10 +33,10 @@ where
             function_to_basic_blocks_tmp(ctx, FunctionLike::FnDecl(fn_decl), Some(varname))?;
 
         assert_eq!(flow.len(), 0);
-        out_flow.push(StructuredFlow::BasicBlock(vec![(
+        out_flow.push(StructuredFlow::Instruction(
             varname,
             BasicBlockInstruction::Function(fn_id),
-        )]));
+        ));
         let (flow, _) = ctx.declare_name(&fn_decl.ident.sym.to_string(), varname);
         out_flow.extend(flow);
     }

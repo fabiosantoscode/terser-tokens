@@ -76,16 +76,13 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
                 to_stat_vec(ctx, stats)
             }
         }
-        StructuredFlow::BasicBlock(ins) => ins
-            .iter()
-            .flat_map(|(varname, ins)| match ins {
-                BasicBlockInstruction::CreateClass(extends) => {
-                    class_to_ast_prepare(ctx, *varname, extends.clone());
-                    vec![]
-                }
-                _ => instruction_to_statement(ctx, *varname, ins),
-            })
-            .collect(),
+        StructuredFlow::Instruction(varname, ins) => match ins {
+            BasicBlockInstruction::CreateClass(extends) => {
+                class_to_ast_prepare(ctx, *varname, extends.clone());
+                vec![]
+            }
+            _ => instruction_to_statement(ctx, *varname, ins),
+        },
         StructuredFlow::Return(ExitType::Return, var_idx) => {
             let return_stmt = Stmt::Return(ReturnStmt {
                 span: Default::default(),

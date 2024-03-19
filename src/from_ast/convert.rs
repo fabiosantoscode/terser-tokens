@@ -1953,7 +1953,7 @@ mod tests {
         insta::assert_debug_snapshot!(s, @r###"
         @0: {
             $0 = 10
-            exit = try @1 catch @6 finally @14..@14
+            exit = try @1 catch @5 finally @12..@12
         }
         @1: {
             $1 = $0
@@ -1968,39 +1968,35 @@ mod tests {
         @3: {
         }
         @4: {
+            exit = catch @5..@12
         }
         @5: {
-            exit = catch @6..@14
+            $5 = caught_error()
+            exit = try @6 catch @8 finally @10..@10
         }
         @6: {
-            $5 = caught_error()
-            exit = try @7 catch @9 finally @11..@11
-        }
-        @7: {
             $6 = 456
             exit = return $6
         }
-        @8: {
-            exit = catch @9..@11
+        @7: {
+            exit = catch @8..@10
         }
-        @9: {
+        @8: {
             $7 = caught_error()
             $8 = 789
             exit = return $8
         }
+        @9: {
+            exit = finally @10..@10
+        }
         @10: {
-            exit = finally @11..@11
         }
         @11: {
+            exit = finally @12..@12
         }
         @12: {
         }
         @13: {
-            exit = finally @14..@14
-        }
-        @14: {
-        }
-        @15: {
             $9 = $0
             exit = return $9
         }

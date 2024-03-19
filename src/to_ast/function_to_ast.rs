@@ -75,7 +75,10 @@ fn take_param_readers(ctx: &mut ToAstContext, func: &mut StructuredFlow) -> Vec<
     }
 
     if let Some((last_idx, _)) = params.last_key_value() {
+        println!("func: {:?}", func);
+        println!("vars_to_remove: {:?}", vars_to_remove);
         func.retain_instructions(&mut |(varname, _ins)| !vars_to_remove.contains(&varname));
+        println!("func: {:?}", func);
 
         (0..=*last_idx)
             .map(|param_idx| {

@@ -49,7 +49,7 @@ impl FromAstCtx {
     ) -> (Vec<StructuredFlow>, usize) {
         let id = self.var_index;
         self.var_index += 1;
-        let flow = StructuredFlow::BasicBlock(vec![(id, node)]);
+        let flow = StructuredFlow::Instruction(id, node);
 
         (vec![flow], id)
     }

@@ -25,7 +25,7 @@ pub fn normalize_basic_blocks_tree_at_block_index(
 ) -> BTreeMap<usize, BasicBlock> {
     let mut ctx = FoldBlocksCtx::default();
     ctx.next_block_index = idx;
-    fold_blocks_1(&mut ctx, recursive);
+    fold_blocks(&mut ctx, recursive);
 
     assert_eq!(ctx.jump_targets.len(), 0);
 
@@ -40,15 +40,12 @@ pub fn normalize_basic_blocks_tree_at_block_index(
 
 fn fold_basic_blocks(
     inp: Vec<StructuredFlow>,
-) -> Vec<(
-    Vec<Vec<(usize, BasicBlockInstruction)>>,
-    Option<StructuredFlow>,
-)> {
+) -> Vec<(Vec<(usize, BasicBlockInstruction)>, Option<StructuredFlow>)> {
     let mut out = vec![];
     let mut leftover_instructions = Vec::with_capacity(inp.len());
     for item in inp {
         match item {
-            StructuredFlow::BasicBlock(instructions) => leftover_instructions.push(instructions),
+            StructuredFlow::Instruction(varname, ins) => leftover_instructions.push((varname, ins)),
             item if item.is_structured_flow_empty() => {}
             _ => {
                 if leftover_instructions.len() > 0 {
@@ -171,11 +168,11 @@ fn prepare_jump_from(ctx: &mut FoldBlocksCtx, index: usize) -> usize {
     }
 }
 
-fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize {
+fn fold_blocks(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize {
     let len_before = ctx.next_block();
 
     for (preceding_bbs, item) in fold_basic_blocks(as_tree) {
-        let instructions = preceding_bbs.into_iter().flatten().collect::<Vec<_>>();
+        let instructions = preceding_bbs;
 
         let item = match item {
             Some(item) => item,
@@ -190,8 +187,8 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
         };
 
         match item {
-            // THE HUMBLE BASIC BLOCK
-            StructuredFlow::BasicBlock(_) => {
+            // THE HUMBLE INSTRUCTION
+            StructuredFlow::Instruction(..) => {
                 unreachable!("handled above")
             }
             // EXITS
@@ -232,7 +229,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                         exit: BasicBlockExit::Fallthrough,
                     });
                 }
-                fold_blocks_1(ctx, blocks_within);
+                fold_blocks(ctx, blocks_within);
 
                 pop_label(ctx, brk);
             }
@@ -245,8 +242,8 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                 });
                 let cond = ctx.block_index();
 
-                let cons = fold_blocks_1(ctx, cons);
-                let alt = fold_blocks_1(ctx, alt);
+                let cons = fold_blocks(ctx, cons);
+                let alt = fold_blocks(ctx, alt);
 
                 ctx.set_exit(
                     cond,
@@ -272,7 +269,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                                 exit: BasicBlockExit::SwitchCaseExpression(MAX, MAX),
                             });
                             let case_expr_start = ctx.block_index();
-                            let case_expr_end = fold_blocks_1(ctx, insx);
+                            let case_expr_end = fold_blocks(ctx, insx);
 
                             ctx.push_block(BasicBlock {
                                 instructions: vec![],
@@ -280,7 +277,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                             });
                             let case_start = ctx.block_index();
 
-                            let case_end = fold_blocks_1(ctx, case.body);
+                            let case_end = fold_blocks(ctx, case.body);
 
                             ctx.set_exit(
                                 case_expr_start,
@@ -301,7 +298,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                             });
                             let case_start = ctx.block_index();
 
-                            let case_end = fold_blocks_1(ctx, case.body);
+                            let case_end = fold_blocks(ctx, case.body);
 
                             ctx.set_exit(
                                 case_start,
@@ -332,7 +329,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                     exit: BasicBlockExit::Loop(MAX, MAX),
                 });
                 let head = ctx.block_index();
-                let body = fold_blocks_1(ctx, body);
+                let body = fold_blocks(ctx, body);
 
                 ctx.set_exit(head, BasicBlockExit::Loop(head + 1, body));
 
@@ -346,7 +343,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                     exit: BasicBlockExit::ForInOfLoop(looped_var, loop_kind, MAX, MAX),
                 });
                 let head = ctx.block_index();
-                let body = fold_blocks_1(ctx, body);
+                let body = fold_blocks(ctx, body);
 
                 ctx.set_exit(
                     head,
@@ -364,13 +361,13 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                 });
                 let head = ctx.block_index();
 
-                let end_body = fold_blocks_1(ctx, body);
+                let end_body = fold_blocks(ctx, body);
                 let end_body = prepare_jump_from(ctx, end_body);
 
-                let end_catch = fold_blocks_1(ctx, catch);
+                let end_catch = fold_blocks(ctx, catch);
                 let end_catch = prepare_jump_from(ctx, end_catch);
 
-                let end_finally = fold_blocks_1(ctx, finally);
+                let end_finally = fold_blocks(ctx, finally);
 
                 ctx.set_exit(
                     head,
@@ -403,7 +400,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
                 for member in members.into_iter() {
                     match member {
                         StructuredClassMember::Property(block, prop) => {
-                            fold_blocks_1(ctx, block);
+                            fold_blocks(ctx, block);
 
                             ctx.push_block(BasicBlock {
                                 instructions: vec![],
@@ -424,7 +421,7 @@ fn fold_blocks_1(ctx: &mut FoldBlocksCtx, as_tree: Vec<StructuredFlow>) -> usize
 
                             let sb_start = ctx.block_index();
 
-                            let sb_end = fold_blocks_1(ctx, block);
+                            let sb_end = fold_blocks(ctx, block);
 
                             ctx.set_exit(
                                 sb_start,

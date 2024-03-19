@@ -102,9 +102,10 @@ fn do_tree_chunk(
         Some((blk_id, block)) => {
             let mut rest = blk_id + 1;
 
-            let mut blocks = vec![StructuredFlow::BasicBlock(std::mem::take(
-                &mut block.instructions,
-            ))];
+            let mut blocks = std::mem::take(&mut block.instructions)
+                .into_iter()
+                .map(|(varname, value)| StructuredFlow::Instruction(varname, value))
+                .collect::<Vec<_>>();
 
             match block.exit {
                 BasicBlockExit::Fallthrough => {}
@@ -518,7 +519,6 @@ mod tests {
                     $2 = 456
                     Continue (@2)
                 } else {
-                
                     Break (@2)
                 }
             }
@@ -594,27 +594,20 @@ mod tests {
 
         insta::assert_debug_snapshot!(block_group_to_structured_flow(func.blocks), @r###"
         {
-
             loop (@2) {
                 $0 = 123
                 if ($0) {
-                
                     loop (@4) {
                         $1 = 456
                         if ($1) {
-                        
                             Break (@2)
-                        
                             Continue (@4)
                         } else {
-                        
                             Break (@4)
                         }
                     }
-                
                     Continue (@2)
                 } else {
-                
                     Break (@2)
                 }
             }
@@ -829,14 +822,12 @@ mod tests {
             if ($0) {
                 $1 = 345
             } else {
-            
             }
             $2 = 10
             $3 = 1
             if ($3) {
                 $4 = 2
             } else {
-            
             }
             $5 = undefined
             Return $5
@@ -885,14 +876,12 @@ mod tests {
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         {
-
             try (@2) {
                 $0 = 777
             } catch {
                 $1 = caught_error()
                 $2 = 888
             } finally {
-            
             }
             $3 = 999
             $4 = undefined
@@ -943,7 +932,6 @@ mod tests {
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         {
-
             try (@2) {
                 $0 = 777
             } catch {
@@ -1011,19 +999,14 @@ mod tests {
         let stats = block_group_to_structured_flow(func.blocks);
         insta::assert_debug_snapshot!(stats, @r###"
         {
-
             try (@2) {
                 $0 = 111
                 if ($0) {
                     $1 = 222
                 } else {
-                
                 }
-            
             } catch {
-            
             } finally {
-            
             }
             $2 = 111
             $3 = undefined

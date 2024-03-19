@@ -35,7 +35,7 @@ pub enum StructuredFlow {
     Break(BreakableId),
     Continue(BreakableId),
     Return(ExitType, usize),
-    BasicBlock(Vec<(usize, BasicBlockInstruction)>),
+    Instruction(usize, BasicBlockInstruction),
     /// (class_var, class_members)
     Class(usize, Vec<StructuredClassMember>),
     Debugger,
@@ -75,7 +75,7 @@ impl StructuredFlow {
             StructuredFlow::ForInOfLoop(_, _, _, _) => "ForInOfLoop".to_string(),
             StructuredFlow::Block(_, _) => "Block".to_string(),
             StructuredFlow::Return(_, _) => "Return".to_string(),
-            StructuredFlow::BasicBlock(_) => "BasicBlockRef".to_string(),
+            StructuredFlow::Instruction(_, _) => "Instruction".to_string(),
             StructuredFlow::TryCatch(_, _, _, _) => "TryCatch".to_string(),
             StructuredFlow::Class(_, _) => "Class".to_string(),
             StructuredFlow::Debugger => "Debugger".to_string(),
@@ -94,6 +94,23 @@ impl StructuredFlow {
         flat
     }
     pub fn simplify_vec(items: Vec<StructuredFlow>) -> Vec<StructuredFlow> {
+        let break_targets = items
+            .iter()
+            .flat_map(|item| item.get_all_break_targets())
+            .collect();
+
+        Self::flatten_vec(
+            items
+                .into_iter()
+                .map(|item| {
+                    let mut item = item.flatten();
+                    item.remove_unused_break_ids(&break_targets);
+                    item
+                })
+                .collect(),
+        )
+    }
+    pub fn flatten_vec(items: Vec<StructuredFlow>) -> Vec<StructuredFlow> {
         use StructuredFlow::*;
 
         items
@@ -107,9 +124,6 @@ impl StructuredFlow {
                 match (prev, item) {
                     (Some(Block(BreakableId(None), prev)), Block(BreakableId(None), items)) => {
                         prev.extend(items.into_iter());
-                    }
-                    (Some(BasicBlock(prev)), BasicBlock(instructions)) => {
-                        prev.extend(instructions.into_iter());
                     }
                     (_, item) => {
                         acc.push(item);
@@ -185,7 +199,7 @@ impl StructuredFlow {
             StructuredFlow::ForInOfLoop(_, _, _, body) => vec![body.iter().collect()],
             StructuredFlow::Block(_, body) => vec![body.iter().collect()],
             StructuredFlow::Return(_, _) => vec![],
-            StructuredFlow::BasicBlock(_) => vec![],
+            StructuredFlow::Instruction(_, _) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
                 vec![t.iter().collect(), v.iter().collect(), fin.iter().collect()]
             }
@@ -204,53 +218,43 @@ impl StructuredFlow {
         }
     }
 
-    pub fn children_mut(&mut self) -> Vec<Vec<&mut StructuredFlow>> {
+    pub fn children_mut(&mut self) -> Vec<&mut Vec<StructuredFlow>> {
         match self {
             StructuredFlow::Cond(_id, _x /* who cares */, y, z) => {
-                vec![y.iter_mut().collect(), z.iter_mut().collect()]
+                vec![y, z]
             }
-            StructuredFlow::Switch(_id, _var, cases) => {
-                vec![cases
-                    .iter_mut()
-                    .flat_map(|case| match &mut case.condition {
-                        Some((insx, _var)) => vec![insx, &mut case.body],
-                        None => vec![&mut case.body],
-                    })
-                    .flatten()
-                    .collect()]
-            }
+            StructuredFlow::Switch(_id, _var, cases) => cases
+                .iter_mut()
+                .flat_map(|case| match &mut case.condition {
+                    Some((insx, _var)) => vec![insx, &mut case.body],
+                    None => vec![&mut case.body],
+                })
+                .collect(),
             StructuredFlow::Break(_) => vec![],
             StructuredFlow::Continue(_) => vec![],
-            StructuredFlow::Loop(_, body) => vec![body.iter_mut().collect()],
-            StructuredFlow::ForInOfLoop(_, _, _, body) => vec![body.iter_mut().collect()],
-            StructuredFlow::Block(_, body) => vec![body.iter_mut().collect()],
+            StructuredFlow::Loop(_, body) => vec![body],
+            StructuredFlow::ForInOfLoop(_, _, _, body) => vec![body],
+            StructuredFlow::Block(_, body) => vec![body],
             StructuredFlow::Return(_, _) => vec![],
-            StructuredFlow::BasicBlock(_) => vec![],
+            StructuredFlow::Instruction(_, _) => vec![],
             StructuredFlow::TryCatch(_, t, v, fin) => {
-                vec![
-                    t.iter_mut().collect(),
-                    v.iter_mut().collect(),
-                    fin.iter_mut().collect(),
-                ]
+                vec![t, v, fin]
             }
-            StructuredFlow::Class(_, items) => {
-                vec![items
-                    .iter_mut()
-                    .flat_map(|item| match item {
-                        StructuredClassMember::StaticBlock(items) => Some(items.iter_mut()),
-                        StructuredClassMember::Property(children, _) => Some(children.iter_mut()),
-                        StructuredClassMember::Constructor(_) => None,
-                    })
-                    .flatten()
-                    .collect()]
-            }
+            StructuredFlow::Class(_, items) => items
+                .iter_mut()
+                .flat_map(|item| match item {
+                    StructuredClassMember::StaticBlock(items) => Some(items),
+                    StructuredClassMember::Property(children, _) => Some(children),
+                    StructuredClassMember::Constructor(_) => None,
+                })
+                .collect(),
             StructuredFlow::Debugger => vec![],
         }
     }
 
     pub fn count_instructions(&self) -> usize {
         match self {
-            StructuredFlow::BasicBlock(block) => block.len(),
+            StructuredFlow::Instruction(_, _) => 1,
             _ => self
                 .children()
                 .into_iter()
@@ -265,14 +269,20 @@ impl StructuredFlow {
         DoRetain: FnMut((usize, &BasicBlockInstruction)) -> bool,
     {
         match self {
-            StructuredFlow::BasicBlock(block) => {
-                block.retain(|(varname, ins)| do_retain((*varname, ins)));
+            StructuredFlow::Instruction(varname, ins) => {
+                if !do_retain((*varname, ins)) {
+                    *self = Default::default();
+                }
             }
             _ => {
                 for children in self.children_mut().iter_mut() {
-                    for child in children.iter_mut() {
-                        child.retain_instructions(do_retain);
-                    }
+                    children.retain_mut(|child| match child {
+                        StructuredFlow::Instruction(varname, ins) => do_retain((*varname, ins)),
+                        _ => {
+                            child.retain_instructions(do_retain);
+                            true
+                        }
+                    })
                 }
             }
         }
@@ -342,7 +352,7 @@ impl StructuredFlow {
             StructuredFlow::ForInOfLoop(_, loop_var, _, _) => vec![*loop_var],
             StructuredFlow::Block(_, _) => vec![],
             StructuredFlow::Return(_, ret_val) => vec![*ret_val],
-            StructuredFlow::BasicBlock(_) => vec![],
+            StructuredFlow::Instruction(_, _) => vec![],
             StructuredFlow::TryCatch(_, _, _, _) => vec![],
             StructuredFlow::Class(class_var, members) => {
                 let mut vars = vec![*class_var];
@@ -460,11 +470,9 @@ impl Debug for StructuredFlow {
             StructuredFlow::Return(exit, ret) => {
                 writeln!(f, "{:?} ${}", exit, ret)
             }
-            StructuredFlow::BasicBlock(instructions) => {
+            StructuredFlow::Instruction(var, ins) => {
                 let mut buf = String::new();
-                for (var, ins) in instructions {
-                    buf.push_str(&format!("${} = {:?}\n", var, ins));
-                }
+                buf.push_str(&format!("${} = {:?}\n", var, ins));
                 write!(f, "{}", &buf)
             }
             StructuredFlow::Debugger => writeln!(f, "Debugger"),
@@ -487,7 +495,7 @@ impl StructuredFlow {
             StructuredFlow::Loop(_, body) => Self::_all(body),
             StructuredFlow::Cond(_, _, cons, alt) => Self::_all(cons) && Self::_all(alt),
             StructuredFlow::TryCatch(_, body, _, fin) => Self::_all(body) && Self::_all(fin),
-            StructuredFlow::BasicBlock(instructions) => instructions.len() == 0,
+            StructuredFlow::Instruction(..) => false,
             _ => false,
         }
     }
@@ -546,9 +554,10 @@ mod tests {
         8: $5 = 9
 
         9: $6 = either($4, $5)
-        $7 = undefined
 
-        10: Return $7
+        10: $7 = undefined
+
+        11: Return $7
         "###);
     }
 }

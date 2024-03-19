@@ -48,9 +48,9 @@ pub fn parse_structured_flow(input: &str) -> StructuredFlow {
     }
 
     fn parse_instructions(input: &str) -> IResult<&str, StructuredFlow> {
-        let (input, instructions) = many1(parse_single_instruction)(input)?;
+        let (input, (varname, ins)) = parse_single_instruction(input)?;
 
-        Ok((input, StructuredFlow::BasicBlock(instructions)))
+        Ok((input, StructuredFlow::Instruction(varname, ins)))
     }
 
     fn parse_cond(input: &str) -> IResult<&str, StructuredFlow> {

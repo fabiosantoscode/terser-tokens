@@ -66,9 +66,9 @@ mod tests {
             }",
         ]);
 
-        let (mut ctx, mut root) = ToAstContext::new(&mut block_module);
+        let (mut ctx, root) = ToAstContext::new(&mut block_module);
 
-        let child = std::mem::take(root.children_mut()[0][0]);
+        let child = root.children()[0][0].clone();
 
         let expr = statements_forced_to_expr_ast(&mut ctx, vec![child].as_slice(), 2);
 
@@ -86,19 +86,26 @@ mod tests {
             }
             @1: {
                 $3 = $2
-                exit = return $2
             }",
         ]);
 
-        let (mut ctx, mut root) = ToAstContext::new(&mut block_module);
+        let (mut ctx, root) = ToAstContext::new(&mut block_module);
 
-        let child = std::mem::take(root.children_mut()[0][0]);
+        let child = root.children()[0]
+            .iter()
+            .cloned()
+            .cloned()
+            .collect::<Vec<_>>();
 
-        let expr = statements_forced_to_expr_ast(&mut ctx, vec![child].as_slice(), 2);
-
+        let expr = statements_forced_to_expr_ast(&mut ctx, &child[..], 2);
         insta::assert_display_snapshot!(expr_to_string(&expr), @r###"
-            (a = 1 + 3, a);
+        (()=>{
+            a = 1 + 3;
+            throw a;
+            return a;
+        })();
         "###);
+
         // $2 is reused
         insta::assert_debug_snapshot!(ctx.dequeue_enqueued_vars(), @"
             {
@@ -131,22 +138,23 @@ mod tests {
         let (mut ctx, mut root) = ToAstContext::new(&mut block_module);
 
         let children = vec![
-            std::mem::take(root.children_mut()[0][0]),
-            std::mem::take(root.children_mut()[0][1]),
-            std::mem::take(root.children_mut()[0][2]),
+            root.children()[0].clone()[0].clone(),
+            root.children()[0].clone()[1].clone(),
+            root.children()[0].clone()[2].clone(),
         ];
 
         let expr = statements_forced_to_expr_ast(&mut ctx, children.as_slice(), 1);
 
         insta::assert_display_snapshot!(expr_to_string(&expr), @r###"
-            (()=>{
-                if (1) {
-                    a = 3;
-                } else {
-                    a = 4;
-                }
-                return a;
-            })();
+        (()=>{
+            if (1) {
+                a = 3;
+            } else {
+                a = 4;
+            }
+            return a;
+            return a;
+        })();
         "###);
         // $1 is NOT reused but we enqueue it for now
         insta::assert_debug_snapshot!(ctx.dequeue_enqueued_vars(), @r###"

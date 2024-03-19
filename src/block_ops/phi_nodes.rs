@@ -72,15 +72,14 @@ impl PhiGenerationCtx {
     fn insert_phi_nodes(
         &mut self,
         phi_instructions: Vec<(usize, BasicBlockInstruction)>,
-    ) -> Option<StructuredFlow> {
-        if phi_instructions.len() > 0 {
-            Some(StructuredFlow::BasicBlock(phi_instructions))
-        } else {
-            None
-        }
+    ) -> Vec<StructuredFlow> {
+        phi_instructions
+            .into_iter()
+            .map(|(name, phi)| StructuredFlow::Instruction(name, phi))
+            .collect()
     }
 
-    fn leave_conditional(&mut self) -> Option<StructuredFlow> {
+    fn leave_conditional(&mut self) -> Vec<StructuredFlow> {
         let to_phi = self
             .conditionals
             .pop()
@@ -110,18 +109,15 @@ fn generate_phi_nodes_inner(
 
     for item in as_recursive {
         match item {
-            StructuredFlow::BasicBlock(mut instructions) => {
-                for (varname, ins) in instructions.iter_mut() {
-                    for used_var in ins.used_vars_mut() {
-                        *used_var = ctx.read_name(*used_var);
-                    }
-
-                    let new_varname = ctx.make_name(*varname);
-                    ctx.write_name(*varname, new_varname);
-                    *varname = new_varname;
+            StructuredFlow::Instruction(varname, mut ins) => {
+                for used_var in ins.used_vars_mut() {
+                    *used_var = ctx.read_name(*used_var);
                 }
 
-                out_recursive.push(StructuredFlow::BasicBlock(instructions));
+                let new_varname = ctx.make_name(varname);
+                ctx.write_name(varname, new_varname);
+
+                out_recursive.push(StructuredFlow::Instruction(new_varname, ins));
             }
             StructuredFlow::Block(brk, contents) => {
                 out_recursive.push(StructuredFlow::Block(
@@ -174,7 +170,7 @@ fn generate_phi_nodes_inner(
                 let (phi_block, contents) = generate_phi_nodes_loops(ctx, contents);
 
                 out_recursive.push(StructuredFlow::Loop(brk, contents));
-                out_recursive.extend(phi_block.into_iter());
+                out_recursive.extend(phi_block);
             }
             StructuredFlow::ForInOfLoop(brk, looped_var, kind, contents) => {
                 // ForInOf will perform a read at the start
@@ -183,7 +179,7 @@ fn generate_phi_nodes_inner(
                 let (phi_block, contents) = generate_phi_nodes_loops(ctx, contents);
 
                 out_recursive.push(StructuredFlow::ForInOfLoop(brk, looped_var, kind, contents));
-                out_recursive.extend(phi_block.into_iter());
+                out_recursive.extend(phi_block);
             }
             StructuredFlow::TryCatch(brk, body, catch, fin) => {
                 let body = generate_phi_nodes_inner(ctx, body);
@@ -235,7 +231,7 @@ fn generate_phi_nodes_inner(
 fn generate_phi_nodes_loops(
     ctx: &mut PhiGenerationCtx,
     mut contents: Vec<StructuredFlow>,
-) -> (Option<StructuredFlow>, Vec<StructuredFlow>) {
+) -> (Vec<StructuredFlow>, Vec<StructuredFlow>) {
     // We may re-use variables coming back to the top of the loop
     ctx.enter_conditional();
     let vars_used_and_defined_in_loop = get_loop_reentry_vars(&mut contents);
@@ -268,28 +264,24 @@ fn generate_phi_nodes_loops(
 fn get_loop_reentry_vars(contents: &Vec<StructuredFlow>) -> BTreeSet<usize> {
     let mut vars_defined_in_loop = BTreeSet::new();
     for block in contents.iter().flat_map(|child| child.nested_iter()) {
-        if let StructuredFlow::BasicBlock(ins) = block {
-            for (varname, _ins) in ins.iter() {
-                // This will be a re-entry var if we also see it defined in the loop
-                vars_defined_in_loop.insert(*varname);
-            }
+        if let StructuredFlow::Instruction(varname, _ins) = block {
+            // This will be a re-entry var if we also see it defined in the loop
+            vars_defined_in_loop.insert(*varname);
         }
     }
 
     let mut loop_vars_used_in_loop = BTreeSet::new();
     for block in contents.iter().flat_map(|child| child.nested_iter()) {
         let mut seen_defs = BTreeSet::new();
-        if let StructuredFlow::BasicBlock(ins) = block {
-            for (varname, ins) in ins.iter() {
-                // Push this into phi unconditionally
-                for used_var in ins.used_vars() {
-                    if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
-                        loop_vars_used_in_loop.insert(used_var);
-                    }
+        if let StructuredFlow::Instruction(varname, ins) = block {
+            // Push this into phi unconditionally
+            for used_var in ins.used_vars() {
+                if vars_defined_in_loop.contains(&used_var) && !seen_defs.contains(&used_var) {
+                    loop_vars_used_in_loop.insert(used_var);
                 }
-
-                seen_defs.insert(*varname);
             }
+
+            seen_defs.insert(*varname);
         }
 
         for used_var in block.used_vars() {

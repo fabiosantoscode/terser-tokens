@@ -82,20 +82,13 @@ impl StructuredFlow {
         StructuredFlowIter { stack: vec![self] }
     }
 
-    pub fn iter_all_blocks<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = &'a Vec<(usize, BasicBlockInstruction)>> {
-        self.nested_iter().flat_map(|flow| match flow {
-            StructuredFlow::BasicBlock(block) => Some(block),
-            _ => None,
-        })
-    }
-
     pub fn iter_all_instructions<'a>(
         &'a self,
     ) -> impl Iterator<Item = (usize, &'a BasicBlockInstruction)> {
-        self.iter_all_blocks()
-            .flat_map(|block| block.iter().map(|(varname, ins)| (*varname, ins)))
+        self.nested_iter().flat_map(|block| match block {
+            StructuredFlow::Instruction(varname, ins) => Some((*varname, ins)),
+            _ => None,
+        })
     }
 }
 

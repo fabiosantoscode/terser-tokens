@@ -160,10 +160,10 @@ impl FromAstCtx {
 
             let phi_idx = self.get_var_index();
 
-            out.push(StructuredFlow::BasicBlock(vec![(
+            out.push(StructuredFlow::Instruction(
                 phi_idx,
                 BasicBlockInstruction::Phi(phies),
-            )]));
+            ));
 
             self.scope_tree
                 .insert(varname, NonLocalOrLocal::Local(phi_idx));
