@@ -287,7 +287,7 @@ fn stat_to_basic_blocks_inner(
         }
         Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
-        Stmt::Debugger(_) => StructuredFlow::Debugger,
+        Stmt::Debugger(_) => Ok(vec![StructuredFlow::Debugger]),
         Stmt::With(_) => todo!(),
         Stmt::Switch(switch) => {
             let (before_switch, switch_exp) = expr_to_basic_blocks(ctx, &switch.discriminant)?;
@@ -370,16 +370,12 @@ fn stat_to_basic_blocks_inner(
                 finally_flow,
             )]);
         }
-        Stmt::Empty(_) => {
-            return Ok(vec![]);
-        }
+        Stmt::Empty(_) => Ok(vec![]),
         Stmt::Decl(Decl::Using(_)) => unreachable!("using decl"),
         Stmt::Decl(
             Decl::TsInterface(_) | Decl::TsTypeAlias(_) | Decl::TsEnum(_) | Decl::TsModule(_),
         ) => unreachable!("typescript features"),
-    };
-
-    Ok(todo!("not all return paths are implemented"))
+    }
 }
 
 fn var_decl_to_basic_blocks(
@@ -416,7 +412,7 @@ pub fn expr_to_basic_blocks(
                 Lit::Regex(_) => todo!(),
                 Lit::JSXText(_) => todo!(),
             };
-            return Ok(ctx.push_instruction(lit));
+            Ok(ctx.push_instruction(lit))
         }
         Expr::Bin(bin) => {
             let mut bin_flow = vec![];
@@ -470,7 +466,7 @@ pub fn expr_to_basic_blocks(
                     let (flow, phi) = ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
                     bin_flow.extend(flow);
 
-                    return Ok((bin_flow, phi));
+                    Ok((bin_flow, phi))
                 }
                 BinaryOp::In | BinaryOp::InstanceOf => todo!("in/instanceof"),
                 _ => {
@@ -481,7 +477,7 @@ pub fn expr_to_basic_blocks(
                         ctx.push_instruction(BasicBlockInstruction::BinOp(bin.op.clone(), l, r));
                     bin_flow.extend(flow);
 
-                    return Ok((bin_flow, op));
+                    Ok((bin_flow, op))
                 }
             }
         }
@@ -495,11 +491,11 @@ pub fn expr_to_basic_blocks(
                 let (flow, ret) = pat_to_basic_blocks(ctx, PatType::Assign, pat, init)?;
                 ret_flow.extend(flow);
 
-                return Ok((ret_flow, ret));
+                Ok((ret_flow, ret))
             }
             _ => todo!(),
         },
-        Expr::Paren(paren) => return expr_to_basic_blocks(ctx, &paren.expr),
+        Expr::Paren(paren) => expr_to_basic_blocks(ctx, &paren.expr),
         Expr::Seq(seq) => {
             let mut seq_flow = vec![];
 
@@ -511,7 +507,7 @@ pub fn expr_to_basic_blocks(
                 last = Some(exp);
             }
 
-            return Ok((seq_flow, last.expect("Seq must have 1+ exprs")));
+            Ok((seq_flow, last.expect("Seq must have 1+ exprs")))
         }
         Expr::Cond(cond_expr) => {
             let mut cond_flow = vec![];
@@ -538,7 +534,7 @@ pub fn expr_to_basic_blocks(
             let (flow, phi) = ctx.push_instruction(BasicBlockInstruction::Phi(vec![cons, alt]));
             cond_flow.extend(flow);
 
-            return Ok((cond_flow, phi));
+            Ok((cond_flow, phi))
         }
         Expr::Ident(ident) => {
             let mut ident_flow = vec![];
@@ -569,9 +565,9 @@ pub fn expr_to_basic_blocks(
             let (flow, ident_var) = ctx.push_instruction(instruction);
             ident_flow.extend(flow);
 
-            return Ok((ident_flow, ident_var));
+            Ok((ident_flow, ident_var))
         }
-        Expr::This(_) => return Ok(ctx.push_instruction(BasicBlockInstruction::This)),
+        Expr::This(_) => Ok(ctx.push_instruction(BasicBlockInstruction::This)),
         Expr::Array(array_lit) => {
             let mut array_flow = vec![];
             let mut elements = Vec::with_capacity(array_lit.elems.len());
@@ -596,7 +592,7 @@ pub fn expr_to_basic_blocks(
             let (flow, array_var) = ctx.push_instruction(BasicBlockInstruction::Array(elements));
             array_flow.extend(flow);
 
-            return Ok((array_flow, array_var));
+            Ok((array_flow, array_var))
         }
         Expr::Object(ObjectLit { props, .. }) => {
             let mut object_flow = vec![];
@@ -689,7 +685,7 @@ pub fn expr_to_basic_blocks(
                 ctx.push_instruction(BasicBlockInstruction::Object(proto, kvs));
             object_flow.extend(flow);
 
-            return Ok((object_flow, object_var));
+            Ok((object_flow, object_var))
         }
         Expr::Unary(unary_expr) => match unary_expr.op {
             UnaryOp::TypeOf => {
@@ -707,7 +703,7 @@ pub fn expr_to_basic_blocks(
                 let (flow, type_of) = ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
                 typeof_flow.extend(flow);
 
-                return Ok((typeof_flow, type_of));
+                Ok((typeof_flow, type_of))
             }
             UnaryOp::Delete => {
                 let mut delete_flow = vec![];
@@ -718,7 +714,7 @@ pub fn expr_to_basic_blocks(
                 let (flow, del) = ctx.push_instruction(BasicBlockInstruction::Delete(lhs));
                 delete_flow.extend(flow);
 
-                return Ok((delete_flow, del));
+                Ok((delete_flow, del))
             }
             UnaryOp::Void => {
                 let mut void_flow = vec![];
@@ -729,7 +725,7 @@ pub fn expr_to_basic_blocks(
                 let (flow, undef) = ctx.push_instruction(BasicBlockInstruction::Undefined);
                 void_flow.extend(flow);
 
-                return Ok((void_flow, undef));
+                Ok((void_flow, undef))
             }
             UnaryOp::Minus | UnaryOp::Plus | UnaryOp::Bang | UnaryOp::Tilde => {
                 let mut unary_flow = vec![];
@@ -741,7 +737,7 @@ pub fn expr_to_basic_blocks(
                     ctx.push_instruction(BasicBlockInstruction::UnaryOp(unary_expr.op, expr));
                 unary_flow.extend(flow);
 
-                return Ok((unary_flow, res));
+                Ok((unary_flow, res))
             }
         },
         Expr::Update(UpdateExpr {
@@ -764,7 +760,7 @@ pub fn expr_to_basic_blocks(
             let (flow, ins) = ctx.push_instruction(ins);
             update_flow.extend(flow);
 
-            return Ok((update_flow, ins));
+            Ok((update_flow, ins))
         }
         Expr::Member(_) => {
             let mut member_flow = vec![];
@@ -775,7 +771,7 @@ pub fn expr_to_basic_blocks(
             let (flow, read) = ctx.push_instruction(BasicBlockInstruction::Read(lhs));
             member_flow.extend(flow);
 
-            return Ok((member_flow, read));
+            Ok((member_flow, read))
         }
         Expr::SuperProp(sp) => {
             let mut super_prop_flow = vec![];
@@ -799,20 +795,20 @@ pub fn expr_to_basic_blocks(
             let (flow, read) = ctx.push_instruction(BasicBlockInstruction::Read(lhs));
             super_prop_flow.extend(flow);
 
-            return Ok((super_prop_flow, read));
+            Ok((super_prop_flow, read))
         }
         Expr::Arrow(arrow_expr) => {
             let (flow, varname, _fn_id) =
                 function_to_basic_blocks(ctx, FunctionLike::ArrowExpr(arrow_expr), None)
                     .expect("todo error handling");
-            return Ok((flow, varname));
+            Ok((flow, varname))
         }
         Expr::Fn(fn_expr) => {
             let (flow, varname, _fn_id) =
                 function_to_basic_blocks(ctx, FunctionLike::FnExpr(fn_expr), None)
                     .expect("todo error handling");
 
-            return Ok((flow, varname));
+            Ok((flow, varname))
         }
         Expr::Call(call) => {
             let mut call_flow = vec![];
@@ -876,13 +872,13 @@ pub fn expr_to_basic_blocks(
             let (flow, new) = ctx.push_instruction(BasicBlockInstruction::New(callee, out_args));
             new_flow.extend(flow);
 
-            return Ok((new_flow, new));
+            Ok((new_flow, new))
         }
         Expr::Tpl(_) => todo!(),
         Expr::TaggedTpl(_) => todo!(),
         Expr::Class(class) => {
             let class_name = class.ident.as_ref().map(|id| id.sym.to_string());
-            return class_to_basic_blocks(ctx, class.class.as_ref(), class_name);
+            class_to_basic_blocks(ctx, class.class.as_ref(), class_name)
         }
         Expr::MetaProp(_) => todo!(),
         Expr::Yield(YieldExpr { arg, delegate, .. }) => {
@@ -902,7 +898,7 @@ pub fn expr_to_basic_blocks(
             let (flow, exit) = ctx.push_instruction(BasicBlockInstruction::TempExit(typ, arg));
             yield_flow.extend(flow);
 
-            return Ok((yield_flow, exit));
+            Ok((yield_flow, exit))
         }
         Expr::Await(AwaitExpr { arg, .. }) => {
             let mut await_flow = vec![];
@@ -914,7 +910,7 @@ pub fn expr_to_basic_blocks(
                 ctx.push_instruction(BasicBlockInstruction::TempExit(TempExitType::Await, arg));
             await_flow.extend(flow);
 
-            return Ok((await_flow, exit));
+            Ok((await_flow, exit))
         }
         Expr::OptChain(_) => todo!(),
         Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
@@ -930,7 +926,7 @@ pub fn expr_to_basic_blocks(
         | Expr::TsAs(_)
         | Expr::TsInstantiation(_)
         | Expr::TsSatisfies(_) => unreachable!("Expr::Ts from SWC should be impossible"),
-    };
+    }
 }
 
 #[cfg(test)]
