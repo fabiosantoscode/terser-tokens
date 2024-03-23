@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analyze::find_multiple_writes;
 use crate::basic_blocks::{
-    BasicBlockExit, BasicBlockModule, ExitType, FunctionId, NonLocalId, ObjectKey, LHS,
+    ExitType, FunctionId, NonLocalId, ObjectKey, StructuredFlow, StructuredModule, LHS,
 };
 use crate::data_structures::CowMap;
 
@@ -14,20 +14,20 @@ pub struct InterpretCtx<'module> {
     arguments: JsArgs,
     cached_functions: BTreeMap<FunctionId, CachedFunction>,
     non_canon: bool,
-    module: Option<&'module BasicBlockModule>,
+    pub module: &'module StructuredModule,
     multiple_writes: BTreeSet<usize>,
     pub disable_tinyfuncs: bool,
 }
 
 impl<'module> InterpretCtx<'_> {
-    pub(crate) fn from_module(module: &'module BasicBlockModule) -> InterpretCtx<'module> {
+    pub(crate) fn from_module(module: &'module StructuredModule) -> InterpretCtx<'module> {
         InterpretCtx {
             variables: Default::default(),
             arguments: Default::default(),
             cached_functions: Default::default(),
             non_canon: false,
             multiple_writes: find_multiple_writes(module),
-            module: Some(module),
+            module,
             disable_tinyfuncs: false,
         }
     }
@@ -134,7 +134,7 @@ impl<'module> InterpretCtx<'_> {
         }
     }
 
-    pub fn delete_lhs(&mut self, lhs: &LHS) -> Option<JsType> {
+    pub fn delete_lhs(&mut self, _lhs: &LHS) -> Option<JsType> {
         None // TODO deleting object props, etc
     }
 
@@ -218,19 +218,14 @@ impl<'module> InterpretCtx<'_> {
     }
 
     fn is_simple_function<'a>(&'a self, the_function: FunctionId) -> bool {
-        let func = self.module.and_then(|md| md.functions.get(&the_function));
+        let func = self.module.functions.get(&the_function);
 
         if let Some(func) = func {
-            func.blocks.iter().all(|(_, block)| {
-                matches!(
-                    block.exit,
-                    BasicBlockExit::ExitFn(ExitType::Return, _)
-                        | BasicBlockExit::Debugger
-                        | BasicBlockExit::Fallthrough
-                ) && block
-                    .instructions
-                    .iter()
-                    .all(|(_, ins)| ins.can_be_reordered())
+            func.iter_all_flows().all(|block| match block {
+                StructuredFlow::Return(ExitType::Return, _) | StructuredFlow::Debugger => true,
+                StructuredFlow::Instruction(_, ins) => ins.can_be_reordered(),
+                StructuredFlow::Block(_, _) => true, // pass-through
+                _ => false,
             })
         } else {
             false
@@ -252,7 +247,7 @@ impl<'module> InterpretCtx<'_> {
         }
 
         let simple_function = self
-            .module?
+            .module
             .functions
             .get(&the_function)
             .expect("ensured in is_simple_function()");
@@ -345,12 +340,6 @@ impl CachedFunction {
 
 #[cfg(test)]
 mod tests {
-    use crate::testutils::*;
-
-    use super::*;
-
-    use super::super::interpret_module;
-
     /*
     fn get_known_args(ctx: &InterpretCtx) -> JsArgs {
         let func_result = ctx.function_returns.get(&FunctionId(1));
@@ -362,8 +351,8 @@ mod tests {
     #[test]
     fn wrap_up_module_nocalls() {
         let m = parse_instructions_module(vec![
-            "@0: { $0 = undefined exit = return $0 }",
-            "@0: { $1 = undefined exit = return $1 }",
+            "@0: { $0 = undefined Return $0 }",
+            "@0: { $1 = undefined Return $1 }",
         ]);
         let mut ctx = InterpretCtx::from_module(&m);
 
@@ -380,9 +369,9 @@ mod tests {
                 $0 = FunctionId(1)
                 $1 = call $0()
                 $2 = $0
-                exit = return $0
+                Return $0
             }",
-            "@0: { $3 = undefined exit = return $3 }",
+            "@0: { $3 = undefined Return $3 }",
         ]);
         let mut ctx = InterpretCtx::from_module(&m);
 
@@ -399,9 +388,9 @@ mod tests {
             "@0: {
                 $0 = FunctionId(1)
                 $1 = call $0()
-                exit = return $0
+                Return $0
             }",
-            "@0: { $3 = undefined exit = return $3 }",
+            "@0: { $3 = undefined Return $3 }",
         ]);
         let mut ctx = InterpretCtx::from_module(&m);
 

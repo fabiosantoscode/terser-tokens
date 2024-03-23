@@ -16,7 +16,7 @@ pub fn compress(input: &str, passes: usize) -> String {
         compress_step_evaluate(&mut module);
     }
 
-    let module = module_to_ast(module);
+    let module = module_to_ast(module.into());
 
     swc_stringify(module)
 }

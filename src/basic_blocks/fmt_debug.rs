@@ -3,24 +3,9 @@ use std::fmt::{Debug, Error, Formatter};
 use crate::basic_blocks::{ForInOfKind, MethodKind, ObjectKey, ObjectProperty, ObjectValue};
 
 use super::{
-    ArrayElement, ArrayPatternPiece, BasicBlock, BasicBlockEnvironment, BasicBlockExit,
-    BasicBlockGroup, BasicBlockInstruction, BasicBlockModule, ExitType, FunctionId, NonLocalId,
-    ObjectPatternPiece, LHS,
+    ArrayElement, ArrayPatternPiece, BasicBlockEnvironment, BreakableId, FunctionId, Instruction,
+    NonLocalId, ObjectPatternPiece, StructuredFlow, StructuredFunction, StructuredModule, LHS,
 };
-
-impl Debug for BasicBlock {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{{\n")?;
-        for (id, node) in self.iter() {
-            write!(f, "    ${} = {:?}\n", id, node)?;
-        }
-        match &self.exit {
-            BasicBlockExit::Fallthrough => {} // ellide
-            _ => write!(f, "    exit = {:?}\n", &self.exit)?,
-        }
-        write!(f, "}}")
-    }
-}
 
 impl Debug for LHS {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -60,49 +45,49 @@ impl Debug for ObjectValue {
     }
 }
 
-impl Debug for BasicBlockInstruction {
+impl Debug for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            BasicBlockInstruction::LitNumber(num) => {
+            Instruction::LitNumber(num) => {
                 write!(f, "{}", num)
             }
-            BasicBlockInstruction::LitBool(b) => {
+            Instruction::LitBool(b) => {
                 write!(f, "{:?}", b)
             }
-            BasicBlockInstruction::LitString(s) => {
+            Instruction::LitString(s) => {
                 write!(f, "{:?}", s)
             }
-            BasicBlockInstruction::UnaryOp(op, operand) => {
+            Instruction::UnaryOp(op, operand) => {
                 write!(f, "{}${}", op, operand)
             }
-            BasicBlockInstruction::BinOp(op, l, r) => {
+            Instruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }
-            BasicBlockInstruction::IncrDecr(lhs, op) => {
+            Instruction::IncrDecr(lhs, op) => {
                 write!(f, "{}{:?}", op.op_string(), lhs)
             }
-            BasicBlockInstruction::IncrDecrPostfix(lhs, op) => {
+            Instruction::IncrDecrPostfix(lhs, op) => {
                 write!(f, "{:?}{}", lhs, op.op_string())
             }
-            BasicBlockInstruction::Ref(id) => {
+            Instruction::Ref(id) => {
                 write!(f, "${}", id)
             }
-            BasicBlockInstruction::Undefined => {
+            Instruction::Undefined => {
                 write!(f, "undefined")
             }
-            BasicBlockInstruction::Null => {
+            Instruction::Null => {
                 write!(f, "null")
             }
-            BasicBlockInstruction::This => {
+            Instruction::This => {
                 write!(f, "this")
             }
-            BasicBlockInstruction::TypeOf(var) => {
+            Instruction::TypeOf(var) => {
                 write!(f, "typeof ${}", var)
             }
-            BasicBlockInstruction::TypeOfGlobal(var) => {
+            Instruction::TypeOfGlobal(var) => {
                 write!(f, "typeof global {:?}", var)
             }
-            BasicBlockInstruction::Array(elements) => {
+            Instruction::Array(elements) => {
                 write!(
                     f,
                     "[{}]",
@@ -117,7 +102,7 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
-            BasicBlockInstruction::Object(proto, props) => {
+            Instruction::Object(proto, props) => {
                 let keys = proto
                     .iter()
                     .map(|proto| format!("__proto__: ${}", proto))
@@ -136,10 +121,10 @@ impl Debug for BasicBlockInstruction {
 
                 write!(f, "{{{}}}", keys.join(", "))
             }
-            BasicBlockInstruction::Super => {
+            Instruction::Super => {
                 write!(f, "super")
             }
-            BasicBlockInstruction::CreateClass(optional_extends) => {
+            Instruction::CreateClass(optional_extends) => {
                 write!(
                     f,
                     "class{}",
@@ -149,7 +134,7 @@ impl Debug for BasicBlockInstruction {
                         .unwrap_or("".to_string())
                 )
             }
-            BasicBlockInstruction::ArrayPattern(input, items) => write!(
+            Instruction::ArrayPattern(input, items) => write!(
                 f,
                 "pack ${} [{}]",
                 input,
@@ -164,7 +149,7 @@ impl Debug for BasicBlockInstruction {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            BasicBlockInstruction::ObjectPattern(input, props) => write!(
+            Instruction::ObjectPattern(input, props) => write!(
                 f,
                 "pack ${} {{{}}}",
                 input,
@@ -180,13 +165,13 @@ impl Debug for BasicBlockInstruction {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            BasicBlockInstruction::PatternUnpack(pattern, index) => {
+            Instruction::PatternUnpack(pattern, index) => {
                 write!(f, "unpack ${}[{}]", pattern, index)
             }
-            BasicBlockInstruction::Function(id) => {
+            Instruction::Function(id) => {
                 write!(f, "{:?}", id)
             }
-            BasicBlockInstruction::Call(callee, args) => {
+            Instruction::Call(callee, args) => {
                 write!(
                     f,
                     "call ${}({})",
@@ -197,7 +182,7 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
-            BasicBlockInstruction::New(constructor, args) => {
+            Instruction::New(constructor, args) => {
                 write!(
                     f,
                     "new ${}({})",
@@ -208,14 +193,14 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
-            BasicBlockInstruction::ArgumentRead(idx) => {
+            Instruction::ArgumentRead(idx) => {
                 write!(f, "arguments[{}]", idx)
             }
-            BasicBlockInstruction::ArgumentRest(idx) => {
+            Instruction::ArgumentRest(idx) => {
                 write!(f, "arguments[{}...]", idx)
             }
 
-            BasicBlockInstruction::Read(lhs) => match lhs {
+            Instruction::Read(lhs) => match lhs {
                 LHS::Local(var) => write!(f, "read_local ${:?}", var),
                 LHS::NonLocal(nonlocal) => {
                     write!(f, "read_non_local $${:?}", nonlocal.0)
@@ -223,7 +208,7 @@ impl Debug for BasicBlockInstruction {
                 LHS::Global(glob_name) => write!(f, "global {:?}", glob_name),
                 LHS::Member(base, member) => write!(f, "{:?}{:?}", base, member),
             },
-            BasicBlockInstruction::Write(lhs, val) => match lhs {
+            Instruction::Write(lhs, val) => match lhs {
                 LHS::Local(var) => write!(f, "write_local ${:?} ${}", var, val),
                 LHS::NonLocal(nonlocal) => {
                     write!(f, "write_non_local $${:?} ${}", nonlocal.0, val)
@@ -231,15 +216,15 @@ impl Debug for BasicBlockInstruction {
                 LHS::Global(glob_name) => write!(f, "global {:?} = ${}", glob_name, val),
                 LHS::Member(base, member) => write!(f, "{:?}{:?} = ${}", base, member, val),
             },
-            BasicBlockInstruction::Delete(lhs) => {
+            Instruction::Delete(lhs) => {
                 write!(f, "delete {:?}", lhs)
             }
 
-            BasicBlockInstruction::TempExit(exit_type, arg) => {
+            Instruction::TempExit(exit_type, arg) => {
                 write!(f, "{:?} ${}", exit_type, arg)
             }
 
-            BasicBlockInstruction::Phi(vars) => {
+            Instruction::Phi(vars) => {
                 write!(
                     f,
                     "either({})",
@@ -249,110 +234,19 @@ impl Debug for BasicBlockInstruction {
                         .join(", ")
                 )
             }
-            BasicBlockInstruction::CaughtError => {
+            Instruction::CaughtError => {
                 write!(f, "caught_error()")
             }
-            BasicBlockInstruction::ForInOfValue => {
+            Instruction::ForInOfValue => {
                 write!(f, "for_in_of_value()")
             }
         }
     }
 }
 
-impl Debug for BasicBlockExit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BasicBlockExit::Cond(cond, cons, cons_end, alt, alt_end) => {
-                write!(
-                    f,
-                    "cond ${} ? @{}..@{} : @{}..@{}",
-                    cond, cons, cons_end, alt, alt_end
-                )
-            }
-            BasicBlockExit::Switch(expr, first_case, end_last_case) => {
-                write!(f, "switch ${} @{}..@{}", expr, first_case, end_last_case)
-            }
-            BasicBlockExit::SwitchCase(Some(expr), start, end) => {
-                write!(f, "case ${}: @{}..@{}", expr, start, end,)
-            }
-            BasicBlockExit::SwitchCase(None, start, end) => {
-                write!(f, "default @{}..@{}", start, end,)
-            }
-            BasicBlockExit::SwitchCaseExpression(start, end) => {
-                write!(f, "case_expr @{}..@{}", start, end)
-            }
-            BasicBlockExit::SwitchEnd => {
-                write!(f, "switch_end")
-            }
-            BasicBlockExit::Loop(start, end) => {
-                write!(f, "loop @{}..@{}", start, end)
-            }
-            BasicBlockExit::ForInOfLoop(loop_var, kind, start, end) => match kind {
-                ForInOfKind::ForIn => {
-                    write!(f, "for in ${} @{}..@{}", loop_var, start, end)
-                }
-                ForInOfKind::ForOf => {
-                    write!(f, "for of ${} @{}..@{}", loop_var, start, end)
-                }
-                ForInOfKind::ForAwaitOf => {
-                    write!(f, "for await of ${} @{}..@{}", loop_var, start, end)
-                }
-            },
-            BasicBlockExit::Fallthrough => {
-                write!(f, "fallthrough")
-            }
-            BasicBlockExit::Break(to) => {
-                write!(f, "break @{}", to)
-            }
-            BasicBlockExit::Continue(to) => {
-                write!(f, "continue @{}", to)
-            }
-            BasicBlockExit::ExitFn(exit_type, val) => match exit_type {
-                ExitType::Return => {
-                    write!(f, "return ${}", val)
-                }
-                ExitType::Throw => {
-                    write!(f, "throw ${}", val)
-                }
-            },
-            BasicBlockExit::SetTryAndCatch(try_block, catch_block, finally_block, after_block) => {
-                write!(
-                    f,
-                    "try @{} catch @{} finally @{}..@{}",
-                    try_block, catch_block, finally_block, after_block
-                )
-            }
-            BasicBlockExit::PopCatch(catch_block, finally_or_after) => {
-                write!(f, "catch @{}..@{}", catch_block, finally_or_after)
-            }
-            BasicBlockExit::PopFinally(start, end) => {
-                write!(f, "finally @{}..@{}", start, end)
-            }
-            BasicBlockExit::ClassStart(class_var, start, end) => {
-                write!(f, "class ${} @{}..@{}", class_var, start, end)
-            }
-            BasicBlockExit::ClassConstructor(fn_id) => {
-                write!(f, "class constructor {:?}", fn_id)
-            }
-            BasicBlockExit::ClassProperty(prop) => {
-                write!(f, "class property {:?}", prop)
-            }
-            BasicBlockExit::ClassStaticBlock(start, end) => {
-                write!(f, "class static block @{}..@{}", start, end)
-            }
-            BasicBlockExit::ClassEnd => {
-                write!(f, "class end")
-            }
-            BasicBlockExit::Debugger => {
-                write!(f, "debugger")
-            }
-        }
-    }
-}
-
-impl Debug for BasicBlockModule {
+impl Debug for StructuredModule {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        let BasicBlockModule {
+        let StructuredModule {
             summary,
             functions,
             imports,
@@ -365,7 +259,7 @@ impl Debug for BasicBlockModule {
             .split_first()
             .expect("there must be a first element in a module's list of functions");
 
-        let mut d = f.debug_struct("BasicBlockModule");
+        let mut d = f.debug_struct("StructuredModule");
 
         d.field("summary", &summary);
         d.field("top_level_stats", &top_level_stats);
@@ -396,7 +290,7 @@ impl Debug for NonLocalId {
     }
 }
 
-impl Debug for BasicBlockGroup {
+impl Debug for StructuredFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.environment {
             BasicBlockEnvironment::Module => {}
@@ -409,12 +303,124 @@ impl Debug for BasicBlockGroup {
                 }
             }
         }
-        for (i, v) in self.iter() {
-            if i > 0 {
+        for (i, b) in self.blocks.iter().enumerate() {
+            let s = format!("{:?}", b);
+            let ends_in_newline = s.ends_with('\n');
+            write!(f, "{}", s)?;
+            if i < self.blocks.len() - 1 && !ends_in_newline {
                 write!(f, "\n")?;
             }
-            write!(f, "@{}: {:?}", i, v)?;
         }
         Ok(())
+    }
+}
+
+impl Debug for StructuredFlow {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let indent_str_lines = |s: &str| {
+            let lines = s.lines();
+            let indented_lines = lines.map(|line| format!("    {}", line));
+            indented_lines.collect::<Vec<String>>().join("\n")
+        };
+
+        let print_brk = |brk: &BreakableId| match brk.0 {
+            Some(x) => format!(" (@{})", x),
+            None => String::new(),
+        };
+
+        let print_vec_no_eol = |f: &mut Formatter<'_>, items: &Vec<StructuredFlow>| {
+            write!(f, "{{\n")?;
+            for item in items {
+                writeln!(f, "{}", indent_str_lines(&format!("{:?}", item)))?;
+            }
+            write!(f, "}}")
+        };
+        let print_vec = |f: &mut Formatter<'_>, items: &Vec<StructuredFlow>| {
+            print_vec_no_eol(f, items)?;
+            write!(f, "\n")
+        };
+
+        match self {
+            StructuredFlow::Block(brk, items) => {
+                if let Some(_) = brk.0 {
+                    write!(f, "block{} {{", print_brk(brk))?;
+                    print_vec(f, items)?;
+                    write!(f, "}}\n")?;
+                }
+                print_vec(f, items)
+            }
+            StructuredFlow::Loop(brk, body) => {
+                write!(f, "loop{} ", print_brk(brk))?;
+                print_vec(f, body)
+            }
+            StructuredFlow::ForInOfLoop(brk, loop_var, kind, body) => {
+                match kind {
+                    ForInOfKind::ForIn => {
+                        write!(f, "for in{} (${}) ", print_brk(brk), loop_var)?;
+                    }
+                    ForInOfKind::ForOf => {
+                        write!(f, "for of{} (${}) ", print_brk(brk), loop_var)?;
+                    }
+                    ForInOfKind::ForAwaitOf => {
+                        write!(f, "for await of{} (${}) ", print_brk(brk), loop_var)?;
+                    }
+                }
+                print_vec(f, body)
+            }
+            StructuredFlow::Cond(brk, cond, cons, alt) => {
+                write!(f, "if{} (${}) ", print_brk(brk), cond)?;
+                print_vec_no_eol(f, cons)?;
+                write!(f, " else ")?;
+                print_vec(f, alt)
+            }
+            StructuredFlow::Switch(brk, expression, cases) => {
+                writeln!(f, "switch{} (${}) {{", print_brk(brk), expression)?;
+
+                for case in cases {
+                    match &case.condition {
+                        Some((instructions, test_var)) => {
+                            if instructions.len() > 0 {
+                                print_vec(f, &instructions)?;
+                            }
+                            writeln!(f, "case (${}) ", test_var)?;
+                            print_vec(f, &case.body)?;
+                        }
+                        None => {
+                            writeln!(f, "default: ")?;
+                            print_vec(f, &case.body)?;
+                        }
+                    }
+                }
+                write!(f, "}}\n")?;
+
+                Ok(())
+            }
+            StructuredFlow::TryCatch(brk, body, catch, fin) => {
+                write!(f, "try{} ", print_brk(brk))?;
+                print_vec_no_eol(f, body)?;
+                write!(f, " catch ")?;
+                print_vec_no_eol(f, catch)?;
+                write!(f, " finally ")?;
+                print_vec(f, fin)
+            }
+            StructuredFlow::Class(class_var, body) => {
+                write!(f, "class ${class_var} {{\n")?;
+                for item in body {
+                    writeln!(f, "{}", indent_str_lines(&format!("{:?}", item)))?;
+                }
+                write!(f, "}}\n")
+            }
+            StructuredFlow::Break(brk) => writeln!(f, "Break{}", print_brk(brk)),
+            StructuredFlow::Continue(brk) => writeln!(f, "Continue{}", print_brk(brk)),
+            StructuredFlow::Return(exit, ret) => {
+                writeln!(f, "{:?} ${}", exit, ret)
+            }
+            StructuredFlow::Instruction(var, ins) => {
+                let mut buf = String::new();
+                buf.push_str(&format!("${} = {:?}\n", var, ins));
+                write!(f, "{}", &buf)
+            }
+            StructuredFlow::Debugger => writeln!(f, "Debugger"),
+        }
     }
 }

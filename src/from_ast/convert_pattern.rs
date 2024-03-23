@@ -4,8 +4,7 @@ use swc_ecma_ast::{
 };
 
 use crate::basic_blocks::{
-    ArrayPatternPiece, BasicBlockInstruction, BreakableId, ObjectKey, ObjectPatternPiece,
-    StructuredFlow, LHS,
+    ArrayPatternPiece, BreakableId, Instruction, ObjectKey, ObjectPatternPiece, StructuredFlow, LHS,
 };
 
 use super::{expr_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx};
@@ -69,8 +68,7 @@ pub fn pat_to_basic_blocks(
                 })
                 .collect::<Vec<_>>();
 
-            let (flow, pattern) =
-                ctx.push_instruction(BasicBlockInstruction::ArrayPattern(input, items));
+            let (flow, pattern) = ctx.push_instruction(Instruction::ArrayPattern(input, items));
             array_pat_flow.extend(flow);
 
             // Then, we create an unpacker for each item
@@ -80,7 +78,7 @@ pub fn pat_to_basic_blocks(
                 .enumerate()
                 .map(|(i, elem)| {
                     let (flow, unpacker) =
-                        ctx.push_instruction(BasicBlockInstruction::PatternUnpack(pattern, i));
+                        ctx.push_instruction(Instruction::PatternUnpack(pattern, i));
                     array_pat_flow.extend(flow);
 
                     (elem, unpacker)
@@ -135,8 +133,7 @@ pub fn pat_to_basic_blocks(
                 })
                 .collect::<Result<Vec<_>, String>>()?;
 
-            let (flow, pattern) =
-                ctx.push_instruction(BasicBlockInstruction::ObjectPattern(input, items));
+            let (flow, pattern) = ctx.push_instruction(Instruction::ObjectPattern(input, items));
             object_pat_flow.extend(flow);
 
             // Then, we create an unpacker for each item
@@ -146,7 +143,7 @@ pub fn pat_to_basic_blocks(
                 .enumerate()
                 .map(|(i, elem)| {
                     let (flow, unpacker) =
-                        ctx.push_instruction(BasicBlockInstruction::PatternUnpack(pattern, i));
+                        ctx.push_instruction(Instruction::PatternUnpack(pattern, i));
                     object_pat_flow.extend(flow);
 
                     (elem, unpacker)
@@ -225,7 +222,7 @@ pub fn pat_like_expr_to_basic_blocks(
 
             let memb = LHS::Member(Box::new(base), prop);
 
-            let (flow, write) = ctx.push_instruction(BasicBlockInstruction::Write(memb, input));
+            let (flow, write) = ctx.push_instruction(Instruction::Write(memb, input));
             ret_flow.extend(flow);
 
             Ok((ret_flow, write))
@@ -257,7 +254,7 @@ fn ident_pat(
             let (flow, input) = ctx.assign_name(name, input);
             ret_flow.extend(flow);
 
-            let (flow, input) = ctx.push_instruction(BasicBlockInstruction::Ref(input));
+            let (flow, input) = ctx.push_instruction(Instruction::Ref(input));
             ret_flow.extend(flow);
 
             Ok((ret_flow, input))
@@ -285,17 +282,16 @@ fn default_assign_pat(
 ) -> Result<(Vec<StructuredFlow>, usize), String> {
     let mut assign_flow = vec![];
 
-    let (flow, undef) = ctx.push_instruction(BasicBlockInstruction::Undefined);
+    let (flow, undef) = ctx.push_instruction(Instruction::Undefined);
     assign_flow.extend(flow);
-    let (flow, test) =
-        ctx.push_instruction(BasicBlockInstruction::BinOp(BinaryOp::EqEqEq, input, undef));
+    let (flow, test) = ctx.push_instruction(Instruction::BinOp(BinaryOp::EqEqEq, input, undef));
     assign_flow.extend(flow);
 
     ctx.enter_conditional_branch();
 
     let (then_flow, default_value) = expr_to_basic_blocks(ctx, by_default)?;
 
-    let (else_flow, input_value) = ctx.push_instruction(BasicBlockInstruction::Ref(input));
+    let (else_flow, input_value) = ctx.push_instruction(Instruction::Ref(input));
 
     assign_flow.push(StructuredFlow::Cond(
         BreakableId(None),
@@ -307,8 +303,7 @@ fn default_assign_pat(
     let flow = ctx.leave_conditional_branch();
     assign_flow.extend(flow);
 
-    let (flow, phi) =
-        ctx.push_instruction(BasicBlockInstruction::Phi(vec![input_value, default_value]));
+    let (flow, phi) = ctx.push_instruction(Instruction::Phi(vec![input_value, default_value]));
     assign_flow.extend(flow);
 
     Ok((assign_flow, phi))
@@ -326,7 +321,7 @@ mod tests {
             c;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = {}
             $1 = $0
             $2 = pack $1 {a: _}
@@ -335,15 +330,11 @@ mod tests {
             $5 = unpack $4[0]
             $6 = undefined
             $7 = $5 === $6
-            exit = cond $7 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $8 = 4
-        }
-        @2: {
-            $9 = $5
-        }
-        @3: {
+            if ($7) {
+                $8 = 4
+            } else {
+                $9 = $5
+            }
             $10 = either($8, $9)
             $11 = $10
         }
@@ -355,7 +346,7 @@ mod tests {
             b;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = {a: $0}
             $2 = $1
@@ -365,15 +356,11 @@ mod tests {
             $6 = unpack $5[0]
             $7 = undefined
             $8 = $6 === $7
-            exit = cond $8 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $9 = 4
-        }
-        @2: {
-            $10 = $6
-        }
-        @3: {
+            if ($8) {
+                $9 = 4
+            } else {
+                $10 = $6
+            }
             $11 = either($9, $10)
             $12 = $11
         }
@@ -389,7 +376,7 @@ mod tests {
             b;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = []
             $1 = $0
             $2 = pack $1 [_, _...]
@@ -407,7 +394,7 @@ mod tests {
             b;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = []
             $1 = $0
             $2 = pack $1 [_, _...]
@@ -428,7 +415,7 @@ mod tests {
             ({ '0': a } = obj);",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = {}
             $1 = undefined
             $2 = $0
@@ -450,7 +437,7 @@ mod tests {
             var {a, ...rest, b} = obj;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = {}
             $1 = $0
             $2 = pack $1 {a: _, ..._, b: _}
@@ -465,7 +452,7 @@ mod tests {
             var [a, ...rest] = arr;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = []
             $1 = $0
             $2 = pack $1 [_, _...]
@@ -482,7 +469,7 @@ mod tests {
             var {a, [1]: b} = obj;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = {}
             $1 = $0
             $2 = 1
@@ -524,7 +511,7 @@ mod tests {
             $13 = pack $11 {[$12]: _}
             $14 = unpack $13[0]
             $15 = undefined
-            exit = return $15
+            Return $15
         }
         "###);
     } */
@@ -536,7 +523,7 @@ mod tests {
             var { x: { a, c = b } = {}, ...rest } = obj;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = undefined
             $1 = $0
             $2 = undefined
@@ -549,30 +536,22 @@ mod tests {
             $9 = unpack $7[1]
             $10 = undefined
             $11 = $8 === $10
-            exit = cond $11 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $12 = {}
-        }
-        @2: {
-            $13 = $8
-        }
-        @3: {
+            if ($11) {
+                $12 = {}
+            } else {
+                $13 = $8
+            }
             $14 = either($12, $13)
             $15 = pack $14 {a: _, c: _}
             $16 = unpack $15[0]
             $17 = unpack $15[1]
             $18 = undefined
             $19 = $17 === $18
-            exit = cond $19 ? @4..@4 : @5..@5
-        }
-        @4: {
-            $20 = $0
-        }
-        @5: {
-            $21 = $17
-        }
-        @6: {
+            if ($19) {
+                $20 = $0
+            } else {
+                $21 = $17
+            }
             $22 = either($20, $21)
         }
         "###);
@@ -582,7 +561,7 @@ mod tests {
             var [a, ...rest] = arr;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = []
             $1 = $0
             $2 = pack $1 [_, _...]

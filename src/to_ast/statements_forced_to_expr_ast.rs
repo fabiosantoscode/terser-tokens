@@ -1,6 +1,6 @@
 use super::{build_iife, ref_or_inlined_expr, to_statements, ToAstContext};
 use crate::basic_blocks::StructuredFlow;
-use swc_ecma_ast::{Expr, ParenExpr, Stmt};
+use swc_ecma_ast::{Expr, ParenExpr, SeqExpr, Stmt};
 
 /// Convert a bunch of statements into an expression, even if we need to utilize an IIFE
 pub fn statements_forced_to_expr_ast(
@@ -18,19 +18,26 @@ pub fn statements_forced_to_expr_ast(
 
     let all_inlined = all_stats.len() == 0;
 
-    let expr = if all_inlined {
-        ref_or_inlined_expr(ctx, varname)
-    } else if let Some(expr) = stats_to_expr(&all_stats[..]) {
-        Expr::Paren(ParenExpr {
-            span: Default::default(),
-            expr: Box::new(Expr::Seq(swc_ecma_ast::SeqExpr {
-                span: Default::default(),
-                exprs: vec![Box::new(expr), Box::new(ref_or_inlined_expr(ctx, varname))],
-            })),
-        })
-    } else {
-        let ret_expr = ref_or_inlined_expr(ctx, varname);
+    let ret_expr = ref_or_inlined_expr(ctx, varname);
 
+    let expr = if all_inlined {
+        ret_expr
+    } else if let Some(exprs) = all_exprs(&all_stats[..]) {
+        match exprs.len() {
+            0 => ret_expr,
+            _ => Expr::Paren(ParenExpr {
+                span: Default::default(),
+                expr: Box::new(Expr::Seq(SeqExpr {
+                    span: Default::default(),
+                    exprs: exprs
+                        .into_iter()
+                        .chain(std::iter::once(ret_expr))
+                        .map(Box::new)
+                        .collect(),
+                })),
+            }),
+        }
+    } else {
         build_iife(all_stats, ret_expr)
     };
 
@@ -39,15 +46,17 @@ pub fn statements_forced_to_expr_ast(
     expr
 }
 
-fn stats_to_expr(stats: &[Stmt]) -> Option<Expr> {
-    match stats.len() {
-        0 => None,
-        1 => match &stats[0] {
-            Stmt::Expr(expr) => Some(*expr.expr.clone()),
-            _ => None,
-        },
-        _ => None, // We could use Seq
+fn all_exprs(stats: &[Stmt]) -> Option<Vec<Expr>> {
+    let mut out = vec![];
+
+    for stat in stats {
+        match stat {
+            Stmt::Expr(expr) => out.push(*expr.expr.clone()),
+            _ => return None,
+        }
     }
+
+    Some(out)
 }
 
 #[cfg(test)]
@@ -57,47 +66,38 @@ mod tests {
 
     #[test]
     fn force_expr_simple() {
-        let mut block_module = parse_instructions_module(vec![
-            "@0: {
+        let block_module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = 3
                 $2 = $0 + $1
-                exit = return $2
             }",
         ]);
 
-        let (mut ctx, root) = ToAstContext::new(&mut block_module);
+        let (mut ctx, root) = ToAstContext::new_for_test(block_module, 2);
 
-        let child = root.children()[0][0].clone();
+        let expr = statements_forced_to_expr_ast(&mut ctx, &vec![root], 2);
 
-        let expr = statements_forced_to_expr_ast(&mut ctx, vec![child].as_slice(), 2);
-
-        insta::assert_display_snapshot!(expr_to_string(&expr), @r###"1 + 3;"###);
+        insta::assert_display_snapshot!(expr_to_string(&expr), @r###"
+        (a = 1 + 3, a);
+        "###);
     }
 
     #[test]
     fn force_expr_needs_stat() {
-        let mut block_module = parse_instructions_module(vec![
-            "@0: {
+        let block_module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = 3
                 $2 = $0 + $1
-                exit = throw $2
-            }
-            @1: {
+                Throw $2
                 $3 = $2
             }",
         ]);
 
-        let (mut ctx, root) = ToAstContext::new(&mut block_module);
+        let (mut ctx, root) = ToAstContext::new_for_test(block_module, 2);
 
-        let child = root.children()[0]
-            .iter()
-            .cloned()
-            .cloned()
-            .collect::<Vec<_>>();
-
-        let expr = statements_forced_to_expr_ast(&mut ctx, &child[..], 2);
+        let expr = statements_forced_to_expr_ast(&mut ctx, &vec![root], 2);
         insta::assert_display_snapshot!(expr_to_string(&expr), @r###"
         (()=>{
             a = 1 + 3;
@@ -116,34 +116,21 @@ mod tests {
 
     #[test]
     fn force_expr_needs_cond() {
-        let mut block_module = parse_instructions_module(vec![
-            "@0: {
+        let block_module = parse_test_module(vec![
+            "{
                 $0 = 1
-                exit = cond $0 ? @1..@1 : @2..@2
-            }
-            @1: {
-                $1 = 3
-                exit = jump @3
-            }
-            @2: {
-                $2 = 4
-                exit = jump @3
-            }
-            @3: {
+                if ($0) {
+                    $1 = 3
+                } else {
+                    $2 = 4
+                }
                 $3 = either($1, $2)
-                exit = return $3
             }",
         ]);
 
-        let (mut ctx, mut root) = ToAstContext::new(&mut block_module);
+        let (mut ctx, root) = ToAstContext::new_for_test(block_module, 1);
 
-        let children = vec![
-            root.children()[0].clone()[0].clone(),
-            root.children()[0].clone()[1].clone(),
-            root.children()[0].clone()[2].clone(),
-        ];
-
-        let expr = statements_forced_to_expr_ast(&mut ctx, children.as_slice(), 1);
+        let expr = statements_forced_to_expr_ast(&mut ctx, &vec![root], 1);
 
         insta::assert_display_snapshot!(expr_to_string(&expr), @r###"
         (()=>{
@@ -152,7 +139,6 @@ mod tests {
             } else {
                 a = 4;
             }
-            return a;
             return a;
         })();
         "###);

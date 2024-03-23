@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::basic_blocks::{BasicBlockInstruction, BasicBlockModule, FunctionId, NonLocalId, LHS};
+use crate::basic_blocks::{
+    FunctionId, Instruction, NonLocalId, StructuredFlow, StructuredModule, LHS,
+};
 
 /// Construct the CallGraph, which will tell us how to traverse the functions in the correct order in order to find most types without yet-unknown return types.
-pub fn construct_call_graph(module: &BasicBlockModule) -> CallGraph {
+pub fn construct_call_graph(module: &StructuredModule) -> CallGraph {
     let function_calls = get_all_function_calls(module);
+    let traversal_order = get_traversal_order(&function_calls);
 
     CallGraph {
-        traversal_order: get_traversal_order(&function_calls),
+        traversal_order,
         function_calls,
     }
 }
@@ -18,7 +21,7 @@ pub struct CallGraph {
 }
 
 /// Get a list, starting with dependency-less functions, and ending with the top-level FunctionId(0).
-pub fn get_traversal_order(function_calls: &BTreeMap<FunctionId, Vec<CallLog>>) -> Vec<FunctionId> {
+fn get_traversal_order(function_calls: &BTreeMap<FunctionId, Vec<CallLog>>) -> Vec<FunctionId> {
     let mut traversal_order = Vec::new();
     let mut visited = BTreeSet::new();
 
@@ -57,7 +60,7 @@ pub fn get_traversal_order(function_calls: &BTreeMap<FunctionId, Vec<CallLog>>) 
 }
 
 /// Given a module, create a graph of what functions call each other. Every function present on the map has a fully known list of calls.
-fn get_all_function_calls(module: &BasicBlockModule) -> BTreeMap<FunctionId, Vec<CallLog>> {
+fn get_all_function_calls(module: &StructuredModule) -> BTreeMap<FunctionId, Vec<CallLog>> {
     let all_function_vars = get_all_function_vars(module);
 
     let mut function_calls: BTreeMap<FunctionId, Vec<CallLog>> = all_function_vars
@@ -65,8 +68,8 @@ fn get_all_function_calls(module: &BasicBlockModule) -> BTreeMap<FunctionId, Vec
         .map(|func_id| (*func_id, Vec::with_capacity(0)))
         .collect();
 
-    for (in_function, _, _, ins) in module.iter_all_instructions() {
-        if let BasicBlockInstruction::Call(callee, args) = ins {
+    for (in_function, _, ins) in module.iter_all_instructions() {
+        if let Instruction::Call(callee, args) = ins {
             if let Some(func_id) = all_function_vars.get(&callee) {
                 let calls = function_calls
                     .get_mut(func_id)
@@ -85,12 +88,12 @@ fn get_all_function_calls(module: &BasicBlockModule) -> BTreeMap<FunctionId, Vec
 }
 
 /// Retrieve a map of variables and the functions they hold. Also return a set of vars that have multiple writes.
-fn get_all_function_vars(module: &BasicBlockModule) -> BTreeMap<usize, FunctionId> {
+fn get_all_function_vars(module: &StructuredModule) -> BTreeMap<usize, FunctionId> {
     let mut function_vars = BTreeMap::new();
     let leaked = find_leaked_vars(module);
 
-    for (_, _, varname, ins) in module.iter_all_instructions() {
-        if let BasicBlockInstruction::Function(id) = ins {
+    for (_, varname, ins) in module.iter_all_instructions() {
+        if let Instruction::Function(id) = ins {
             function_vars.insert(varname, *id);
         }
     }
@@ -99,19 +102,17 @@ fn get_all_function_vars(module: &BasicBlockModule) -> BTreeMap<usize, FunctionI
     loop {
         let len_before = function_vars.len();
 
-        for (_, _, varname, ins) in module.iter_all_instructions() {
+        for (_, varname, ins) in module.iter_all_instructions() {
             match ins {
-                BasicBlockInstruction::Read(
-                    LHS::Local(reference) | LHS::NonLocal(NonLocalId(reference)),
-                )
-                | BasicBlockInstruction::Ref(reference) => {
+                Instruction::Read(LHS::Local(reference) | LHS::NonLocal(NonLocalId(reference)))
+                | Instruction::Ref(reference) => {
                     if !leaked.contains(&varname) {
                         if let Some(id) = function_vars.get(&reference) {
                             function_vars.insert(varname, *id);
                         }
                     }
                 }
-                BasicBlockInstruction::Write(
+                Instruction::Write(
                     LHS::Local(varname) | LHS::NonLocal(NonLocalId(varname)),
                     origin,
                 ) => {
@@ -138,10 +139,10 @@ fn get_all_function_vars(module: &BasicBlockModule) -> BTreeMap<usize, FunctionI
 }
 
 /// Find all variables that are leaked, IE we can't track their value
-fn find_leaked_vars(module: &BasicBlockModule) -> BTreeSet<usize> {
+fn find_leaked_vars(module: &StructuredModule) -> BTreeSet<usize> {
     let known_non_functions: BTreeSet<_> = module
         .iter_all_instructions()
-        .filter_map(|(_, _, varname, ins)| {
+        .filter_map(|(_, varname, ins)| {
             if ins.is_immutable_primitive() {
                 Some(varname)
             } else {
@@ -160,49 +161,50 @@ fn find_leaked_vars(module: &BasicBlockModule) -> BTreeSet<usize> {
     loop {
         single_writes.clear();
         let unknowable_count_before = unknowable.len();
-        for (_, _, block) in module.iter_all_blocks() {
-            for (varname, ins) in block.iter() {
-                match ins {
-                    BasicBlockInstruction::Function(_) => {}
-                    BasicBlockInstruction::Call(callee, args) => {
-                        for arg in args {
-                            mark_unknowable(&mut unknowable, *arg);
+        for (_, block) in module.iter_all_flows() {
+            match block {
+                StructuredFlow::Instruction(varname, ins) => {
+                    match ins {
+                        Instruction::Function(_) => {}
+                        Instruction::Call(_callee, args) => {
+                            // TODO: do not assume all args are unknowable. We can crawl that function and detect otherwise.
+                            for arg in args {
+                                mark_unknowable(&mut unknowable, *arg);
+                            }
+                        }
+                        Instruction::Write(LHS::Local(id) | LHS::NonLocal(NonLocalId(id)), inp) => {
+                            if known_non_functions.contains(inp) {
+                                continue;
+                            }
+                            if !single_writes.contains(id) && !unknowable.contains(id) {
+                                single_writes.insert(*id);
+                                continue;
+                            }
+                            mark_unknowable(&mut unknowable, *id);
+                            mark_unknowable(&mut unknowable, *inp);
+                        }
+                        Instruction::Read(LHS::Local(id) | LHS::NonLocal(NonLocalId(id)))
+                        | Instruction::Ref(id) => {
+                            // Reassignment doesn't mean losing track
+                            // unless it's a reassignment of an unknowable
+                            if unknowable.contains(id) {
+                                unknowable.insert(*varname);
+                            }
+                        }
+                        unknown_instruction => {
+                            for var in unknown_instruction.get_read_vars_and_nonlocals() {
+                                mark_unknowable(&mut unknowable, var);
+                            }
+                            mark_unknowable(&mut unknowable, *varname);
                         }
                     }
-                    BasicBlockInstruction::Write(
-                        LHS::Local(id) | LHS::NonLocal(NonLocalId(id)),
-                        inp,
-                    ) => {
-                        if known_non_functions.contains(inp) {
-                            continue;
-                        }
-                        if !single_writes.contains(id) && !unknowable.contains(id) {
-                            single_writes.insert(*id);
-                            continue;
-                        }
-                        mark_unknowable(&mut unknowable, *id);
-                        mark_unknowable(&mut unknowable, *inp);
-                    }
-                    BasicBlockInstruction::Read(LHS::Local(id) | LHS::NonLocal(NonLocalId(id)))
-                    | BasicBlockInstruction::Ref(id) => {
-                        // Reassignment doesn't mean losing track
-                        // unless it's a reassignment of an unknowable
-                        if unknowable.contains(id) {
-                            unknowable.insert(varname);
-                        }
-                    }
-                    unknown_instruction => {
-                        for var in unknown_instruction.get_read_vars_and_nonlocals() {
-                            mark_unknowable(&mut unknowable, var);
-                        }
-                        mark_unknowable(&mut unknowable, varname);
+                }
+                other => {
+                    for var in other.used_vars() {
+                        mark_unknowable(&mut unknowable, var);
                     }
                 }
             }
-
-            block.exit.used_vars().iter().for_each(|var| {
-                mark_unknowable(&mut unknowable, *var);
-            });
         }
 
         if unknowable.len() == unknowable_count_before {
@@ -226,14 +228,14 @@ mod tests {
 
     #[test]
     fn test_get_all_function_vars() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 100
                 $1 = FunctionId(1)
                 $2 = $3
                 $3 = $1
                 $4 = read_non_local $$1
-                exit = return $0
+                Return $0
             }",
         ]);
 
@@ -260,13 +262,13 @@ mod tests {
 
     #[test]
     fn test_get_all_function_calls() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 100
                 $1 = FunctionId(1)
                 $2 = call $1($0)
                 $404 = FunctionId(404)
-                exit = return $0
+                Return $0
             }",
         ]);
         let knowable_calls = get_all_function_calls(&module);
@@ -287,8 +289,8 @@ mod tests {
 
         // ---
 
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $100 = 100
                 $110 = 110
                 $1 = FunctionId(1)
@@ -296,7 +298,7 @@ mod tests {
                 $3 = call $2($100)
                 $4 = read_non_local $$1
                 $5 = call $4($110)
-                exit = return $100
+                Return $100
             }",
         ]);
         let knowable_calls = get_all_function_calls(&module);
@@ -315,20 +317,20 @@ mod tests {
 
     #[test]
     fn test_construct_call_graph() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = FunctionId(2)
                 $1 = call $0()
-                exit = return $1
+                Return $1
             }",
-            "@0: {
+            "{
                 $2 = 100
-                exit = return $2
+                Return $2
             }",
-            "@0: {
+            "{
                 $3 = FunctionId(1)
                 $4 = call $3()
-                exit = return $4
+                Return $4
             }",
         ]);
         let call_graph = construct_call_graph(&module);
@@ -340,8 +342,8 @@ mod tests {
 
     #[test]
     fn test_nonlocal_function_calls() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = undefined
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
@@ -356,23 +358,23 @@ mod tests {
                 $9 = $3
                 $10 = 1
                 $11 = call $9($10)
-                exit = return $11
+                Return $11
             }",
-            "@0: {
+            "{
                 $12 = arguments[0]
                 $13 = $12
                 $14 = read_non_local $$1
                 $15 = call $14()
                 $16 = $13 + $15
-                exit = return $16
+                Return $16
             }",
-            "@0: {
+            "{
                 $17 = 99999
-                exit = return $17
+                Return $17
             }",
-            "@0: {
+            "{
                 $18 = 1
-                exit = return $18
+                Return $18
             }",
         ]);
         let call_graph = construct_call_graph(&module);
@@ -392,8 +394,8 @@ mod tests {
 
     #[test]
     fn test_nonlocal_function_calls_undefined_then_some() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = undefined
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
@@ -401,19 +403,19 @@ mod tests {
                 $4 = FunctionId(2)
                 $5 = write_non_local $$1 $4
                 $101 = call $3()
-                exit = return $101
+                Return $101
             }",
-            "@0: {
+            "{
                 $12 = arguments[0]
                 $13 = $12
                 $14 = read_non_local $$1
                 $15 = call $14()
                 $16 = $13 + $15
-                exit = return $16
+                Return $16
             }",
-            "@0: {
+            "{
                 $17 = 99999
-                exit = return $17
+                Return $17
             }",
         ]);
         let call_graph = construct_call_graph(&module);
@@ -429,8 +431,8 @@ mod tests {
 
     #[test]
     fn test_leaked_funcs() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = undefined
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
@@ -445,23 +447,23 @@ mod tests {
                 $9 = $3
                 $10 = 1
                 $11 = call $9($10)
-                exit = return $11
+                Return $11
             }",
-            "@0: {
+            "{
                 $12 = arguments[0]
                 $13 = $12
                 $14 = read_non_local $$1
                 $15 = call $14()
                 $16 = $13 + $15
-                exit = return $16
+                Return $16
             }",
-            "@0: {
+            "{
                 $17 = 99999
-                exit = return $17
+                Return $17
             }",
-            "@0: {
+            "{
                 $18 = 1
-                exit = return $18
+                Return $18
             }",
         ]);
         let leaked = find_leaked_vars(&module);

@@ -1,56 +1,56 @@
-use crate::basic_blocks::{ArrayElement, BasicBlockInstruction, ObjectProperty, LHS};
+use crate::basic_blocks::{ArrayElement, Instruction, ObjectProperty, LHS};
 
-impl BasicBlockInstruction {
+impl Instruction {
     /// Will this instruction throw an error or change the state of the program besides assigning its variable?
     pub fn may_have_side_effects(&self) -> bool {
         match self {
-            BasicBlockInstruction::LitNumber(_) => false,
-            BasicBlockInstruction::LitBool(_) => false,
-            BasicBlockInstruction::LitString(_) => false,
-            BasicBlockInstruction::Ref(_) => false,
-            BasicBlockInstruction::UnaryOp(_, _) => false,
+            Instruction::LitNumber(_) => false,
+            Instruction::LitBool(_) => false,
+            Instruction::LitString(_) => false,
+            Instruction::Ref(_) => false,
+            Instruction::UnaryOp(_, _) => false,
             // may throw due to bigint
-            BasicBlockInstruction::BinOp(_, _, _) => true,
+            Instruction::BinOp(_, _, _) => true,
             // Can throw a conversion error (some_symbol++)
-            BasicBlockInstruction::IncrDecr(_, _) => true,
-            BasicBlockInstruction::IncrDecrPostfix(_, _) => true,
-            BasicBlockInstruction::Undefined => false,
-            BasicBlockInstruction::Null => false,
-            BasicBlockInstruction::This => false,
-            BasicBlockInstruction::TypeOf(_) => false,
-            BasicBlockInstruction::TypeOfGlobal(_) => false,
-            BasicBlockInstruction::CaughtError => false,
-            BasicBlockInstruction::ForInOfValue => false,
+            Instruction::IncrDecr(_, _) => true,
+            Instruction::IncrDecrPostfix(_, _) => true,
+            Instruction::Undefined => false,
+            Instruction::Null => false,
+            Instruction::This => false,
+            Instruction::TypeOf(_) => false,
+            Instruction::TypeOfGlobal(_) => false,
+            Instruction::CaughtError => false,
+            Instruction::ForInOfValue => false,
             // may throw due to unspreadable array items
-            BasicBlockInstruction::Array(items) => {
+            Instruction::Array(items) => {
                 items.iter().any(|it| matches!(it, ArrayElement::Spread(_)))
             }
             // may throw due to unspreadable object items
-            BasicBlockInstruction::Object(_, props) => {
+            Instruction::Object(_, props) => {
                 props.iter().any(|p| matches!(p, ObjectProperty::Spread(_)))
             }
             // Moving super around is dangerous but it doesn't have side effects itself
-            BasicBlockInstruction::Super => false,
+            Instruction::Super => false,
             // extending things like "1" or "undefined" can throw
-            BasicBlockInstruction::CreateClass(extends) => extends.is_some(),
+            Instruction::CreateClass(extends) => extends.is_some(),
             // may throw due to unspreadable array items
-            BasicBlockInstruction::ArrayPattern(_, _) => true,
+            Instruction::ArrayPattern(_, _) => true,
             // may throw due to unspreadable object items
-            BasicBlockInstruction::ObjectPattern(_, _) => true,
+            Instruction::ObjectPattern(_, _) => true,
             // just unpacking what's conceptually already there
-            BasicBlockInstruction::PatternUnpack(_, _) => false,
-            BasicBlockInstruction::TempExit(_, _) => true,
+            Instruction::PatternUnpack(_, _) => false,
+            Instruction::TempExit(_, _) => true,
             // don't mess with phi
-            BasicBlockInstruction::Phi(_) => true,
-            BasicBlockInstruction::Function(_) => false,
-            BasicBlockInstruction::Call(_, _) => true,
+            Instruction::Phi(_) => true,
+            Instruction::Function(_) => false,
+            Instruction::Call(_, _) => true,
             // may throw but shouldn't
-            BasicBlockInstruction::New(_, _) => true,
-            BasicBlockInstruction::ArgumentRead(_) => false,
-            BasicBlockInstruction::ArgumentRest(_) => false,
-            BasicBlockInstruction::Read(lhs) => lhs.read_may_have_side_effects(),
-            BasicBlockInstruction::Write(_, _) => true,
-            BasicBlockInstruction::Delete(_) => true,
+            Instruction::New(_, _) => true,
+            Instruction::ArgumentRead(_) => false,
+            Instruction::ArgumentRest(_) => false,
+            Instruction::Read(lhs) => lhs.read_may_have_side_effects(),
+            Instruction::Write(_, _) => true,
+            Instruction::Delete(_) => true,
         }
     }
 }

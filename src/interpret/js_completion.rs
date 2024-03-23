@@ -1,10 +1,12 @@
+use crate::basic_blocks::BreakableId;
+
 use super::JsType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsCompletion {
     Normal(JsType),
-    Break(usize),
-    Continue(usize),
+    Break(BreakableId),
+    Continue(BreakableId),
     Return(JsType),
 }
 

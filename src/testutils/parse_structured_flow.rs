@@ -1,10 +1,13 @@
 use nom::IResult;
 
-use crate::basic_blocks::{BreakableId, ExitType, StructuredFlow};
+use crate::basic_blocks::{
+    BasicBlockEnvironment, BreakableId, ExitType, FunctionId, StructuredFlow, StructuredFunction,
+    StructuredModule,
+};
 
-use super::parse_single_instruction;
+use super::parse_test_instruction;
 
-pub fn parse_structured_flow(input: &str) -> StructuredFlow {
+pub fn parse_test_flow(input: &str) -> StructuredFlow {
     use nom::branch::*;
     use nom::bytes::complete::*;
     use nom::character::complete::*;
@@ -42,13 +45,14 @@ pub fn parse_structured_flow(input: &str) -> StructuredFlow {
 
     fn parse_braced_block(input: &str) -> IResult<&str, StructuredFlow> {
         let (input, brk) = parse_brk(input)?;
+        let input = whitespace!(input);
         let (input, contents) = parse_many_braced(input)?;
 
         Ok((input, StructuredFlow::Block(brk, contents)))
     }
 
     fn parse_instructions(input: &str) -> IResult<&str, StructuredFlow> {
-        let (input, (varname, ins)) = parse_single_instruction(input)?;
+        let (input, (varname, ins)) = parse_test_instruction(input)?;
 
         Ok((input, StructuredFlow::Instruction(varname, ins)))
     }
@@ -151,7 +155,6 @@ pub fn parse_structured_flow(input: &str) -> StructuredFlow {
         ))(input)?;
 
         let input = whitespace!(input);
-
         Ok((input, out))
     }
 
@@ -162,13 +165,38 @@ pub fn parse_structured_flow(input: &str) -> StructuredFlow {
     complete
 }
 
+pub fn parse_test_module(input: Vec<&str>) -> StructuredModule {
+    StructuredModule {
+        functions: input
+            .into_iter()
+            .enumerate()
+            .map(|(func_id, func)| {
+                let parsed = parse_test_flow(func);
+                (
+                    FunctionId(func_id),
+                    StructuredFunction {
+                        blocks: vec![parsed],
+                        id: FunctionId(func_id),
+                        environment: if func_id == 0 {
+                            BasicBlockEnvironment::Module
+                        } else {
+                            BasicBlockEnvironment::Function(false, false)
+                        },
+                    },
+                )
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_parse_structured_flow() {
-        let parsed = parse_structured_flow(
+        let parsed = parse_test_flow(
             "{
                 $0 = 123
                 if ($0) {
@@ -195,7 +223,7 @@ mod tests {
             Return $4
         }");
 
-        let parsed = parse_structured_flow(
+        let parsed = parse_test_flow(
             "{
                 $0 = 123
                 loop (@2) {
@@ -228,7 +256,7 @@ mod tests {
             Return $3
         }");
 
-        let parsed = parse_structured_flow(
+        let parsed = parse_test_flow(
             "{
                 try (@2) {
                     $0 = 777

@@ -2,7 +2,7 @@ use ordered_float::NotNan;
 
 use super::{InterpretCtx, JsCompletion, JsType};
 
-pub(crate) fn interp_math_ops(
+pub fn interp_math_ops(
     ctx: &mut InterpretCtx,
     l: usize,
     r: usize,

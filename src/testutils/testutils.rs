@@ -8,7 +8,9 @@ use swc_ecma_ast::{Expr, ExprStmt, Module, ModuleItem, Stmt};
 use swc_ecma_codegen::{text_writer::JsWriter, Emitter};
 use swc_ecma_parser::{parse_file_as_expr, EsConfig};
 
-use crate::basic_blocks::{BasicBlockEnvironment, BasicBlockGroup, BasicBlockModule, FunctionId};
+use crate::basic_blocks::{
+    BasicBlockEnvironment, FunctionId, StructuredFunction, StructuredModule,
+};
 use crate::from_ast::{block_to_basic_blocks, module_to_basic_blocks, FromAstCtx};
 use crate::swc_parse::swc_parse;
 
@@ -33,7 +35,7 @@ pub fn parse_expression(source: &str) -> swc_ecma_ast::Expr {
     .unwrap()
 }
 
-pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
+pub fn test_basic_blocks_expr(source: &str) -> StructuredFunction {
     let m = parse_expression(source);
 
     let mut ctx = FromAstCtx::new();
@@ -55,12 +57,12 @@ pub fn test_basic_blocks_expr(source: &str) -> BasicBlockGroup {
     ctx.functions.remove(&FunctionId(1)).unwrap()
 }
 
-pub fn test_basic_blocks(source: &str) -> BasicBlockGroup {
-    let m = test_basic_blocks_module(source);
-    m.top_level_stats().clone()
+pub fn test_basic_blocks(source: &str) -> StructuredFunction {
+    let mut m = test_basic_blocks_module(source);
+    m.take_top_level_stats()
 }
 
-pub fn test_basic_blocks_module(source: &str) -> BasicBlockModule {
+pub fn test_basic_blocks_module(source: &str) -> StructuredModule {
     let m = swc_parse(source);
     module_to_basic_blocks("test.js", &m).unwrap()
 }

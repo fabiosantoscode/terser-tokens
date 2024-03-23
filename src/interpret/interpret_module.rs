@@ -1,18 +1,17 @@
-use interpret_block_group::interpret_function;
-
 use crate::{
     analyze::construct_call_graph,
-    basic_blocks::{BasicBlockModule, FunctionId},
+    basic_blocks::{FunctionId, StructuredModule},
     interpret::JsArgs,
 };
 
-use super::{interpret_block_group, InterpretCtx, JsCompletion};
+use super::{interpret_blocks, interpret_function, InterpretCtx, JsCompletion};
 
-pub fn interpret_module(ctx: &mut InterpretCtx, module: &BasicBlockModule) -> Option<JsCompletion> {
+pub fn interpret_module(ctx: &mut InterpretCtx, module: &StructuredModule) -> Option<JsCompletion> {
     let call_graph = construct_call_graph(&module);
 
     // First, evaluate top-down to gather information for later
-    interpret_block_group(ctx, module.top_level_stats());
+    let top = module.functions.get(&FunctionId(0))?;
+    interpret_blocks(ctx, &top.blocks);
     for interp_func in call_graph.traversal_order.iter().rev() {
         if interp_func == &FunctionId(0) {
             continue; // Not a function, but the top-level block
@@ -70,7 +69,8 @@ pub fn interpret_module(ctx: &mut InterpretCtx, module: &BasicBlockModule) -> Op
         interpret_function(ctx, func, args, true);
     }
 
-    interpret_block_group(ctx, module.top_level_stats())
+    let top = module.functions.get(&FunctionId(0))?;
+    interpret_blocks(ctx, &top.blocks)
 }
 
 #[cfg(test)]
@@ -81,18 +81,19 @@ mod tests {
 
     #[test]
     fn interp_basic_module() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = FunctionId(1)
                 $2 = call $1($0)
-                exit = return $2
+                Return $2
             }",
-            "@0: {
+            "{
                 $3 = 123
-                exit = return $3
+                Return $3
             }",
         ]);
+        let module = module.into();
         let mut ctx = InterpretCtx::from_module(&module);
         assert_eq!(
             interpret_module(&mut ctx, &module),
@@ -102,18 +103,19 @@ mod tests {
 
     #[test]
     fn interp_knownarg_calls() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = FunctionId(1)
                 $2 = call $1($0)
-                exit = return $2
+                Return $2
             }",
-            "@0: {
+            "{
                 $3 = arguments[0]
-                exit = return $3
+                Return $3
             }",
         ]);
+        let module = module.into();
         let mut ctx = InterpretCtx::from_module(&module);
         ctx.disable_tinyfuncs = true;
         assert_eq!(
@@ -121,20 +123,21 @@ mod tests {
             Some(JsCompletion::Return(1.0.into()))
         );
 
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = FunctionId(1)
                 $2 = call $1($0)
                 $3 = call $1($0)
                 $4 = $2 + $3
-                exit = return $4
+                Return $4
             }",
-            "@0: {
+            "{
                 $5 = arguments[0]
-                exit = return $5
+                Return $5
             }",
         ]);
+        let module = module.into();
         let mut ctx = InterpretCtx::from_module(&module);
         ctx.disable_tinyfuncs = true;
         assert_eq!(

@@ -1,50 +1,52 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::basic_blocks::{BasicBlockInstruction, BasicBlockModule, LHS};
+use crate::basic_blocks::{Instruction, StructuredFlow, StructuredModule, LHS};
 
 /// Returns a map of variable indices to instructions that can be inlined.
 /// Inlining is when we take advantage of nested expressions to
 /// reduce the amount of variables that need to be emitted.
 pub fn get_inlined_variables(
-    module: &BasicBlockModule,
+    module: &StructuredModule,
     variable_use_count: &BTreeMap<usize, u32>,
     phi_participants: BTreeSet<usize>,
-) -> BTreeMap<usize, BasicBlockInstruction> {
+) -> BTreeMap<usize, Instruction> {
     let mut ctx = GetInlinedVariablesCtx::new(variable_use_count, phi_participants);
 
     for (_id, block_group) in module.iter() {
         // variables used once that are reorderable. Wherever they were defined, they can be inlined.
         ctx.pure_candidates = block_group
             .iter_all_instructions()
-            .filter(|&(_blk, ins_id, ins)| ctx.is_single_use(ins_id) && ins.can_be_reordered())
-            .map(|(_blk, ins_id, ins)| (ins_id, ins))
+            .filter(|&(ins_id, ins)| ctx.is_single_use(ins_id) && ins.can_be_reordered())
             .collect();
+        ctx.non_reorderable_candidates = vec![];
 
-        for (_, block) in block_group.iter() {
-            ctx.non_reorderable_candidates = vec![];
+        for block in block_group.iter_all_flows() {
+            match block {
+                StructuredFlow::Instruction(var_idx, instruction) => {
+                    let used_vars = match instruction {
+                        Instruction::IncrDecr(_, _) | Instruction::IncrDecrPostfix(_, _) => vec![],
+                        Instruction::Write(LHS::Local(_), written_val) => {
+                            vec![*written_val]
+                        }
+                        _ => instruction.used_vars(),
+                    };
 
-            for (var_idx, instruction) in block.iter() {
-                let used_vars = match instruction {
-                    BasicBlockInstruction::IncrDecr(_, _)
-                    | BasicBlockInstruction::IncrDecrPostfix(_, _) => vec![],
-                    BasicBlockInstruction::Write(LHS::Local(_), written_val) => {
-                        vec![*written_val]
-                    }
-                    _ => instruction.used_vars(),
-                };
+                    // In reverse, check if we can inline an argument in here.
+                    mark_deps(&mut ctx, used_vars);
 
-                // In reverse, check if we can inline an argument in here.
-                mark_deps(&mut ctx, used_vars);
-
-                if ctx.is_single_use(var_idx) {
-                    // We can inline this variable later. Is it reorderable or not?
-                    if !instruction.can_be_reordered() {
-                        ctx.non_reorderable_candidates.push((var_idx, instruction));
+                    if ctx.is_single_use(*var_idx) {
+                        // We can inline this variable later. Is it reorderable or not?
+                        if !instruction.can_be_reordered() {
+                            ctx.non_reorderable_candidates.push((*var_idx, instruction));
+                        }
                     }
                 }
-            }
+                block => {
+                    mark_deps(&mut ctx, block.used_vars());
 
-            mark_deps(&mut ctx, block.exit.used_vars());
+                    ctx.non_reorderable_candidates = vec![];
+                }
+            }
         }
     }
 
@@ -71,13 +73,13 @@ fn mark_deps(ctx: &mut GetInlinedVariablesCtx<'_>, dependencies: Vec<usize>) {
 }
 
 pub struct GetInlinedVariablesCtx<'blkmod> {
-    pub pure_candidates: BTreeMap<usize, &'blkmod BasicBlockInstruction>,
+    pub pure_candidates: BTreeMap<usize, &'blkmod Instruction>,
     pub phi_participants: BTreeSet<usize>,
-    pub non_reorderable_candidates: Vec<(usize, &'blkmod BasicBlockInstruction)>,
+    pub non_reorderable_candidates: Vec<(usize, &'blkmod Instruction)>,
     /// from count_variable_uses()
     pub variable_use_count: &'blkmod BTreeMap<usize, u32>,
     /// Our final result
-    pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
+    pub inlined_variables: BTreeMap<usize, Instruction>,
 }
 
 impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
@@ -95,19 +97,14 @@ impl<'blkmod> GetInlinedVariablesCtx<'blkmod> {
         self.variable_use_count.get(&var_idx) == Some(&1)
     }
 
-    fn pop_reorderable_candidate(
-        &mut self,
-        var_idx: usize,
-    ) -> Option<&'blkmod BasicBlockInstruction> {
+    fn pop_reorderable_candidate(&mut self, var_idx: usize) -> Option<&'blkmod Instruction> {
         self.pure_candidates.remove(&var_idx)
     }
 
-    fn force_mark_inlineable(&mut self, index: usize, ins: &BasicBlockInstruction) -> bool {
+    fn force_mark_inlineable(&mut self, index: usize, ins: &Instruction) -> bool {
         if matches!(
             ins,
-            BasicBlockInstruction::Phi(_)
-                | BasicBlockInstruction::ArgumentRead(_)
-                | BasicBlockInstruction::ArgumentRest(_)
+            Instruction::Phi(_) | Instruction::ArgumentRead(_) | Instruction::ArgumentRest(_)
         ) || self.phi_participants.contains(&index)
         {
             return false;
@@ -124,12 +121,12 @@ mod tests {
     use super::*;
     use crate::{analyze::count_variable_uses, testutils::*};
 
-    fn test_inlined_vars(module: &BasicBlockModule) -> BTreeMap<usize, BasicBlockInstruction> {
+    fn test_inlined_vars(module: &StructuredModule) -> BTreeMap<usize, Instruction> {
         let variable_use_count = count_variable_uses(module);
         let phied = module
             .iter_all_instructions()
-            .flat_map(|(_, _, varname, ins)| match ins {
-                BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
+            .flat_map(|(_, varname, ins)| match ins {
+                Instruction::Phi(vars) => vec![&vec![varname], vars]
                     .into_iter()
                     .flatten()
                     .copied()
@@ -143,17 +140,14 @@ mod tests {
 
     #[test]
     fn test_inline_vars() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = 2
-                exit = jump @1
-            }
-            @1: {
                 $2 = $0 + $1
                 $3 = 3
                 $4 = $1 + $3
-                exit = return $2
+                Return $2
             }
             ",
         ]);
@@ -171,12 +165,12 @@ mod tests {
 
     #[test]
     fn test_adjacent_mutation() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = call $0()
                 $2 = $1
-                exit = return $2
+                Return $2
             }",
         ]);
 
@@ -193,12 +187,12 @@ mod tests {
 
     #[test]
     fn test_adjacent_mutation_2() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = write_non_local $$99 $0
                 $2 = write_non_local $$99 $1
-                exit = return $2
+                Return $2
             }",
         ]);
 
@@ -215,14 +209,14 @@ mod tests {
 
     #[test]
     fn test_adjacent_mutation_3() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = 4
                 $2 = write_non_local $$99 $0
                 $3 = write_non_local $$99 $1
                 $4 = call $2($3)
-                exit = return $4
+                Return $4
             }",
         ]);
 
@@ -241,8 +235,8 @@ mod tests {
 
     #[test]
     fn test_adjacent_mutation_4() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = 2
                 $2 = write_non_local $$99 $1
@@ -250,7 +244,7 @@ mod tests {
                 $4 = write_non_local $$99 $0
                 $5 = write_non_local $$99 $3
                 $6 = call $4($5)
-                exit = return $6
+                Return $6
             }",
         ]);
 
@@ -270,14 +264,14 @@ mod tests {
 
     #[test]
     fn test_multifunc() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $8 = FunctionId(1)
                 $11 = FunctionId(3)
                 $13 = call $11()
                 $15 = call $8()
                 $16 = $13 + $15
-                exit = return $16
+                Return $16
             }",
         ]);
 
@@ -296,14 +290,14 @@ mod tests {
 
     #[test]
     fn test_multifunc_out_of_order() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $8 = FunctionId(1)
                 $11 = FunctionId(3)
                 $13 = call $11()
                 $15 = call $8()
                 $16 = $15 + $13
-                exit = return $16
+                Return $16
             }",
         ]);
 
@@ -321,36 +315,21 @@ mod tests {
 
     #[test]
     fn test_phied() {
-        let module = parse_instructions_module(vec![
-            "@0: {
+        let module = parse_test_module(vec![
+            "{
                 $0 = 10
                 $1 = 123
-                exit = jump @1
-            }
-            @1: {
-                exit = cond $1 ? @2..@4 : @4..@6
-            }
-            @2: {
-                $2 = 456
-                exit = jump @3
-            }
-            @3: {
-                exit = jump @6
-            }
-            @4: {
-                $3 = 789
-                exit = jump @5
-            }
-            @5: {
-                exit = jump @6
-            }
-            @6: {
-                $4 = either($2, $3)
-                $5 = $4
-                $6 = 1
-                $7 = $5 + $6
-                $8 = undefined
-                exit = return $8
+                if ($1) {
+                    $2 = 456
+                    $3 = 789
+                } else {
+                    $4 = either($2, $3)
+                    $5 = $4
+                    $6 = 1
+                    $7 = $5 + $6
+                    $8 = undefined
+                    Return $8
+                }
             }",
         ]);
 

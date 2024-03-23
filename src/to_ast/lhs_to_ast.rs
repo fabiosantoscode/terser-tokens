@@ -1,6 +1,6 @@
 use swc_ecma_ast::{ComputedPropName, Expr, Ident, MemberExpr, MemberProp, PrivateName};
 
-use crate::basic_blocks::{BasicBlockInstruction, ObjectKey, LHS};
+use crate::basic_blocks::{Instruction, ObjectKey, LHS};
 
 use super::{build_identifier, build_identifier_str, ref_or_inlined_expr, ToAstContext};
 
@@ -21,10 +21,7 @@ fn lhs_to_ast_expr_inner(ctx: &mut ToAstContext, lhs: &LHS, depth: usize) -> Exp
         LHS::Global(varname) => build_identifier_str(&varname),
         LHS::Member(lhs, member) => match lhs.as_ref() {
             LHS::Local(v)
-                if matches!(
-                    ctx.peek_inlined_expression(*v),
-                    Some(BasicBlockInstruction::Super)
-                ) =>
+                if matches!(ctx.peek_inlined_expression(*v), Some(Instruction::Super)) =>
             {
                 // Super props are special!
 

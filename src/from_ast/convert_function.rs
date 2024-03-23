@@ -5,8 +5,7 @@ use super::{
     FuncBlockOrRetExpr, FunctionLike, PatType,
 };
 use crate::basic_blocks::{
-    BasicBlockEnvironment, BasicBlockInstruction, ExitType, FunctionId, NonLocalId, StructuredFlow,
-    LHS,
+    BasicBlockEnvironment, ExitType, FunctionId, Instruction, NonLocalId, StructuredFlow, LHS,
 };
 
 /// Convert a function to basic blocks. Function declarations are special because since they're hoisted, we don't create a variable for them. Instead, the caller provides it.
@@ -22,8 +21,7 @@ pub fn function_to_basic_blocks<'a, 'decl>(
     // Only a named FnExpr can have two simultaneous bindings. Outside (maybe) and inside.
     let (outer_varname, inner_varname) = match function {
         FunctionLike::ArrowExpr(_) | FunctionLike::FnExpr(FnExpr { ident: None, .. }) => {
-            let (flow, outer_varname) =
-                ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
+            let (flow, outer_varname) = ctx.push_instruction(Instruction::Function(fn_id));
             function_flow.extend(flow);
 
             (outer_varname, None)
@@ -31,22 +29,18 @@ pub fn function_to_basic_blocks<'a, 'decl>(
         FunctionLike::FnExpr(FnExpr {
             ident: Some(ident), ..
         }) => {
-            let (flow, undef) = ctx.push_instruction(BasicBlockInstruction::Undefined);
+            let (flow, undef) = ctx.push_instruction(Instruction::Undefined);
             function_flow.extend(flow);
 
             let non_local_id = NonLocalId(ctx.get_var_index());
-            let (flow, _) = ctx.push_instruction(BasicBlockInstruction::Write(
-                LHS::NonLocal(non_local_id),
-                undef,
-            ));
+            let (flow, _) =
+                ctx.push_instruction(Instruction::Write(LHS::NonLocal(non_local_id), undef));
             function_flow.extend(flow);
 
-            let (flow, outer_varname) =
-                ctx.push_instruction(BasicBlockInstruction::Function(fn_id));
+            let (flow, outer_varname) = ctx.push_instruction(Instruction::Function(fn_id));
             function_flow.extend(flow);
 
-            let write_non_local =
-                BasicBlockInstruction::Write(LHS::NonLocal(non_local_id), outer_varname);
+            let write_non_local = Instruction::Write(LHS::NonLocal(non_local_id), outer_varname);
             let (flow, _) = ctx.push_instruction(write_non_local);
             function_flow.extend(flow);
 
@@ -103,16 +97,14 @@ pub fn function_to_basic_blocks<'a, 'decl>(
             |(i, pat)| -> Result<(), String> {
                 match pat {
                     Pat::Rest(rest_pat) => {
-                        let (flow, arg) =
-                            ctx.push_instruction(BasicBlockInstruction::ArgumentRest(i));
+                        let (flow, arg) = ctx.push_instruction(Instruction::ArgumentRest(i));
                         func_body.extend(flow);
                         let (flow, _) =
                             pat_to_basic_blocks(ctx, PatType::FunArg, &rest_pat.arg, arg)?;
                         func_body.extend(flow);
                     }
                     _ => {
-                        let (flow, arg) =
-                            ctx.push_instruction(BasicBlockInstruction::ArgumentRead(i));
+                        let (flow, arg) = ctx.push_instruction(Instruction::ArgumentRead(i));
                         func_body.extend(flow);
                         let (flow, _) = pat_to_basic_blocks(ctx, PatType::FunArg, pat, arg)?;
                         func_body.extend(flow);
@@ -124,8 +116,7 @@ pub fn function_to_basic_blocks<'a, 'decl>(
 
         // If this is a named FnExpr, we need another binding here.
         if let Some((name, nloc)) = inner_varname {
-            let (flow, nloc) =
-                ctx.push_instruction(BasicBlockInstruction::Read(LHS::NonLocal(nloc)));
+            let (flow, nloc) = ctx.push_instruction(Instruction::Read(LHS::NonLocal(nloc)));
             func_body.extend(flow);
 
             let (flow, _) = ctx.declare_name(&name, nloc);
@@ -159,10 +150,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::basic_blocks::{BasicBlockGroup, FunctionId};
+    use crate::basic_blocks::{FunctionId, StructuredFunction};
     use crate::swc_parse::swc_parse;
 
-    fn conv_fn(src: &str) -> BTreeMap<FunctionId, BasicBlockGroup> {
+    fn conv_fn(src: &str) -> BTreeMap<FunctionId, StructuredFunction> {
         let mut ctx = FromAstCtx::new();
         let func = swc_parse(src);
         let decl = func.body[0]
@@ -185,18 +176,13 @@ mod tests {
         insta::assert_debug_snapshot!(func, @r###"
         {
             FunctionId(1): function():
-            @0: {
-                $1 = arguments[0]
-                $2 = arguments[1]
-            }
-            @1: {
-                $3 = $1
-                $4 = $2
-                $5 = $3 + $4
-            }
-            @2: {
-                exit = return $5
-            },
+            $1 = arguments[0]
+            $2 = arguments[1]
+            $3 = $1
+            $4 = $2
+            $5 = $3 + $4
+            Return $5
+            ,
         }
         "###);
     }
@@ -207,12 +193,11 @@ mod tests {
         insta::assert_debug_snapshot!(func, @r###"
         {
             FunctionId(1): function():
-            @0: {
-                $1 = arguments[0]
-                $2 = arguments[1...]
-                $3 = $2
-                exit = return $3
-            },
+            $1 = arguments[0]
+            $2 = arguments[1...]
+            $3 = $2
+            Return $3
+            ,
         }
         "###);
     }
@@ -228,22 +213,20 @@ mod tests {
         insta::assert_debug_snapshot!(func, @r###"
         {
             FunctionId(1): function():
-            @0: {
-                $1 = undefined
-                $3 = write_non_local $$2 $1
-                $4 = 1
-                $5 = write_non_local $$2 $4
-                $6 = undefined
-                $8 = write_non_local $$7 $6
-                $9 = FunctionId(2)
-                $10 = write_non_local $$7 $9
-            },
+            $1 = undefined
+            $3 = write_non_local $$2 $1
+            $4 = 1
+            $5 = write_non_local $$2 $4
+            $6 = undefined
+            $8 = write_non_local $$7 $6
+            $9 = FunctionId(2)
+            $10 = write_non_local $$7 $9
+            ,
             FunctionId(2): function():
-            @0: {
-                $11 = read_non_local $$7
-                $12 = read_non_local $$2
-                exit = return $12
-            },
+            $11 = read_non_local $$7
+            $12 = read_non_local $$2
+            Return $12
+            ,
         }
         "###);
     }
@@ -258,22 +241,20 @@ mod tests {
         insta::assert_debug_snapshot!(func, @r###"
         {
             FunctionId(1): function():
-            @0: {
-                $1 = undefined
-                $3 = write_non_local $$2 $1
-                $4 = arguments[0]
-                $5 = write_non_local $$2 $4
-                $6 = undefined
-                $8 = write_non_local $$7 $6
-                $9 = FunctionId(2)
-                $10 = write_non_local $$7 $9
-            },
+            $1 = undefined
+            $3 = write_non_local $$2 $1
+            $4 = arguments[0]
+            $5 = write_non_local $$2 $4
+            $6 = undefined
+            $8 = write_non_local $$7 $6
+            $9 = FunctionId(2)
+            $10 = write_non_local $$7 $9
+            ,
             FunctionId(2): function():
-            @0: {
-                $11 = read_non_local $$7
-                $12 = read_non_local $$2
-                exit = return $12
-            },
+            $11 = read_non_local $$7
+            $12 = read_non_local $$2
+            Return $12
+            ,
         }
         "###);
     }
@@ -295,44 +276,40 @@ mod tests {
         insta::assert_debug_snapshot!(func, @r###"
         {
             FunctionId(1): function():
-            @0: {
-                $1 = undefined
-                $3 = write_non_local $$2 $1
-                $4 = 1
-                $5 = write_non_local $$2 $4
-                $6 = undefined
-                $8 = write_non_local $$7 $6
-                $9 = FunctionId(2)
-                $10 = write_non_local $$7 $9
-                $13 = undefined
-                $15 = write_non_local $$14 $13
-                $16 = FunctionId(3)
-                $17 = write_non_local $$14 $16
-            },
+            $1 = undefined
+            $3 = write_non_local $$2 $1
+            $4 = 1
+            $5 = write_non_local $$2 $4
+            $6 = undefined
+            $8 = write_non_local $$7 $6
+            $9 = FunctionId(2)
+            $10 = write_non_local $$7 $9
+            $13 = undefined
+            $15 = write_non_local $$14 $13
+            $16 = FunctionId(3)
+            $17 = write_non_local $$14 $16
+            ,
             FunctionId(2): function():
-            @0: {
-                $11 = read_non_local $$7
-                $12 = read_non_local $$2
-                exit = return $12
-            },
+            $11 = read_non_local $$7
+            $12 = read_non_local $$2
+            Return $12
+            ,
             FunctionId(3): function():
-            @0: {
-                $18 = undefined
-                $20 = write_non_local $$19 $18
-                $21 = read_non_local $$14
-                $22 = 2
-                $23 = write_non_local $$19 $22
-                $24 = undefined
-                $26 = write_non_local $$25 $24
-                $27 = FunctionId(4)
-                $28 = write_non_local $$25 $27
-            },
+            $18 = undefined
+            $20 = write_non_local $$19 $18
+            $21 = read_non_local $$14
+            $22 = 2
+            $23 = write_non_local $$19 $22
+            $24 = undefined
+            $26 = write_non_local $$25 $24
+            $27 = FunctionId(4)
+            $28 = write_non_local $$25 $27
+            ,
             FunctionId(4): function():
-            @0: {
-                $29 = read_non_local $$25
-                $30 = read_non_local $$19
-                exit = return $30
-            },
+            $29 = read_non_local $$25
+            $30 = read_non_local $$19
+            Return $30
+            ,
         }
         "###);
     }
@@ -351,23 +328,21 @@ mod tests {
         insta::assert_debug_snapshot!(func, @r###"
         {
             FunctionId(1): function():
-            @0: {
-                $1 = undefined
-                $3 = write_non_local $$2 $1
-                $4 = read_non_local $$2
-                $5 = 999
-                $6 = write_non_local $$2 $5
-                $7 = undefined
-                $9 = write_non_local $$8 $7
-                $10 = FunctionId(2)
-                $11 = write_non_local $$8 $10
-            },
+            $1 = undefined
+            $3 = write_non_local $$2 $1
+            $4 = read_non_local $$2
+            $5 = 999
+            $6 = write_non_local $$2 $5
+            $7 = undefined
+            $9 = write_non_local $$8 $7
+            $10 = FunctionId(2)
+            $11 = write_non_local $$8 $10
+            ,
             FunctionId(2): function():
-            @0: {
-                $12 = read_non_local $$8
-                $13 = read_non_local $$2
-                exit = return $13
-            },
+            $12 = read_non_local $$8
+            $13 = read_non_local $$2
+            Return $13
+            ,
         }
         "###);
     }

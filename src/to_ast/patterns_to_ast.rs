@@ -3,18 +3,18 @@ use swc_ecma_ast::{
     RestPat, Stmt,
 };
 
-use crate::basic_blocks::{ArrayPatternPiece, BasicBlockInstruction, ObjectPatternPiece};
+use crate::basic_blocks::{ArrayPatternPiece, Instruction, ObjectPatternPiece};
 
 use super::{build_binding_identifier, build_var_decl, ref_or_inlined_expr, ToAstContext};
 
 /// ObjectPattern and ArrayPattern are not expressions, so we need to emit them as statements.
 pub fn pattern_to_statement(
-    ctx: &mut ToAstContext<'_>,
-    instruction: &BasicBlockInstruction,
+    ctx: &mut ToAstContext,
+    instruction: &Instruction,
     variable: usize,
 ) -> Option<Stmt> {
     match instruction {
-        BasicBlockInstruction::ObjectPattern(base, items) => {
+        Instruction::ObjectPattern(base, items) => {
             // Creates a statement itself
             let variables = ctx.create_pattern(variable, items.len());
             let props = items
@@ -57,7 +57,7 @@ pub fn pattern_to_statement(
 
             Some(build_var_decl(pat, ref_or_inlined_expr(ctx, *base)))
         }
-        BasicBlockInstruction::ArrayPattern(base, items) => {
+        Instruction::ArrayPattern(base, items) => {
             // Creates a statement itself
             let variables = ctx.create_pattern(variable, items.len());
             let elems = items
@@ -244,7 +244,6 @@ mod tests {
         var { ["x"]: a } = {
             x: 1
         };
-        var b = a;
         "###);
     }
 

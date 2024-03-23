@@ -9,7 +9,7 @@ pub struct FunctionId(pub usize);
 /// and multiple ways of doing the same thing.
 /// These cannot do control flow, but can do function calls, binops and other basic operations.
 #[derive(Clone, PartialEq)]
-pub enum BasicBlockInstruction {
+pub enum Instruction {
     LitNumber(f64),
     LitBool(bool),
     LitString(String),
@@ -93,24 +93,24 @@ pub enum TempExitType {
     Await,
 }
 
-impl BasicBlockInstruction {
+impl Instruction {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
-            BasicBlockInstruction::LitNumber(_) => vec![],
-            BasicBlockInstruction::LitBool(_) => vec![],
-            BasicBlockInstruction::LitString(_) => vec![],
-            BasicBlockInstruction::Ref(id) => vec![*id],
-            BasicBlockInstruction::UnaryOp(_, v) => vec![*v],
-            BasicBlockInstruction::BinOp(_, l, r) => vec![*l, *r],
-            BasicBlockInstruction::IncrDecr(v, _) => v.used_vars(),
-            BasicBlockInstruction::IncrDecrPostfix(v, _) => v.used_vars(),
-            BasicBlockInstruction::Phi(vars) => vars.iter().cloned().collect(),
-            BasicBlockInstruction::Undefined => vec![],
-            BasicBlockInstruction::Null => vec![],
-            BasicBlockInstruction::This => vec![],
-            BasicBlockInstruction::TypeOf(v) => vec![*v],
-            BasicBlockInstruction::TypeOfGlobal(_) => vec![],
-            BasicBlockInstruction::Array(elements) => elements
+            Instruction::LitNumber(_) => vec![],
+            Instruction::LitBool(_) => vec![],
+            Instruction::LitString(_) => vec![],
+            Instruction::Ref(id) => vec![*id],
+            Instruction::UnaryOp(_, v) => vec![*v],
+            Instruction::BinOp(_, l, r) => vec![*l, *r],
+            Instruction::IncrDecr(v, _) => v.used_vars(),
+            Instruction::IncrDecrPostfix(v, _) => v.used_vars(),
+            Instruction::Phi(vars) => vars.iter().cloned().collect(),
+            Instruction::Undefined => vec![],
+            Instruction::Null => vec![],
+            Instruction::This => vec![],
+            Instruction::TypeOf(v) => vec![*v],
+            Instruction::TypeOfGlobal(_) => vec![],
+            Instruction::Array(elements) => elements
                 .iter()
                 .filter_map(|e| match e {
                     ArrayElement::Hole => None,
@@ -118,7 +118,7 @@ impl BasicBlockInstruction {
                     ArrayElement::Spread(id) => Some(*id),
                 })
                 .collect(),
-            BasicBlockInstruction::Object(proto, props) => proto
+            Instruction::Object(proto, props) => proto
                 .iter()
                 .cloned()
                 .chain(
@@ -131,12 +131,10 @@ impl BasicBlockInstruction {
                         .flatten(),
                 )
                 .collect(),
-            BasicBlockInstruction::CreateClass(maybe_extends) => {
-                maybe_extends.iter().cloned().collect()
-            }
-            BasicBlockInstruction::Super => vec![],
-            BasicBlockInstruction::ArrayPattern(input, _) => vec![*input],
-            BasicBlockInstruction::ObjectPattern(input, pat_pieces) => {
+            Instruction::CreateClass(maybe_extends) => maybe_extends.iter().cloned().collect(),
+            Instruction::Super => vec![],
+            Instruction::ArrayPattern(input, _) => vec![*input],
+            Instruction::ObjectPattern(input, pat_pieces) => {
                 let mut res = vec![*input];
                 for piece in pat_pieces.iter() {
                     if let ObjectPatternPiece::TakeComputedKey(id) = piece {
@@ -145,47 +143,46 @@ impl BasicBlockInstruction {
                 }
                 res
             }
-            BasicBlockInstruction::PatternUnpack(base, _idx) => vec![*base],
-            BasicBlockInstruction::TempExit(_, arg) => vec![*arg],
-            BasicBlockInstruction::CaughtError => vec![],
-            BasicBlockInstruction::ForInOfValue => vec![],
-            BasicBlockInstruction::Function(_) => vec![],
-            BasicBlockInstruction::Call(callee, args)
-            | BasicBlockInstruction::New(callee, args) => {
+            Instruction::PatternUnpack(base, _idx) => vec![*base],
+            Instruction::TempExit(_, arg) => vec![*arg],
+            Instruction::CaughtError => vec![],
+            Instruction::ForInOfValue => vec![],
+            Instruction::Function(_) => vec![],
+            Instruction::Call(callee, args) | Instruction::New(callee, args) => {
                 let mut res = Vec::with_capacity(args.len() + 1);
                 res.push(*callee);
                 res.extend(args);
                 res
             }
-            BasicBlockInstruction::ArgumentRead(_) => vec![],
-            BasicBlockInstruction::ArgumentRest(_) => vec![],
-            BasicBlockInstruction::Read(lhs) => lhs.used_vars(),
-            BasicBlockInstruction::Write(lhs, val) => {
+            Instruction::ArgumentRead(_) => vec![],
+            Instruction::ArgumentRest(_) => vec![],
+            Instruction::Read(lhs) => lhs.used_vars(),
+            Instruction::Write(lhs, val) => {
                 let mut res = lhs.used_vars();
                 res.push(*val);
                 res
             }
-            BasicBlockInstruction::Delete(lhs) => lhs.used_vars(),
+            Instruction::Delete(lhs) => lhs.used_vars(),
         }
     }
 
     pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
-            BasicBlockInstruction::LitNumber(_) => vec![],
-            BasicBlockInstruction::LitBool(_) => vec![],
-            BasicBlockInstruction::LitString(_) => vec![],
-            BasicBlockInstruction::Ref(id) => vec![id],
-            BasicBlockInstruction::UnaryOp(_, v) => vec![v],
-            BasicBlockInstruction::BinOp(_, l, r) => vec![l, r],
-            BasicBlockInstruction::IncrDecr(v, _) => v.used_vars_mut(),
-            BasicBlockInstruction::IncrDecrPostfix(v, _) => v.used_vars_mut(),
-            BasicBlockInstruction::Phi(vars) => vars.iter_mut().collect(),
-            BasicBlockInstruction::Undefined => vec![],
-            BasicBlockInstruction::Null => vec![],
-            BasicBlockInstruction::This => vec![],
-            BasicBlockInstruction::TypeOf(v) => vec![v],
-            BasicBlockInstruction::TypeOfGlobal(_) => vec![],
-            BasicBlockInstruction::Array(elements) => elements
+            Instruction::LitNumber(_) => vec![],
+            Instruction::LitBool(_) => vec![],
+            Instruction::LitString(_) => vec![],
+            Instruction::Ref(id) => vec![id],
+            Instruction::UnaryOp(_, v) => vec![v],
+            Instruction::BinOp(_, l, r) => vec![l, r],
+            Instruction::IncrDecr(v, _) => v.used_vars_mut(),
+            Instruction::IncrDecrPostfix(v, _) => v.used_vars_mut(),
+            Instruction::Phi(vars) => vars.iter_mut().collect(),
+            Instruction::Undefined => vec![],
+            Instruction::Null => vec![],
+            Instruction::This => vec![],
+            Instruction::TypeOf(v) => vec![v],
+            Instruction::TypeOfGlobal(_) => vec![],
+            Instruction::Array(elements) => elements
                 .iter_mut()
                 .filter_map(|e| match e {
                     ArrayElement::Hole => None,
@@ -193,7 +190,7 @@ impl BasicBlockInstruction {
                     ArrayElement::Spread(id) => Some(id),
                 })
                 .collect(),
-            BasicBlockInstruction::Object(proto, props) => proto
+            Instruction::Object(proto, props) => proto
                 .iter_mut()
                 .map(|proto| proto)
                 .chain(
@@ -208,12 +205,10 @@ impl BasicBlockInstruction {
                         .flatten(),
                 )
                 .collect(),
-            BasicBlockInstruction::CreateClass(optional_extends) => {
-                optional_extends.iter_mut().collect()
-            }
-            BasicBlockInstruction::Super => vec![],
-            BasicBlockInstruction::ArrayPattern(input, _) => vec![input],
-            BasicBlockInstruction::ObjectPattern(input, pieces) => {
+            Instruction::CreateClass(optional_extends) => optional_extends.iter_mut().collect(),
+            Instruction::Super => vec![],
+            Instruction::ArrayPattern(input, _) => vec![input],
+            Instruction::ObjectPattern(input, pieces) => {
                 let mut res = vec![input];
                 for piece in pieces.iter_mut() {
                     if let ObjectPatternPiece::TakeComputedKey(id) = piece {
@@ -222,27 +217,26 @@ impl BasicBlockInstruction {
                 }
                 res
             }
-            BasicBlockInstruction::PatternUnpack(base, _idx) => vec![base],
-            BasicBlockInstruction::TempExit(_, arg) => vec![arg],
-            BasicBlockInstruction::CaughtError => vec![],
-            BasicBlockInstruction::ForInOfValue => vec![],
-            BasicBlockInstruction::Function(_) => vec![],
-            BasicBlockInstruction::Call(callee, args)
-            | BasicBlockInstruction::New(callee, args) => {
+            Instruction::PatternUnpack(base, _idx) => vec![base],
+            Instruction::TempExit(_, arg) => vec![arg],
+            Instruction::CaughtError => vec![],
+            Instruction::ForInOfValue => vec![],
+            Instruction::Function(_) => vec![],
+            Instruction::Call(callee, args) | Instruction::New(callee, args) => {
                 let mut res = Vec::with_capacity(args.len() + 1);
                 res.push(callee);
                 res.extend(args);
                 res
             }
-            BasicBlockInstruction::ArgumentRead(_) => vec![],
-            BasicBlockInstruction::ArgumentRest(_) => vec![],
-            BasicBlockInstruction::Read(lhs) => lhs.used_vars_mut(),
-            BasicBlockInstruction::Write(lhs, val) => {
+            Instruction::ArgumentRead(_) => vec![],
+            Instruction::ArgumentRest(_) => vec![],
+            Instruction::Read(lhs) => lhs.used_vars_mut(),
+            Instruction::Write(lhs, val) => {
                 let mut res = lhs.used_vars_mut();
                 res.push(val);
                 res
             }
-            BasicBlockInstruction::Delete(lhs) => lhs.used_vars_mut(),
+            Instruction::Delete(lhs) => lhs.used_vars_mut(),
         }
     }
 
@@ -252,19 +246,19 @@ impl BasicBlockInstruction {
 
     pub fn get_read_lhs(&self) -> Option<&LHS> {
         match self {
-            BasicBlockInstruction::Read(lhs) => Some(lhs),
-            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
-            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
+            Instruction::Read(lhs) => Some(lhs),
+            Instruction::IncrDecr(lhs, _) => Some(lhs),
+            Instruction::IncrDecrPostfix(lhs, _) => Some(lhs),
             _ => None,
         }
     }
 
     pub fn get_written_lhs(&self) -> Option<&LHS> {
         match self {
-            BasicBlockInstruction::Write(lhs, _) => Some(lhs),
-            BasicBlockInstruction::IncrDecr(lhs, _) => Some(lhs),
-            BasicBlockInstruction::IncrDecrPostfix(lhs, _) => Some(lhs),
-            BasicBlockInstruction::Delete(lhs) => Some(lhs),
+            Instruction::Write(lhs, _) => Some(lhs),
+            Instruction::IncrDecr(lhs, _) => Some(lhs),
+            Instruction::IncrDecrPostfix(lhs, _) => Some(lhs),
+            Instruction::Delete(lhs) => Some(lhs),
             _ => None,
         }
     }
@@ -282,18 +276,18 @@ impl BasicBlockInstruction {
     #[allow(dead_code)]
     pub fn unwrap_ref(&self) -> usize {
         match self {
-            BasicBlockInstruction::Ref(id) => *id,
+            Instruction::Ref(id) => *id,
             _ => panic!("Expected Ref"),
         }
     }
 
     pub(crate) fn is_immutable_primitive(&self) -> bool {
         match self {
-            BasicBlockInstruction::Undefined
-            | BasicBlockInstruction::Null
-            | BasicBlockInstruction::LitBool(_)
-            | BasicBlockInstruction::LitNumber(_)
-            | BasicBlockInstruction::LitString(_) => true,
+            Instruction::Undefined
+            | Instruction::Null
+            | Instruction::LitBool(_)
+            | Instruction::LitNumber(_)
+            | Instruction::LitString(_) => true,
             _ => false,
         }
     }
@@ -339,14 +333,6 @@ impl LHS {
         match self {
             LHS::NonLocal(id) => Some(id.0),
             LHS::Member(base, _) => base.get_nonlocal_id(),
-            _ => None,
-        }
-    }
-
-    pub fn get_nonlocal_id_mut(&mut self) -> Option<&mut usize> {
-        match self {
-            LHS::NonLocal(id) => Some(&mut id.0),
-            LHS::Member(base, _) => base.get_nonlocal_id_mut(),
             _ => None,
         }
     }

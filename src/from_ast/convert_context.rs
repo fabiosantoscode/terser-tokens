@@ -3,24 +3,24 @@ use std::collections::BTreeMap;
 use swc_ecma_ast::Ident;
 
 use crate::basic_blocks::{
-    BasicBlock, BasicBlockEnvironment, BasicBlockGroup, BasicBlockInstruction, BasicBlockModule,
-    BreakableId, Export, FunctionId, Import, ModuleSummary, NonLocalId, StructuredFlow,
+    BasicBlockEnvironment, BreakableId, Export, FunctionId, Import, Instruction, ModuleSummary,
+    NonLocalId, StructuredFlow, StructuredFunction, StructuredModule,
 };
-use crate::block_ops::{normalize_basic_blocks_tree, normalize_module};
+use crate::block_ops::normalize_module;
 use crate::scope::ScopeTree;
 
 use super::NonLocalInfo;
 
 #[derive(Debug)]
 pub struct FromAstCtx {
-    pub current_function_index: Option<FunctionId>,
-    pub function_index: FunctionId, // TODO duplicate of current_function_index?
+    pub current_function_index: FunctionId,
+    pub function_index: FunctionId,
     pub var_index: usize,
     pub conditionals: Vec<BTreeMap<String, Vec<usize>>>,
     pub scope_tree: ScopeTree<String, NonLocalOrLocal>,
     pub label_tracking: Vec<(NestedIntoStatement, BreakableId)>,
     pub break_index: usize,
-    pub functions: BTreeMap<FunctionId, BasicBlockGroup>,
+    pub functions: BTreeMap<FunctionId, StructuredFunction>,
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
     pub nonlocalinfo: Option<NonLocalInfo>,
@@ -29,7 +29,7 @@ pub struct FromAstCtx {
 impl FromAstCtx {
     pub fn new() -> Self {
         Self {
-            current_function_index: Some(FunctionId(0)),
+            current_function_index: FunctionId(0),
             function_index: FunctionId(0),
             var_index: 0,
             conditionals: vec![],
@@ -43,10 +43,7 @@ impl FromAstCtx {
         }
     }
 
-    pub fn push_instruction(
-        &mut self,
-        node: BasicBlockInstruction,
-    ) -> (Vec<StructuredFlow>, usize) {
+    pub fn push_instruction(&mut self, node: Instruction) -> (Vec<StructuredFlow>, usize) {
         let id = self.var_index;
         self.var_index += 1;
         let flow = StructuredFlow::Instruction(id, node);
@@ -102,36 +99,20 @@ impl FromAstCtx {
         self.exports.push(export);
     }
 
-    pub(crate) fn wrap_up_blocks(
-        &mut self,
-        blocks: Vec<StructuredFlow>,
-    ) -> (FunctionId, BTreeMap<usize, BasicBlock>) {
-        let blocks = normalize_basic_blocks_tree(blocks);
-
-        (
-            self.current_function_index.take().expect(
-                "wrap_up_blocks must be called within a current function (or module) context",
-            ),
-            blocks,
-        )
-    }
-
     pub(crate) fn wrap_up_module(
         &mut self,
         summary: ModuleSummary,
         structured_flow: Vec<StructuredFlow>,
-    ) -> BasicBlockModule {
-        let blocks = normalize_basic_blocks_tree(structured_flow);
-
-        let module_bg = BasicBlockGroup {
+    ) -> StructuredModule {
+        let module_bg = StructuredFunction {
             id: FunctionId(0),
-            blocks,
+            blocks: structured_flow,
             environment: BasicBlockEnvironment::Module,
         };
 
         self.functions.insert(FunctionId(0), module_bg);
 
-        let mut module = BasicBlockModule {
+        let mut module = StructuredModule {
             summary,
             functions: std::mem::take(&mut self.functions),
             imports: std::mem::take(&mut self.imports),
@@ -162,7 +143,7 @@ impl FromAstCtx {
         let scope_tree = std::mem::take(&mut self.scope_tree);
 
         let mut inner_ctx = Self {
-            current_function_index: Some(function_index),
+            current_function_index: function_index,
             function_index: self.function_index,
             var_index: self.var_index,
             conditionals: vec![],
@@ -185,14 +166,12 @@ impl FromAstCtx {
         let flow = convert_in_function(&mut inner_ctx)?;
         func_flow.extend(flow);
 
-        let (id, blocks) = inner_ctx.wrap_up_blocks(func_flow);
-        let function_bg = BasicBlockGroup {
-            id,
-            blocks,
+        let function_bg = StructuredFunction {
+            id: function_index,
+            blocks: StructuredFlow::simplify_vec(func_flow),
             environment,
         };
-
-        inner_ctx.functions.insert(id, function_bg);
+        inner_ctx.functions.insert(function_index, function_bg);
 
         self.functions = std::mem::take(&mut inner_ctx.functions);
         self.scope_tree = std::mem::take(&mut inner_ctx.scope_tree);

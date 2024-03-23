@@ -32,14 +32,13 @@ pub fn class_to_ast(
             StructuredClassMember::Property(block, prop) => {
                 match prop.value {
                     ObjectValue::Property(value) => {
-                        let value_expr =
-                            |ctx: &mut ToAstContext<'_>, needs_forced_statement: bool| {
-                                if !needs_forced_statement {
-                                    ref_or_inlined_expr(ctx, value)
-                                } else {
-                                    statements_forced_to_expr_ast(ctx, block, value)
-                                }
-                            };
+                        let value_expr = |ctx: &mut ToAstContext, needs_forced_statement: bool| {
+                            if !needs_forced_statement {
+                                ref_or_inlined_expr(ctx, value)
+                            } else {
+                                statements_forced_to_expr_ast(ctx, block, value)
+                            }
+                        };
 
                         let class_prop = |key: PropName, value: Expr| {
                             ClassMember::ClassProp(ClassProp {
@@ -104,7 +103,7 @@ pub fn class_to_ast(
                         }
                     }
                     ObjectValue::Method(kind, fn_id) => {
-                        let function = ctx.module.take_function(fn_id).unwrap();
+                        let function = ctx.take_function(fn_id);
                         let function = function_to_ast(ctx, function);
 
                         let class_method = |key: PropName, function: Function| {
@@ -161,7 +160,7 @@ pub fn class_to_ast(
                 }
             }
             StructuredClassMember::Constructor(fn_id) => {
-                let function = ctx.module.take_function(*fn_id).unwrap();
+                let function = ctx.take_function(*fn_id);
                 let function = function_to_ast(ctx, function);
 
                 ClassMember::Constructor(Constructor {
@@ -220,10 +219,12 @@ pub fn class_to_ast(
 #[cfg(test)]
 mod tests {
     use super::super::module_to_ast;
-    use crate::testutils::*;
+    use crate::{block_ops::normalize_module, testutils::*};
 
     fn test_to_ast(source: &str) -> String {
-        let blocks = test_basic_blocks_module(source);
+        let mut blocks = test_basic_blocks_module(source);
+
+        normalize_module(&mut blocks);
 
         let ast = module_to_ast(blocks);
 

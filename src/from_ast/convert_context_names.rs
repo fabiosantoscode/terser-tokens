@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use crate::basic_blocks::{BasicBlockInstruction, NonLocalId, StructuredFlow, LHS};
+use crate::basic_blocks::{Instruction, NonLocalId, StructuredFlow, LHS};
 
 use super::{FromAstCtx, NonLocalInfo, NonLocalOrLocal};
 
@@ -9,7 +9,7 @@ impl FromAstCtx {
     pub fn declare_name(&mut self, name: &str, value: usize) -> (Vec<StructuredFlow>, usize) {
         if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
             let (flow, _id) =
-                self.push_instruction(BasicBlockInstruction::Write(LHS::NonLocal(nonlocal), value));
+                self.push_instruction(Instruction::Write(LHS::NonLocal(nonlocal), value));
 
             (flow, value)
         } else {
@@ -36,10 +36,8 @@ impl FromAstCtx {
     /// Assign or reassign {name}, which can be global, already-declared, or a nonlocal
     pub fn assign_name(&mut self, name: &str, value: usize) -> (Vec<StructuredFlow>, usize) {
         if self.is_global_name(name) {
-            let (flow, _id) = self.push_instruction(BasicBlockInstruction::Write(
-                LHS::Global(name.to_string()),
-                value,
-            ));
+            let (flow, _id) =
+                self.push_instruction(Instruction::Write(LHS::Global(name.to_string()), value));
             (flow, value)
         } else {
             self.declare_name(name, value)
@@ -55,8 +53,7 @@ impl FromAstCtx {
         } else if self.is_unwritten_funscoped(name) {
             let mut write_flow = vec![];
 
-            let (flow, deferred_undefined) =
-                self.push_instruction(BasicBlockInstruction::Undefined);
+            let (flow, deferred_undefined) = self.push_instruction(Instruction::Undefined);
             write_flow.extend(flow);
 
             let (flow, deferred_undefined) = self.assign_name(name, deferred_undefined);
@@ -73,12 +70,11 @@ impl FromAstCtx {
 
     pub fn read_name(&mut self, name: &str) -> (Vec<StructuredFlow>, usize) {
         if let Some(NonLocalOrLocal::NonLocal(nonlocal)) = self.scope_tree.lookup(name) {
-            self.push_instruction(BasicBlockInstruction::Read(LHS::NonLocal(nonlocal)))
+            self.push_instruction(Instruction::Read(LHS::NonLocal(nonlocal)))
         } else if self.is_unwritten_funscoped(name) {
             let mut read_name_flow = vec![];
 
-            let (flow, deferred_undefined) =
-                self.push_instruction(BasicBlockInstruction::Undefined);
+            let (flow, deferred_undefined) = self.push_instruction(Instruction::Undefined);
             read_name_flow.extend(flow);
 
             let (flow, _) = self.assign_name(name, deferred_undefined);
@@ -90,7 +86,7 @@ impl FromAstCtx {
         } else if let Some(nonlocal) = self.scope_tree.lookup(name) {
             unreachable!("nonlocal {:?} not in nonlocalinfo", nonlocal)
         } else {
-            self.push_instruction(BasicBlockInstruction::Read(LHS::Global(name.to_string())))
+            self.push_instruction(Instruction::Read(LHS::Global(name.to_string())))
         }
     }
 
@@ -162,7 +158,7 @@ impl FromAstCtx {
 
             out.push(StructuredFlow::Instruction(
                 phi_idx,
-                BasicBlockInstruction::Phi(phies),
+                Instruction::Phi(phies),
             ));
 
             self.scope_tree
@@ -191,12 +187,11 @@ impl FromAstCtx {
 
         for name in nonlocalinfo.nonlocals.iter() {
             let nonlocal_id = if !parent_nonlocals.contains(name.as_str()) {
-                let (flow, nonlocal_undef) =
-                    self.push_instruction(BasicBlockInstruction::Undefined);
+                let (flow, nonlocal_undef) = self.push_instruction(Instruction::Undefined);
                 nonlocals_flow.extend(flow);
 
                 let wanted_id = NonLocalId(self.get_var_index());
-                let read = BasicBlockInstruction::Write(LHS::NonLocal(wanted_id), nonlocal_undef);
+                let read = Instruction::Write(LHS::NonLocal(wanted_id), nonlocal_undef);
                 let (flow, _) = self.push_instruction(read);
                 nonlocals_flow.extend(flow);
 
@@ -218,9 +213,6 @@ impl FromAstCtx {
 
 #[cfg(test)]
 mod tests {
-    use crate::{basic_blocks::BasicBlockEnvironment, from_ast::NonLocalInfo};
-
-    use super::*;
 
     /*
     #[test]

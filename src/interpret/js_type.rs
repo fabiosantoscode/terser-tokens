@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use ordered_float::NotNan;
 
-use crate::basic_blocks::{BasicBlockInstruction, FunctionId};
+use crate::basic_blocks::{FunctionId, Instruction};
 
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
 pub enum JsType {
@@ -183,11 +183,11 @@ impl JsType {
         }
     }
 
-    pub(crate) fn as_small_literal_instruction(&self) -> Option<BasicBlockInstruction> {
+    pub(crate) fn as_small_literal_instruction(&self) -> Option<Instruction> {
         match self {
-            JsType::TheBoolean(b) => Some(BasicBlockInstruction::LitBool(*b)),
-            JsType::TheNumber(n) => Some(BasicBlockInstruction::LitNumber((*n).into())),
-            JsType::TheString(s) => Some(BasicBlockInstruction::LitString(s.clone())),
+            JsType::TheBoolean(b) => Some(Instruction::LitBool(*b)),
+            JsType::TheNumber(n) => Some(Instruction::LitNumber((*n).into())),
+            JsType::TheString(s) => Some(Instruction::LitString(s.clone())),
             _ => None,
         }
     }

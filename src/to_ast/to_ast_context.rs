@@ -2,18 +2,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     analyze::count_variable_uses,
-    basic_blocks::{BasicBlockInstruction, BasicBlockModule, BreakableId, StructuredFlow},
-    block_ops::{block_group_to_structured_flow, remove_phi},
+    basic_blocks::{
+        BreakableId, FunctionId, Instruction, StructuredFlow, StructuredFunction, StructuredModule,
+    },
+    block_ops::remove_phi_module,
 };
 
 use super::{get_inlined_variables, Base54};
 
 #[derive(Debug)]
-pub struct ToAstContext<'a> {
+pub struct ToAstContext {
     pub caught_error: Option<Base54>,
     pub for_in_of_value: Option<Base54>,
-    pub module: &'a mut BasicBlockModule,
-    pub inlined_variables: BTreeMap<usize, BasicBlockInstruction>,
+    pub inlined_variables: BTreeMap<usize, Instruction>,
     pub variable_use_count: BTreeMap<usize, u32>,
     pub emitted_vars: BTreeMap<usize, Base54>,
     pub gen_var_index: Base54,
@@ -31,7 +32,8 @@ pub struct ToAstContext<'a> {
     /// Object/Array patterns
     pub destructuring_patterns: BTreeMap<usize, Vec<Base54>>,
 
-    /// Classes
+    /// Functions/Classes
+    pub functions: BTreeMap<FunctionId, StructuredFunction>,
     pub classes: BTreeMap<usize, Option<usize>>,
 }
 
@@ -43,12 +45,27 @@ pub struct BreakableStackItem {
     is_anonymous: bool,
 }
 
-impl<'a> ToAstContext<'a> {
-    pub fn new(block_module: &'a mut BasicBlockModule) -> (ToAstContext<'a>, StructuredFlow) {
+impl ToAstContext {
+    pub fn new(block_module: StructuredModule) -> (ToAstContext, StructuredFlow) {
+        Self::new_priv(block_module, None)
+    }
+
+    #[cfg(test)]
+    pub fn new_for_test(
+        block_module: StructuredModule,
+        fake_use_for_tests: usize,
+    ) -> (ToAstContext, StructuredFlow) {
+        Self::new_priv(block_module, Some(fake_use_for_tests))
+    }
+
+    fn new_priv(
+        mut block_module: StructuredModule,
+        fake_use_for_tests: Option<usize>,
+    ) -> (ToAstContext, StructuredFlow) {
         let phied = block_module
             .iter_all_instructions()
-            .flat_map(|(_, _, varname, ins)| match ins {
-                BasicBlockInstruction::Phi(vars) => vec![&vec![varname], vars]
+            .flat_map(|(_, varname, ins)| match ins {
+                Instruction::Phi(vars) => vec![&vec![varname], vars]
                     .into_iter()
                     .flatten()
                     .copied()
@@ -57,19 +74,25 @@ impl<'a> ToAstContext<'a> {
             })
             .collect();
 
-        for (_, block_group) in block_module.iter_mut() {
-            remove_phi(block_group);
-        }
+        remove_phi_module(&mut block_module);
 
-        let variable_use_count = count_variable_uses(&block_module);
+        let mut variable_use_count = count_variable_uses(&block_module);
+        if let Some(fake_use) = fake_use_for_tests {
+            *variable_use_count.entry(fake_use).or_insert(0) += 1;
+        }
         let inlined_variables = get_inlined_variables(&block_module, &variable_use_count, phied);
 
-        let tree = block_group_to_structured_flow(block_module.take_top_level_stats().blocks);
+        let mut functions = std::mem::take(&mut block_module.functions);
+
+        let tree = functions
+            .remove(&FunctionId(0))
+            .expect("modules always have a top-level")
+            .blocks;
 
         let ctx = ToAstContext {
             caught_error: None,
             for_in_of_value: None,
-            module: block_module,
+            functions,
             inlined_variables,
             vars_later: Default::default(),
             forbid_var_decls: false,
@@ -82,7 +105,7 @@ impl<'a> ToAstContext<'a> {
             classes: BTreeMap::new(),
         };
 
-        (ctx, tree)
+        (ctx, StructuredFlow::from_vec(tree))
     }
 
     /// get/create a var, and return whether we should create a var decl for it
@@ -181,6 +204,12 @@ impl<'a> ToAstContext<'a> {
             .expect("taking a class that hasn't been prepared")
     }
 
+    pub(crate) fn take_function(&mut self, fn_id: FunctionId) -> StructuredFunction {
+        self.functions
+            .remove(&fn_id)
+            .expect(&format!("function {fn_id:?} not found"))
+    }
+
     pub(crate) fn get_varname_for_pattern(&self, variable: usize, idx: usize) -> String {
         self.destructuring_patterns
             .get(&variable)
@@ -195,11 +224,11 @@ impl<'a> ToAstContext<'a> {
         self.inlined_variables.contains_key(&variable)
     }
 
-    pub fn get_inlined_expression(&mut self, var_idx: usize) -> Option<BasicBlockInstruction> {
-        self.inlined_variables.remove(&var_idx)
+    pub fn get_inlined_expression(&mut self, var_idx: usize) -> Option<Instruction> {
+        self.inlined_variables.get(&var_idx).cloned()
     }
 
-    pub fn peek_inlined_expression(&mut self, var_idx: usize) -> Option<&BasicBlockInstruction> {
+    pub fn peek_inlined_expression(&mut self, var_idx: usize) -> Option<&Instruction> {
         self.inlined_variables.get(&var_idx)
     }
 
@@ -238,7 +267,7 @@ impl<'a> ToAstContext<'a> {
         &mut self,
         brk_id: &BreakableId,
         is_anonymous: bool,
-        in_breakable: impl Fn(&mut ToAstContext<'_>) -> swc_ecma_ast::Stmt,
+        in_breakable: impl Fn(&mut ToAstContext) -> swc_ecma_ast::Stmt,
     ) -> swc_ecma_ast::Stmt {
         self.breakable_stack.push(BreakableStackItem {
             brk_id: brk_id.clone(),

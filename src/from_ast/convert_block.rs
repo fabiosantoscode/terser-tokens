@@ -1,6 +1,6 @@
 use swc_ecma_ast::{Decl, FnDecl, Stmt};
 
-use crate::basic_blocks::{BasicBlockInstruction, StructuredFlow};
+use crate::basic_blocks::{Instruction, StructuredFlow};
 
 use super::{function_to_basic_blocks, stat_to_basic_blocks, FromAstCtx, FunctionLike};
 
@@ -35,7 +35,7 @@ where
         assert_eq!(flow.len(), 0);
         out_flow.push(StructuredFlow::Instruction(
             varname,
-            BasicBlockInstruction::Function(fn_id),
+            Instruction::Function(fn_id),
         ));
         let (flow, _) = ctx.declare_name(&fn_decl.ident.sym.to_string(), varname);
         out_flow.extend(flow);

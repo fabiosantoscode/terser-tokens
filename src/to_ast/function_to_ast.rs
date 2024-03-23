@@ -3,14 +3,13 @@ use std::collections::{BTreeMap, HashSet};
 use swc_ecma_ast::{BlockStmt, Expr, FnExpr, Function, Param, ParenExpr, Pat, RestPat};
 
 use crate::{
-    basic_blocks::{BasicBlockGroup, BasicBlockInstruction, StructuredFlow},
-    block_ops::block_group_to_structured_flow,
+    basic_blocks::{Instruction, StructuredFlow, StructuredFunction},
     to_ast::build_binding_identifier,
 };
 
 use super::{build_ident_param, to_blockgroup_statements, ToAstContext};
 
-pub fn function_expr_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Expr {
+pub fn function_expr_to_ast(ctx: &mut ToAstContext, func: StructuredFunction) -> Expr {
     Expr::Paren(ParenExpr {
         expr: Box::new(Expr::Fn(FnExpr {
             ident: None,
@@ -20,8 +19,8 @@ pub fn function_expr_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Ex
     })
 }
 
-pub fn function_to_ast(ctx: &mut ToAstContext, func: BasicBlockGroup) -> Function {
-    let mut blocks = block_group_to_structured_flow(func.blocks);
+pub fn function_to_ast(ctx: &mut ToAstContext, func: StructuredFunction) -> Function {
+    let mut blocks = StructuredFlow::from_vec(func.blocks);
     let params = take_param_readers(ctx, &mut blocks);
     let stmts = to_blockgroup_statements(ctx, &blocks);
 
@@ -48,12 +47,12 @@ fn take_param_readers(ctx: &mut ToAstContext, func: &mut StructuredFlow) -> Vec<
 
     for (varname, ins) in func.iter_all_instructions() {
         match ins {
-            BasicBlockInstruction::ArgumentRead(n) => {
+            Instruction::ArgumentRead(n) => {
                 let ident = &ctx.create_varname_for(varname);
                 vars_to_remove.insert(varname);
                 params.insert(*n, build_ident_param(ident));
             }
-            BasicBlockInstruction::ArgumentRest(from_n) => {
+            Instruction::ArgumentRest(from_n) => {
                 let ident = build_binding_identifier(&ctx.create_varname_for(varname));
                 vars_to_remove.insert(varname);
                 params.insert(
@@ -134,15 +133,15 @@ mod tests {
 
     #[test]
     fn to_functions_make_dummy_args() {
-        let block_group = parse_instructions_module(vec![
-            "@0: {
+        let block_group = parse_test_module(vec![
+            "{
                 $0 = FunctionId(1)
-                exit = return $0
+                Return $0
             }",
-            "@0: {
+            "{
                 $1 = arguments[0]
                 $3 = arguments[3]
-                exit = return $3
+                Return $3
             }",
         ]);
 

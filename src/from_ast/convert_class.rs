@@ -5,8 +5,8 @@ use super::{
 };
 use crate::{
     basic_blocks::{
-        BasicBlockInstruction, ClassProperty, MethodKind, ObjectKey, ObjectValue,
-        StructuredClassMember, StructuredFlow,
+        ClassProperty, Instruction, MethodKind, ObjectKey, ObjectValue, StructuredClassMember,
+        StructuredFlow,
     },
     from_ast::function_to_basic_blocks,
 };
@@ -28,7 +28,7 @@ pub fn class_to_basic_blocks(
         None
     };
 
-    let (flow, created_class) = ctx.push_instruction(BasicBlockInstruction::CreateClass(extends));
+    let (flow, created_class) = ctx.push_instruction(Instruction::CreateClass(extends));
     before_class.extend(flow);
 
     if let Some(optional_name) = optional_name {
@@ -48,7 +48,7 @@ pub fn class_to_basic_blocks(
 
                 let (flow, value) = match &class_prop.value {
                     Some(value) => expr_to_basic_blocks(ctx, &*value)?,
-                    None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+                    None => ctx.push_instruction(Instruction::Undefined),
                 };
                 prop_flow.extend(flow);
 
@@ -70,7 +70,7 @@ pub fn class_to_basic_blocks(
 
                 let (flow, value) = match &class_prop.value {
                     Some(value) => expr_to_basic_blocks(ctx, &*value)?,
-                    None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+                    None => ctx.push_instruction(Instruction::Undefined),
                 };
                 prop_flow.extend(flow);
 
@@ -100,7 +100,7 @@ pub fn class_to_basic_blocks(
 
                 let (flow, _, fn_id) =
                     function_to_basic_blocks(ctx, FunctionLike::ClassMethod(&method), None)?;
-                assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
+                assert!(StructuredFlow::is_flow_empty_vec(&flow));
 
                 members.push(StructuredClassMember::Property(
                     prop_flow,
@@ -116,7 +116,7 @@ pub fn class_to_basic_blocks(
 
                 let (flow, _fn_varname, fn_id) =
                     function_to_basic_blocks(ctx, FunctionLike::PrivateMethod(&method), None)?;
-                assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
+                assert!(StructuredFlow::is_flow_empty_vec(&flow));
 
                 members.push(StructuredClassMember::Property(
                     vec![],
@@ -131,7 +131,7 @@ pub fn class_to_basic_blocks(
                 let (flow, _fn_varname, fn_id) =
                     function_to_basic_blocks(ctx, FunctionLike::ClassConstructor(&method), None)?;
 
-                assert!(StructuredFlow::is_structured_flow_vec_empty(&flow));
+                assert!(StructuredFlow::is_flow_empty_vec(&flow));
 
                 members.push(StructuredClassMember::Constructor(fn_id));
             }

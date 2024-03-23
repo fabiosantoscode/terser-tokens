@@ -1,73 +1,43 @@
-use std::collections::BTreeSet;
-
 use crate::{
-    basic_blocks::{BasicBlockExit, BasicBlockGroup, BasicBlockModule},
-    block_ops::{normalize_basic_blocks, normalize_module},
+    basic_blocks::{StructuredFlow, StructuredModule},
+    block_ops::normalize_module,
     interpret::{interpret_module, InterpretCtx, JsType},
 };
 
-pub fn compress_step_evaluate(module: &mut BasicBlockModule) {
-    let mut types = InterpretCtx::from_module(module);
+pub fn compress_step_evaluate(module: &mut StructuredModule) {
+    let mut types = InterpretCtx::from_module(&module);
     interpret_module(&mut types, &module);
 
     let types = types.into_all_variables();
 
-    // statically-analyzable conditions
-    for (_func_id, block_group) in module.iter_mut() {
-        let mut blocks_to_suppress = BTreeSet::new();
+    module.for_each_flow_mut(
+        |_func_id, block| match  block {
+            StructuredFlow::Cond(brk, test, cons, alt) => {
+                let is_truthy = types.get(&test).and_then(JsType::is_truthy);
 
-        for (block_id, block) in block_group.iter_mut() {
-            if blocks_to_suppress.contains(&block_id) {
-                continue;
+                // statically-analyzable conditions
+                match is_truthy {
+                    Some(true) => *block = StructuredFlow::Block(brk.clone(), std::mem::take(cons)),
+                    Some(false) => *block = StructuredFlow::Block(brk.clone(), std::mem::take(alt)),
+                    None => {},
+                };
             }
-
-            match &block.exit {
-                BasicBlockExit::Cond(test, cons_start, cons_end, alt_start, alt_end) => {
-                    let is_truthy = types.get(&test).and_then(JsType::is_truthy);
-
-                    // Known truth-values can eliminate branches
-                    match is_truthy {
-                        Some(true) => {
-                            blocks_to_suppress.extend(*alt_start..=*alt_end);
-                            block.exit = BasicBlockExit::Fallthrough;
+            StructuredFlow::Instruction(varname, ins) => {
+                match types.get(&varname) {
+                    Some(value) => {
+                        if let Some(new_ins) = value.as_small_literal_instruction(/* TODO calculate and pass desired max size here */)
+                        {
+                            *ins = new_ins;
                         }
-                        Some(false) => {
-                            blocks_to_suppress.extend(*cons_start..=*cons_end);
-                            block.exit = BasicBlockExit::Fallthrough;
-                        }
-                        None => continue,
                     }
-                }
-                _ => {}
-            }
-        }
-
-        remove_blocks(block_group, blocks_to_suppress);
-    }
-
-    for (_func_id, _blk_id, varname, ins) in module.iter_all_instructions_mut() {
-        match types.get(&varname) {
-            Some(value) => {
-                if let Some(new_ins) = value.as_small_literal_instruction(/* TODO calculate and pass desired max size here */)
-                {
-                    *ins = new_ins;
+                    None => {}
                 }
             }
-            None => {}
-        }
-    }
+            _ => {}
+        },
+    );
 
     normalize_module(module);
-}
-
-fn remove_blocks(block_group: &mut BasicBlockGroup, blocks_to_suppress: BTreeSet<usize>) {
-    if blocks_to_suppress.len() > 0 {
-        let mut blocks = std::mem::take(&mut block_group.blocks);
-
-        blocks.retain(|block_id, _| !blocks_to_suppress.contains(block_id));
-
-        block_group.blocks = normalize_basic_blocks(blocks);
-    }
 }
 
 #[cfg(test)]
@@ -79,108 +49,96 @@ mod tests {
 
     #[test]
     fn test_evaluate_block() {
-        let mut module = parse_instructions_module(vec![
-            "@0: {
+        let mut module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = 2
                 $2 = $0 + $1
-                exit = return $2
+                Return $2
             }",
-        ]);
+        ])
+        .into();
 
         compress_step_evaluate(&mut module);
 
-        insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap().blocks[&0], @r###"
+        insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap().blocks[0], @r###"
         {
             $0 = 1
             $1 = 2
             $2 = 3
-            exit = return $2
+            Return $2
         }
         "###);
     }
 
     #[test]
     fn test_evaluate_cond() {
-        let mut module = parse_instructions_module(vec![
-            "@0: {
+        let mut module = parse_test_module(vec![
+            "{
                 $0 = 1
-                exit = cond $0 ? @1..@1 : @2..@2
-            }
-            @1: {
-                $1 = 1
-                exit = return $1
-            }
-            @2: {
-                $2 = 2
-                exit = return $2
+                if ($0) {
+                    $1 = 1
+                    Return $1
+                } else {
+                    $2 = 2
+                    Return $2
+                }
             }
             ",
-        ]);
+        ])
+        .into();
 
         compress_step_evaluate(&mut module);
 
         insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
-        @0: {
+        {
             $0 = 1
             $1 = 1
-            exit = return $1
+            Return $1
         }
         "###);
     }
 
     #[test]
     fn test_evaluate_cond_nested() {
-        let mut module = parse_instructions_module(vec![
-            "@0: {
+        let mut module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = $0
                 $2 = 1
                 $3 = $1 == $2
-                exit = cond $3 ? @1..@4 : @5..@5
-            }
-            @1: {
-                $4 = $0
-                $5 = 1
-                $6 = $4 == $5
-                exit = cond $6 ? @2..@2 : @3..@3
-            }
-            @2: {
-                $7 = $0
-                $8 = 2000
-                $9 = $7 + $8
-                $10 = $9
-                exit = jump @4
-            }
-            @3: {
-                $11 = 3
-                $12 = $11
-                exit = jump @4
-            }
-            @4: {
-                $13 = either($0, $9, $11)
-                $14 = $13
-                $15 = 1000
-                $16 = $14 + $15
-                $17 = $16
-                exit = jump @6
-            }
-            @5: {
-                $18 = 3
-                $19 = $18
-                exit = jump @6
-            }
-            @6: {
+                if ($3) {
+                    $4 = $0
+                    $5 = 1
+                    $6 = $4 == $5
+                    if ($6) {
+                        $7 = $0
+                        $8 = 2000
+                        $9 = $7 + $8
+                        $10 = $9
+                    } else {
+                        $11 = 3
+                        $12 = $11
+                    }
+                    $13 = either($0, $9, $11)
+                    $14 = $13
+                    $15 = 1000
+                    $16 = $14 + $15
+                    $17 = $16
+                } else {
+                    $18 = 3
+                    $19 = $18
+                }
                 $20 = either($13, $16, $18)
                 $21 = $20
-                exit = return $21
+                Return $21
             }",
         ]);
 
         compress_step_evaluate(&mut module);
 
         insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
-        @0: {
+        {
             $0 = 1
             $1 = 1
             $2 = 1
@@ -197,63 +155,51 @@ mod tests {
             $11 = $14 + $15
             $17 = $11
             $21 = $11
-            exit = return $21
+            Return $21
         }
         "###);
     }
 
     #[test]
     fn test_evaluate_cond_nested_2() {
-        let mut module = parse_instructions_module(vec![
-            "@0: {
+        let mut module = parse_test_module(vec![
+            "{
                 $0 = 1
                 $1 = $0
                 $2 = 1
                 $3 = $1 == $2
-                exit = cond $3 ? @1..@4 : @5..@5
-            }
-            @1: {
-                $4 = $0
-                $5 = true
-                $6 = $4 == $5
-                exit = cond $6 ? @2..@2 : @3..@3
-            }
-            @2: {
-                $7 = $0
-                $8 = 2000
-                $9 = $7 + $8
-                $10 = $9
-                exit = jump @4
-            }
-            @3: {
-                $11 = 3
-                $12 = $11
-                exit = jump @4
-            }
-            @4: {
-                $13 = either($0, $9, $11)
-                $14 = $13
-                $15 = 1000
-                $16 = $14 + $15
-                $17 = $16
-                exit = jump @6
-            }
-            @5: {
-                $18 = 3
-                $19 = $18
-                exit = jump @6
-            }
-            @6: {
+                if ($3) {
+                    $4 = $0
+                    $5 = true
+                    $6 = $4 == $5
+                    if ($6) {
+                        $7 = $0
+                        $8 = 2000
+                        $9 = $7 + $8
+                        $10 = $9
+                    } else {
+                        $11 = 3
+                        $12 = $11
+                    }
+                    $13 = either($0, $9, $11)
+                    $14 = $13
+                    $15 = 1000
+                    $16 = $14 + $15
+                    $17 = $16
+                } else {
+                    $18 = 3
+                    $19 = $18
+                }
                 $20 = either($13, $16, $18)
                 $21 = $20
-                exit = return $21
+                Return $21
             }",
         ]);
 
         compress_step_evaluate(&mut module);
 
         insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
-        @0: {
+        {
             $0 = 1
             $1 = 1
             $2 = 1
@@ -261,76 +207,75 @@ mod tests {
             $4 = 1
             $5 = true
             $6 = $4 == $5
-            exit = cond $6 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $7 = $0
-            $8 = 2000
-            $9 = $7 + $8
-            $10 = $9
-        }
-        @2: {
-            $11 = 3
-            $12 = $11
-        }
-        @3: {
+            if ($6) {
+                $7 = $0
+                $8 = 2000
+                $9 = $7 + $8
+                $10 = $9
+            } else {
+                $11 = 3
+                $12 = $11
+            }
             $13 = either($0, $9, $11)
             $14 = $13
             $15 = 1000
             $16 = $14 + $15
             $17 = $16
             $21 = $16
-            exit = return $21
+            Return $21
         }
         "###);
     }
 
     #[test]
     fn evaluate_nonlocal_1() {
-        let mut module = parse_instructions_module(vec![
-            "@0: {
+        let mut module = parse_test_module(vec![
+            "{
                 $0 = undefined
                 $3 = FunctionId(1)
                 $4 = 100
                 $5 = write_non_local $$1 $4
                 $6 = $3
                 $7 = call $6()
-                exit = return $7
+                Return $7
             }",
-            "@0: {
+            "{
                 $8 = read_non_local $$1
                 $9 = 1
                 $10 = $8 + $9
                 $11 = $10
-                exit = return $11
+                Return $11
             }",
-        ]);
+        ])
+        .into();
 
         compress_step_evaluate(&mut module);
 
         insta::assert_debug_snapshot!(module, @r###"
-        BasicBlockModule {
+        StructuredModule {
             summary: ModuleSummary {
                 filename: "",
             },
-            top_level_stats: @0: {
+            top_level_stats: {
                 $0 = undefined
                 $3 = FunctionId(1)
                 $4 = 100
                 $5 = 100
                 $6 = $3
                 $7 = 101
-                exit = return $7
-            },
+                Return $7
+            }
+            ,
             functions: [
                 function():
-                @0: {
+                {
                     $8 = 100
                     $9 = 1
                     $10 = 101
                     $11 = 101
-                    exit = return $11
-                },
+                    Return $11
+                }
+                ,
             ],
         }
         "###);
@@ -340,8 +285,8 @@ mod tests {
     #[test]
     fn evaluate_nonlocal_2() {
         // TODO: our code generates a duplicate write_non_local $$1 so we can't easily statically evaluate this
-        let mut module = parse_instructions_module(vec![
-            "@0: {
+        let mut module = parse_structured_module(vec![
+            "{
                 $0 = undefined
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
@@ -349,14 +294,14 @@ mod tests {
                 $5 = write_non_local $$1 $4
                 $6 = $3
                 $7 = call $6()
-                exit = return $7
+                Return $7
             }",
-            "@0: {
+            "{
                 $8 = read_non_local $$1
                 $9 = 1
                 $10 = $8 + $9
                 $11 = $10
-                exit = return $11
+                Return $11
             }",
         ]);
 
@@ -374,7 +319,7 @@ mod tests {
                 $5 = write_non_local $$1 $4
                 $6 = $3
                 $7 = call $6()
-                exit = return $7
+                Return $7
             },
             functions: [
                 function():
@@ -383,7 +328,7 @@ mod tests {
                     $9 = 1
                     $10 = $8 + $9
                     $11 = $10
-                    exit = return $11
+                    Return $11
                 },
             ],
         }

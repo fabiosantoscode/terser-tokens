@@ -6,9 +6,8 @@ use swc_ecma_ast::{
 };
 
 use crate::basic_blocks::{
-    ArrayElement, BasicBlockInstruction, BreakableId, ExitType, ForInOfKind, IncrDecr, MethodKind,
-    ObjectKey, ObjectProperty, ObjectValue, StructuredFlow, StructuredSwitchCase, TempExitType,
-    LHS,
+    ArrayElement, BreakableId, ExitType, ForInOfKind, IncrDecr, Instruction, MethodKind, ObjectKey,
+    ObjectProperty, ObjectValue, StructuredFlow, StructuredSwitchCase, TempExitType, LHS,
 };
 
 use super::{
@@ -92,8 +91,7 @@ fn stat_to_basic_blocks_inner(
 
             let mut loop_body = vec![];
 
-            let (loop_value_flow, loop_value) =
-                ctx.push_instruction(BasicBlockInstruction::ForInOfValue);
+            let (loop_value_flow, loop_value) = ctx.push_instruction(Instruction::ForInOfValue);
             loop_body.extend(loop_value_flow);
 
             match left {
@@ -161,7 +159,7 @@ fn stat_to_basic_blocks_inner(
             let (test_flow, test) = if let Some(test) = &for_loop.test {
                 expr_to_basic_blocks(ctx, test)?
             } else {
-                ctx.push_instruction(BasicBlockInstruction::LitBool(true))
+                ctx.push_instruction(Instruction::LitBool(true))
             };
             loop_body.extend(test_flow);
 
@@ -345,8 +343,7 @@ fn stat_to_basic_blocks_inner(
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {
-                    let (err_flow, catcherr) =
-                        ctx.push_instruction(BasicBlockInstruction::CaughtError);
+                    let (err_flow, catcherr) = ctx.push_instruction(Instruction::CaughtError);
                     catch_flow.extend(err_flow);
 
                     let (pat_flow, _pat) = pat_to_basic_blocks(ctx, PatType::VarDecl, p, catcherr)?;
@@ -387,7 +384,7 @@ fn var_decl_to_basic_blocks(
     for decl in &var.decls {
         let (flow, init) = match decl.init.as_ref() {
             Some(init) => expr_to_basic_blocks(ctx, &init.as_ref())?,
-            None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+            None => ctx.push_instruction(Instruction::Undefined),
         };
         var_flow.extend(flow);
         let (flow, _) = pat_to_basic_blocks(ctx, PatType::VarDecl, &decl.name, init)?;
@@ -404,11 +401,11 @@ pub fn expr_to_basic_blocks(
     match exp {
         Expr::Lit(lit) => {
             let lit = match lit {
-                Lit::Null(_) => BasicBlockInstruction::Null,
-                Lit::Bool(b) => BasicBlockInstruction::LitBool(b.value),
-                Lit::Num(num) => BasicBlockInstruction::LitNumber(num.value),
+                Lit::Null(_) => Instruction::Null,
+                Lit::Bool(b) => Instruction::LitBool(b.value),
+                Lit::Num(num) => Instruction::LitNumber(num.value),
                 Lit::BigInt(_) => todo!(),
-                Lit::Str(s) => BasicBlockInstruction::LitString(s.value.to_string()),
+                Lit::Str(s) => Instruction::LitString(s.value.to_string()),
                 Lit::Regex(_) => todo!(),
                 Lit::JSXText(_) => todo!(),
             };
@@ -425,21 +422,18 @@ pub fn expr_to_basic_blocks(
                     let condition = match bin.op {
                         BinaryOp::LogicalAnd => l,
                         BinaryOp::LogicalOr => {
-                            let (flow, not_l) = ctx
-                                .push_instruction(BasicBlockInstruction::UnaryOp(UnaryOp::Bang, l));
+                            let (flow, not_l) =
+                                ctx.push_instruction(Instruction::UnaryOp(UnaryOp::Bang, l));
                             bin_flow.extend(flow);
 
                             not_l
                         }
                         BinaryOp::NullishCoalescing => {
-                            let (flow, nil) = ctx.push_instruction(BasicBlockInstruction::Null);
+                            let (flow, nil) = ctx.push_instruction(Instruction::Null);
                             bin_flow.extend(flow);
 
-                            let (flow, binop) = ctx.push_instruction(BasicBlockInstruction::BinOp(
-                                BinaryOp::EqEq,
-                                l,
-                                nil,
-                            ));
+                            let (flow, binop) =
+                                ctx.push_instruction(Instruction::BinOp(BinaryOp::EqEq, l, nil));
                             bin_flow.extend(flow);
 
                             binop
@@ -451,7 +445,7 @@ pub fn expr_to_basic_blocks(
 
                     let (then_side, r) = expr_to_basic_blocks(ctx, &bin.right)?;
 
-                    let (else_side, l) = ctx.push_instruction(BasicBlockInstruction::Ref(l));
+                    let (else_side, l) = ctx.push_instruction(Instruction::Ref(l));
 
                     bin_flow.push(StructuredFlow::Cond(
                         BreakableId(None),
@@ -463,7 +457,7 @@ pub fn expr_to_basic_blocks(
                     let after_cond = ctx.leave_conditional_branch();
                     bin_flow.extend(after_cond);
 
-                    let (flow, phi) = ctx.push_instruction(BasicBlockInstruction::Phi(vec![l, r]));
+                    let (flow, phi) = ctx.push_instruction(Instruction::Phi(vec![l, r]));
                     bin_flow.extend(flow);
 
                     Ok((bin_flow, phi))
@@ -473,8 +467,7 @@ pub fn expr_to_basic_blocks(
                     let (flow, r) = expr_to_basic_blocks(ctx, &bin.right)?;
                     bin_flow.extend(flow);
 
-                    let (flow, op) =
-                        ctx.push_instruction(BasicBlockInstruction::BinOp(bin.op.clone(), l, r));
+                    let (flow, op) = ctx.push_instruction(Instruction::BinOp(bin.op.clone(), l, r));
                     bin_flow.extend(flow);
 
                     Ok((bin_flow, op))
@@ -531,7 +524,7 @@ pub fn expr_to_basic_blocks(
             cond_flow.extend(after_flow);
 
             // the retval of our ternary is a phi node
-            let (flow, phi) = ctx.push_instruction(BasicBlockInstruction::Phi(vec![cons, alt]));
+            let (flow, phi) = ctx.push_instruction(Instruction::Phi(vec![cons, alt]));
             cond_flow.extend(flow);
 
             Ok((cond_flow, phi))
@@ -541,20 +534,17 @@ pub fn expr_to_basic_blocks(
 
             let ident = ident.sym.to_string();
             let (flow, instruction) = match ident.as_str() {
-                "undefined" => (vec![], BasicBlockInstruction::Undefined),
-                "Infinity" => (vec![], BasicBlockInstruction::LitNumber(f64::INFINITY)),
+                "undefined" => (vec![], Instruction::Undefined),
+                "Infinity" => (vec![], Instruction::LitNumber(f64::INFINITY)),
                 ident => {
                     if ctx.is_global_name(ident) {
-                        (
-                            vec![],
-                            BasicBlockInstruction::Read(LHS::Global(ident.to_string())),
-                        )
+                        (vec![], Instruction::Read(LHS::Global(ident.to_string())))
                     } else if let Some(nonloc) = ctx.is_nonlocal(ident) {
-                        (vec![], BasicBlockInstruction::Read(LHS::NonLocal(nonloc)))
+                        (vec![], Instruction::Read(LHS::NonLocal(nonloc)))
                     } else {
                         let (flow, ident) = ctx.read_name(ident);
 
-                        (flow, BasicBlockInstruction::Ref(ident))
+                        (flow, Instruction::Ref(ident))
                     }
                 }
             };
@@ -567,7 +557,7 @@ pub fn expr_to_basic_blocks(
 
             Ok((ident_flow, ident_var))
         }
-        Expr::This(_) => Ok(ctx.push_instruction(BasicBlockInstruction::This)),
+        Expr::This(_) => Ok(ctx.push_instruction(Instruction::This)),
         Expr::Array(array_lit) => {
             let mut array_flow = vec![];
             let mut elements = Vec::with_capacity(array_lit.elems.len());
@@ -589,7 +579,7 @@ pub fn expr_to_basic_blocks(
                 elements.push(elem);
             }
 
-            let (flow, array_var) = ctx.push_instruction(BasicBlockInstruction::Array(elements));
+            let (flow, array_var) = ctx.push_instruction(Instruction::Array(elements));
             array_flow.extend(flow);
 
             Ok((array_flow, array_var))
@@ -681,8 +671,7 @@ pub fn expr_to_basic_blocks(
                 }
             }
 
-            let (flow, object_var) =
-                ctx.push_instruction(BasicBlockInstruction::Object(proto, kvs));
+            let (flow, object_var) = ctx.push_instruction(Instruction::Object(proto, kvs));
             object_flow.extend(flow);
 
             Ok((object_flow, object_var))
@@ -694,13 +683,13 @@ pub fn expr_to_basic_blocks(
                 if let Expr::Ident(global_ident) = &unary_expr.arg.as_ref() {
                     let s = global_ident.sym.to_string();
                     if ctx.is_global_name(&s) {
-                        return Ok(ctx.push_instruction(BasicBlockInstruction::TypeOfGlobal(s)));
+                        return Ok(ctx.push_instruction(Instruction::TypeOfGlobal(s)));
                     }
                 }
                 let (flow, expr) = expr_to_basic_blocks(ctx, &unary_expr.arg)?;
                 typeof_flow.extend(flow);
 
-                let (flow, type_of) = ctx.push_instruction(BasicBlockInstruction::TypeOf(expr));
+                let (flow, type_of) = ctx.push_instruction(Instruction::TypeOf(expr));
                 typeof_flow.extend(flow);
 
                 Ok((typeof_flow, type_of))
@@ -711,7 +700,7 @@ pub fn expr_to_basic_blocks(
                 let (flow, lhs) = to_basic_blocks_lhs(ctx, &unary_expr.arg)?;
                 delete_flow.extend(flow);
 
-                let (flow, del) = ctx.push_instruction(BasicBlockInstruction::Delete(lhs));
+                let (flow, del) = ctx.push_instruction(Instruction::Delete(lhs));
                 delete_flow.extend(flow);
 
                 Ok((delete_flow, del))
@@ -722,7 +711,7 @@ pub fn expr_to_basic_blocks(
                 let (flow, _) = expr_to_basic_blocks(ctx, &unary_expr.arg)?;
                 void_flow.extend(flow);
 
-                let (flow, undef) = ctx.push_instruction(BasicBlockInstruction::Undefined);
+                let (flow, undef) = ctx.push_instruction(Instruction::Undefined);
                 void_flow.extend(flow);
 
                 Ok((void_flow, undef))
@@ -733,8 +722,7 @@ pub fn expr_to_basic_blocks(
                 let (flow, expr) = expr_to_basic_blocks(ctx, &unary_expr.arg)?;
                 unary_flow.extend(flow);
 
-                let (flow, res) =
-                    ctx.push_instruction(BasicBlockInstruction::UnaryOp(unary_expr.op, expr));
+                let (flow, res) = ctx.push_instruction(Instruction::UnaryOp(unary_expr.op, expr));
                 unary_flow.extend(flow);
 
                 Ok((unary_flow, res))
@@ -753,8 +741,8 @@ pub fn expr_to_basic_blocks(
                 UpdateOp::MinusMinus => IncrDecr::Decr,
             };
             let ins = match *prefix {
-                true => BasicBlockInstruction::IncrDecr(lhs, op),
-                false => BasicBlockInstruction::IncrDecrPostfix(lhs, op),
+                true => Instruction::IncrDecr(lhs, op),
+                false => Instruction::IncrDecrPostfix(lhs, op),
             };
 
             let (flow, ins) = ctx.push_instruction(ins);
@@ -768,7 +756,7 @@ pub fn expr_to_basic_blocks(
             let (flow, lhs) = to_basic_blocks_lhs(ctx, exp)?;
             member_flow.extend(flow);
 
-            let (flow, read) = ctx.push_instruction(BasicBlockInstruction::Read(lhs));
+            let (flow, read) = ctx.push_instruction(Instruction::Read(lhs));
             member_flow.extend(flow);
 
             Ok((member_flow, read))
@@ -776,7 +764,7 @@ pub fn expr_to_basic_blocks(
         Expr::SuperProp(sp) => {
             let mut super_prop_flow = vec![];
 
-            let (flow, sup) = ctx.push_instruction(BasicBlockInstruction::Super);
+            let (flow, sup) = ctx.push_instruction(Instruction::Super);
             super_prop_flow.extend(flow);
 
             let lhs = match &sp.prop {
@@ -792,7 +780,7 @@ pub fn expr_to_basic_blocks(
                 }
             };
 
-            let (flow, read) = ctx.push_instruction(BasicBlockInstruction::Read(lhs));
+            let (flow, read) = ctx.push_instruction(Instruction::Read(lhs));
             super_prop_flow.extend(flow);
 
             Ok((super_prop_flow, read))
@@ -816,7 +804,7 @@ pub fn expr_to_basic_blocks(
             // TODO non-expr callees (super, import)
             let callee = match &call.callee {
                 swc_ecma_ast::Callee::Super(_) => {
-                    let (flow, callee) = ctx.push_instruction(BasicBlockInstruction::Super);
+                    let (flow, callee) = ctx.push_instruction(Instruction::Super);
                     call_flow.extend(flow);
 
                     callee
@@ -843,7 +831,7 @@ pub fn expr_to_basic_blocks(
                 }
             }
 
-            let (flow, call) = ctx.push_instruction(BasicBlockInstruction::Call(callee, args));
+            let (flow, call) = ctx.push_instruction(Instruction::Call(callee, args));
             call_flow.extend(flow);
 
             return Ok((call_flow, call));
@@ -869,7 +857,7 @@ pub fn expr_to_basic_blocks(
                 }
             }
 
-            let (flow, new) = ctx.push_instruction(BasicBlockInstruction::New(callee, out_args));
+            let (flow, new) = ctx.push_instruction(Instruction::New(callee, out_args));
             new_flow.extend(flow);
 
             Ok((new_flow, new))
@@ -891,11 +879,11 @@ pub fn expr_to_basic_blocks(
 
             let (flow, arg) = match arg {
                 Some(arg) => expr_to_basic_blocks(ctx, arg)?,
-                None => ctx.push_instruction(BasicBlockInstruction::Undefined),
+                None => ctx.push_instruction(Instruction::Undefined),
             };
             yield_flow.extend(flow);
 
-            let (flow, exit) = ctx.push_instruction(BasicBlockInstruction::TempExit(typ, arg));
+            let (flow, exit) = ctx.push_instruction(Instruction::TempExit(typ, arg));
             yield_flow.extend(flow);
 
             Ok((yield_flow, exit))
@@ -907,7 +895,7 @@ pub fn expr_to_basic_blocks(
             await_flow.extend(flow);
 
             let (flow, exit) =
-                ctx.push_instruction(BasicBlockInstruction::TempExit(TempExitType::Await, arg));
+                ctx.push_instruction(Instruction::TempExit(TempExitType::Await, arg));
             await_flow.extend(flow);
 
             Ok((await_flow, exit))
@@ -938,13 +926,11 @@ mod tests {
         let s = test_basic_blocks_expr("10 + 20 + 30;");
         insta::assert_debug_snapshot!(s, @r###"
         function():
-        @0: {
-            $0 = 10
-            $1 = 20
-            $2 = $0 + $1
-            $3 = 30
-            $4 = $2 + $3
-        }
+        $0 = 10
+        $1 = 20
+        $2 = $0 + $1
+        $3 = 30
+        $4 = $2 + $3
         "###);
     }
 
@@ -952,7 +938,7 @@ mod tests {
     fn an_array() {
         let s = test_basic_blocks("var x = [1, 2, , ...3];");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = 2
             $2 = 3
@@ -972,7 +958,7 @@ mod tests {
             $2 = Await $1
             $3 = Yield $2
             $4 = undefined
-            exit = return $4
+            Return $4
         }
         "###);
     }
@@ -982,7 +968,7 @@ mod tests {
     fn simple_await() {
         let s = test_basic_blocks("await (await 1)");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = Await $0
             $2 = Await $1
@@ -993,14 +979,12 @@ mod tests {
     #[test]
     fn simple_add_2() {
         let s = test_basic_blocks(
-            "
-        var a = 10;
-        var b = 20;
-        var c = a + b + 30;
-        ",
+            "var a = 10;
+            var b = 20;
+            var c = a + b + 30;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 10
             $1 = 20
             $2 = $0
@@ -1021,7 +1005,7 @@ mod tests {
             void a;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 10
             $1 = typeof global "globalVar"
             $2 = $0
@@ -1041,7 +1025,7 @@ mod tests {
             writeGlobalProp.prop = 1;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = global "readGlobal"
             $1 = 1
             $2 = global "writeGlobal" = $1
@@ -1064,7 +1048,7 @@ mod tests {
             use(b);",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 100
             $1 = $0++
             $2 = global "use"
@@ -1084,7 +1068,7 @@ mod tests {
             use(--a);",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 100
             $1 = global "use"
             $2 = $0++
@@ -1103,19 +1087,15 @@ mod tests {
             let b = cond ? a++ : (--a, --a);",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 100
             $1 = global "cond"
-            exit = cond $1 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $2 = $0++
-        }
-        @2: {
-            $3 = --$0
-            $4 = --$0
-        }
-        @3: {
+            if ($1) {
+                $2 = $0++
+            } else {
+                $3 = --$0
+                $4 = --$0
+            }
             $5 = either($2, $4)
         }
         "###);
@@ -1126,19 +1106,13 @@ mod tests {
         let s = test_basic_blocks_expr("1 ? 10 : 20;");
         insta::assert_debug_snapshot!(s, @r###"
         function():
-        @0: {
-            $0 = 1
-            exit = cond $0 ? @1..@1 : @2..@2
-        }
-        @1: {
+        $0 = 1
+        if ($0) {
             $1 = 10
-        }
-        @2: {
+        } else {
             $2 = 20
         }
-        @3: {
-            $3 = either($1, $2)
-        }
+        $3 = either($1, $2)
         "###);
     }
 
@@ -1150,23 +1124,19 @@ mod tests {
             return x;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 999
             $1 = 1
-            exit = cond $1 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $2 = 2
-            $3 = $2
-        }
-        @2: {
-            $4 = 3
-        }
-        @3: {
+            if ($1) {
+                $2 = 2
+                $3 = $2
+            } else {
+                $4 = 3
+            }
             $5 = either($0, $2)
             $6 = either($3, $4)
             $7 = $5
-            exit = return $7
+            Return $7
         }
         "###);
     }
@@ -1176,29 +1146,19 @@ mod tests {
         let s = test_basic_blocks_expr("1 ? (2 ? 10 : 15) : 20;");
         insta::assert_debug_snapshot!(s, @r###"
         function():
-        @0: {
-            $0 = 1
-            exit = cond $0 ? @1..@4 : @5..@5
-        }
-        @1: {
+        $0 = 1
+        if ($0) {
             $1 = 2
-            exit = cond $1 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $2 = 10
-        }
-        @3: {
-            $3 = 15
-        }
-        @4: {
+            if ($1) {
+                $2 = 10
+            } else {
+                $3 = 15
+            }
             $4 = either($2, $3)
-        }
-        @5: {
+        } else {
             $5 = 20
         }
-        @6: {
-            $6 = either($4, $5)
-        }
+        $6 = either($4, $5)
         "###);
     }
 
@@ -1206,7 +1166,7 @@ mod tests {
     fn simple_vars() {
         let s = test_basic_blocks("var x = 1; x + 2");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = $0
             $2 = 2
@@ -1219,21 +1179,17 @@ mod tests {
     fn cond_nested_reassign() {
         let s = test_basic_blocks("var x = 1; 123 ? (x = 2, 1) : x = 3; x + 2");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = 123
-            exit = cond $1 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $2 = 2
-            $3 = $2
-            $4 = 1
-        }
-        @2: {
-            $5 = 3
-            $6 = $5
-        }
-        @3: {
+            if ($1) {
+                $2 = 2
+                $3 = $2
+                $4 = 1
+            } else {
+                $5 = 3
+                $6 = $5
+            }
             $7 = either($0, $2, $5)
             $8 = either($4, $6)
             $9 = $7
@@ -1251,33 +1207,25 @@ mod tests {
             x + 2",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = 123
-            exit = cond $1 ? @1..@4 : @5..@5
-        }
-        @1: {
-            $2 = 1234
-            $3 = $2
-            exit = cond $3 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $4 = 567
-            $5 = $4
-        }
-        @3: {
-            $6 = 890
-        }
-        @4: {
-            $7 = either($0, $2, $4)
-            $8 = either($5, $6)
-            $9 = 1
-        }
-        @5: {
-            $10 = 3
-            $11 = $10
-        }
-        @6: {
+            if ($1) {
+                $2 = 1234
+                $3 = $2
+                if ($3) {
+                    $4 = 567
+                    $5 = $4
+                } else {
+                    $6 = 890
+                }
+                $7 = either($0, $2, $4)
+                $8 = either($5, $6)
+                $9 = 1
+            } else {
+                $10 = 3
+                $11 = $10
+            }
             $12 = either($0, $2, $7, $10)
             $13 = either($9, $11)
             $14 = $12
@@ -1291,45 +1239,29 @@ mod tests {
     fn a_switch() {
         let s = test_basic_blocks("switch (10) { case 20: 30; default: 40; break; case 50: 60; }");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 10
-            exit = switch $0 @1..@11
-        }
-        @1: {
-            exit = case_expr @2..@2
-        }
-        @2: {
-            $1 = 20
-        }
-        @3: {
-            exit = case $1: @4..@4
-        }
-        @4: {
-            $2 = 30
-        }
-        @5: {
-            exit = default @6..@6
-        }
-        @6: {
-            $3 = 40
-            exit = break @12
-        }
-        @7: {
-            exit = case_expr @8..@8
-        }
-        @8: {
-            $4 = 50
-        }
-        @9: {
-            exit = case $4: @10..@10
-        }
-        @10: {
-            $5 = 60
-        }
-        @11: {
-            exit = switch_end
-        }
-        @12: {
+            switch (@0) ($0) {
+            {
+                $1 = 20
+            }
+            case ($1) 
+            {
+                $2 = 30
+            }
+            default: 
+            {
+                $3 = 40
+                Break (@0)
+            }
+            {
+                $4 = 50
+            }
+            case ($4) 
+            {
+                $5 = 60
+            }
+            }
         }
         "###);
     }
@@ -1338,22 +1270,17 @@ mod tests {
     fn a_loop() {
         let s = test_basic_blocks("123; while (123) { 456; }");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 123
-            exit = loop @1..@3
-        }
-        @1: {
-            $1 = 123
-            exit = cond $1 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $2 = 456
-            exit = continue @1
-        }
-        @3: {
-            exit = break @4
-        }
-        @4: {
+            loop (@0) {
+                $1 = 123
+                if ($1) {
+                    $2 = 456
+                    Continue (@0)
+                } else {
+                    Break (@0)
+                }
+            }
         }
         "###);
     }
@@ -1362,20 +1289,11 @@ mod tests {
     fn a_loop_break() {
         let s = test_basic_blocks("while (123) { break }");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
-            exit = loop @1..@3
-        }
-        @1: {
+        loop (@0) {
             $0 = 123
-            exit = cond $0 ? @2..@2 : @3..@3
-        }
-        @2: {
-            exit = break @4
-        }
-        @3: {
-            exit = break @4
-        }
-        @4: {
+            {
+                Break (@0)
+            }
         }
         "###);
     }
@@ -1394,54 +1312,40 @@ mod tests {
             return x;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
-            exit = loop @1..@9
-        }
-        @1: {
-            $1 = either($0, $15)
-            $2 = 111
-            exit = cond $2 ? @2..@7 : @8..@8
-        }
-        @2: {
-            $3 = $1
-            $4 = 1000
-            $5 = $3 + $4
-            $6 = $5
-            exit = loop @3..@6
-        }
-        @3: {
-            $7 = either($5, $13)
-            $8 = 222
-            exit = cond $8 ? @4..@4 : @5..@5
-        }
-        @4: {
-            $9 = $7
-            $10 = 2000
-            $11 = $9 + $10
-            $12 = $11
-            exit = break @10
-        }
-        @5: {
-            exit = break @7
-        }
-        @6: {
-            $13 = either($0, $1, $5, $7, $11)
-        }
-        @7: {
-            $14 = either($0, $1, $5, $7, $13)
-            exit = continue @1
-        }
-        @8: {
-            exit = break @10
-        }
-        @9: {
-            $15 = either($0, $1, $5, $14)
-        }
-        @10: {
+            loop (@0) {
+                $1 = either($0, $15)
+                $2 = 111
+                if ($2) {
+                    $3 = $1
+                    $4 = 1000
+                    $5 = $3 + $4
+                    $6 = $5
+                    loop (@1) {
+                        $7 = either($5, $13)
+                        $8 = 222
+                        if ($8) {
+                            $9 = $7
+                            $10 = 2000
+                            $11 = $9 + $10
+                            $12 = $11
+                            Break (@0)
+                        } else {
+                            Break (@1)
+                        }
+                        $13 = either($0, $1, $5, $7, $11)
+                    }
+                    $14 = either($0, $1, $5, $7, $13)
+                    Continue (@0)
+                } else {
+                    Break (@0)
+                }
+                $15 = either($0, $1, $5, $14)
+            }
             $16 = either($0, $1, $15)
             $17 = $16
-            exit = return $17
+            Return $17
         }
         "###);
     }
@@ -1454,21 +1358,14 @@ mod tests {
             } while (456);"###,
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
-            exit = loop @1..@3
-        }
-        @1: {
+        loop (@0) {
             $0 = 123
             $1 = 456
-            exit = cond $1 ? @2..@2 : @3..@3
-        }
-        @2: {
-            exit = continue @1
-        }
-        @3: {
-            exit = break @4
-        }
-        @4: {
+            if ($1) {
+                Continue (@0)
+            } else {
+                Break (@0)
+            }
         }
         "###);
     }
@@ -1483,32 +1380,25 @@ mod tests {
             "###,
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 123
-            exit = loop @1..@4
-        }
-        @1: {
-            $1 = either($0, $10)
-            $2 = $1
-            $3 = 456
-            $4 = $2 < $3
-            exit = cond $4 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $5 = 789
-            $6 = $1
-            $7 = 1
-            $8 = $6 + $7
-            $9 = $8
-            exit = continue @1
-        }
-        @3: {
-            exit = break @5
-        }
-        @4: {
-            $10 = either($0, $1, $8)
-        }
-        @5: {
+            loop (@0) {
+                $1 = either($0, $10)
+                $2 = $1
+                $3 = 456
+                $4 = $2 < $3
+                if ($4) {
+                    $5 = 789
+                    $6 = $1
+                    $7 = 1
+                    $8 = $6 + $7
+                    $9 = $8
+                    Continue (@0)
+                } else {
+                    Break (@0)
+                }
+                $10 = either($0, $1, $8)
+            }
             $11 = either($0, $1, $10)
         }
         "###);
@@ -1527,36 +1417,28 @@ mod tests {
             return x;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = 111
-            exit = cond $1 ? @1..@4 : @5..@5
-        }
-        @1: {
-            $2 = $0
-            $3 = 1000
-            $4 = $2 + $3
-            $5 = $4
-            $6 = 222
-            exit = cond $6 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $7 = $4
-            $8 = 2000
-            $9 = $7 + $8
-            $10 = $9
-        }
-        @3: {
-        }
-        @4: {
-            $11 = either($0, $4, $9)
-        }
-        @5: {
-        }
-        @6: {
+            if ($1) {
+                $2 = $0
+                $3 = 1000
+                $4 = $2 + $3
+                $5 = $4
+                $6 = 222
+                if ($6) {
+                    $7 = $4
+                    $8 = 2000
+                    $9 = $7 + $8
+                    $10 = $9
+                } else {
+                }
+                $11 = either($0, $4, $9)
+            } else {
+            }
             $12 = either($0, $4, $11)
             $13 = $12
-            exit = return $13
+            Return $13
         }
         "###);
     }
@@ -1578,44 +1460,36 @@ mod tests {
             return x;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = $0
             $2 = 1
             $3 = $1 == $2
-            exit = cond $3 ? @1..@4 : @5..@5
-        }
-        @1: {
-            $4 = $0
-            $5 = 1
-            $6 = $4 == $5
-            exit = cond $6 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $7 = $0
-            $8 = 2000
-            $9 = $7 + $8
-            $10 = $9
-        }
-        @3: {
-            $11 = 3
-            $12 = $11
-        }
-        @4: {
-            $13 = either($0, $9, $11)
-            $14 = $13
-            $15 = 1000
-            $16 = $14 + $15
-            $17 = $16
-        }
-        @5: {
-            $18 = 3
-            $19 = $18
-        }
-        @6: {
+            if ($3) {
+                $4 = $0
+                $5 = 1
+                $6 = $4 == $5
+                if ($6) {
+                    $7 = $0
+                    $8 = 2000
+                    $9 = $7 + $8
+                    $10 = $9
+                } else {
+                    $11 = 3
+                    $12 = $11
+                }
+                $13 = either($0, $9, $11)
+                $14 = $13
+                $15 = 1000
+                $16 = $14 + $15
+                $17 = $16
+            } else {
+                $18 = 3
+                $19 = $18
+            }
             $20 = either($0, $13, $16, $18)
             $21 = $20
-            exit = return $21
+            Return $21
         }
         "###);
     }
@@ -1624,42 +1498,34 @@ mod tests {
     fn a_logical_operator() {
         let s = test_basic_blocks("var x = 1 && 2; return x;");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
-            exit = cond $0 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $1 = 2
-        }
-        @2: {
-            $2 = $0
-        }
-        @3: {
+            if ($0) {
+                $1 = 2
+            } else {
+                $2 = $0
+            }
             $3 = either($1, $2)
             $4 = $3
-            exit = return $4
+            Return $4
         }
         "###);
 
         let s = test_basic_blocks("var x = y() || z(); return x;");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = global "y"
             $1 = call $0()
             $2 = !$1
-            exit = cond $2 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $3 = global "z"
-            $4 = call $3()
-        }
-        @2: {
-            $5 = $1
-        }
-        @3: {
+            if ($2) {
+                $3 = global "z"
+                $4 = call $3()
+            } else {
+                $5 = $1
+            }
             $6 = either($4, $5)
             $7 = $6
-            exit = return $7
+            Return $7
         }
         "###);
     }
@@ -1668,33 +1534,21 @@ mod tests {
     fn a_labelled_break() {
         let s = test_basic_blocks("outer: while (123) { while (456) { break outer } }");
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
-            exit = loop @1..@7
-        }
-        @1: {
+        loop (@0) {
             $0 = 123
-            exit = cond $0 ? @2..@6 : @7..@7
-        }
-        @2: {
-            exit = loop @3..@5
-        }
-        @3: {
-            $1 = 456
-            exit = cond $1 ? @4..@4 : @5..@5
-        }
-        @4: {
-            exit = break @8
-        }
-        @5: {
-            exit = break @6
-        }
-        @6: {
-            exit = continue @1
-        }
-        @7: {
-            exit = break @8
-        }
-        @8: {
+            if ($0) {
+                loop (@1) {
+                    $1 = 456
+                    if ($1) {
+                        Break (@0)
+                    } else {
+                        Break (@1)
+                    }
+                }
+                Continue (@0)
+            } else {
+                Break (@0)
+            }
         }
         "###);
     }
@@ -1709,7 +1563,7 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 123
         }
         "###);
@@ -1725,17 +1579,12 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 123
-            exit = cond $0 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $1 = 456
-            exit = break @3
-        }
-        @2: {
-        }
-        @3: {
+            if ($0) {
+                $1 = 456
+            } else {
+            }
         }
         "###);
     }
@@ -1750,15 +1599,13 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 123
-            exit = cond $0 ? @1..@1 : @2..@2
-        }
-        @1: {
-            $1 = 456
-        }
-        @2: {
-            $2 = 789
+            if ($0) {
+                $1 = 456
+            } else {
+                $2 = 789
+            }
         }
         "###);
     }
@@ -1776,21 +1623,17 @@ mod tests {
         ",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 123
-            exit = cond $0 ? @1..@3 : @4..@4
-        }
-        @1: {
-            $1 = 456
-            exit = cond $1 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $2 = 789
-        }
-        @3: {
-        }
-        @4: {
-            $3 = 999
+            if ($0) {
+                $1 = 456
+                if ($1) {
+                    $2 = 789
+                } else {
+                }
+            } else {
+                $3 = 999
+            }
         }
         "###);
     }
@@ -1805,22 +1648,11 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
-            exit = try @1 catch @3 finally @5..@5
-        }
-        @1: {
+        try {
             $0 = 777
-        }
-        @2: {
-            exit = catch @3..@5
-        }
-        @3: {
+        } catch {
             $1 = 888
-        }
-        @4: {
-            exit = finally @5..@5
-        }
-        @5: {
+        } finally {
         }
         "###);
     }
@@ -1835,26 +1667,15 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
-            exit = try @1 catch @3 finally @5..@5
-        }
-        @1: {
+        try {
             $0 = 777
-        }
-        @2: {
-            exit = catch @3..@5
-        }
-        @3: {
+        } catch {
             $1 = caught_error()
             $2 = pack $1 {message: _}
             $3 = unpack $2[0]
             $4 = $3
-            exit = return $4
-        }
-        @4: {
-            exit = finally @5..@5
-        }
-        @5: {
+            Return $4
+        } finally {
         }
         "###);
     }
@@ -1870,27 +1691,16 @@ mod tests {
             return a",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
-            exit = try @1 catch @3 finally @5..@5
-        }
-        @1: {
-            $0 = 777
-        }
-        @2: {
-            exit = catch @3..@5
-        }
-        @3: {
-            $1 = 888
-        }
-        @4: {
-            exit = finally @5..@5
-        }
-        @5: {
-            $2 = either($0, $1)
-        }
-        @6: {
+        {
+            try {
+                $0 = 777
+            } catch {
+                $1 = 888
+            } finally {
+                $2 = either($0, $1)
+            }
             $3 = $2
-            exit = return $3
+            Return $3
         }
         "###);
     }
@@ -1907,22 +1717,11 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
-            exit = try @1 catch @3 finally @5..@5
-        }
-        @1: {
+        try {
             $0 = 777
-        }
-        @2: {
-            exit = catch @3..@5
-        }
-        @3: {
+        } catch {
             $1 = 888
-        }
-        @4: {
-            exit = finally @5..@5
-        }
-        @5: {
+        } finally {
             $2 = 999
         }
         "###);
@@ -1946,54 +1745,32 @@ mod tests {
             return x;",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 10
-            exit = try @1 catch @5 finally @12..@12
-        }
-        @1: {
-            $1 = $0
-            $2 = 10
-            $3 = $1 > $2
-            exit = cond $3 ? @2..@2 : @3..@3
-        }
-        @2: {
-            $4 = 123
-            exit = throw $4
-        }
-        @3: {
-        }
-        @4: {
-            exit = catch @5..@12
-        }
-        @5: {
-            $5 = caught_error()
-            exit = try @6 catch @8 finally @10..@10
-        }
-        @6: {
-            $6 = 456
-            exit = return $6
-        }
-        @7: {
-            exit = catch @8..@10
-        }
-        @8: {
-            $7 = caught_error()
-            $8 = 789
-            exit = return $8
-        }
-        @9: {
-            exit = finally @10..@10
-        }
-        @10: {
-        }
-        @11: {
-            exit = finally @12..@12
-        }
-        @12: {
-        }
-        @13: {
+            try {
+                $1 = $0
+                $2 = 10
+                $3 = $1 > $2
+                if ($3) {
+                    $4 = 123
+                    Throw $4
+                } else {
+                }
+            } catch {
+                $5 = caught_error()
+                try {
+                    $6 = 456
+                    Return $6
+                } catch {
+                    $7 = caught_error()
+                    $8 = 789
+                    Return $8
+                } finally {
+                }
+            } finally {
+            }
             $9 = $0
-            exit = return $9
+            Return $9
         }
         "###);
     }
@@ -2006,15 +1783,15 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = {}
-            exit = for in $0 @1..@1
-        }
-        @1: {
-            $1 = for_in_of_value()
-            $2 = $1
-            $3 = call $2()
-            exit = continue @1
+            for in ($0) {
+                $1 = for_in_of_value()
+                {
+                    $2 = $1
+                    $3 = call $2()
+                }
+            }
         }
         "###);
     }
@@ -2033,7 +1810,7 @@ mod tests {
             }",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = {}
             $1 = "val"
             $2 = $0
@@ -2058,7 +1835,7 @@ mod tests {
             obj['prop']",
         );
         insta::assert_debug_snapshot!(s, @r###"
-        @0: {
+        {
             $0 = 1
             $1 = {1: $0}
             $2 = 2

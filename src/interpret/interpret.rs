@@ -1,23 +1,20 @@
 use std::collections::{BTreeMap, HashSet};
 
 use crate::basic_blocks::{
-    ArrayElement, ArrayPatternPiece, BasicBlockInstruction, ObjectPatternPiece, ObjectProperty,
+    ArrayElement, ArrayPatternPiece, Instruction, ObjectPatternPiece, ObjectProperty,
 };
 
 use super::{interp_math_ops, InterpretCtx, JsArgs, JsCompletion, JsType};
 
 static ARRAY_MAX_ELEMENTS: usize = 100;
 
-pub fn interpret(
-    ctx: &mut InterpretCtx,
-    instruction: &BasicBlockInstruction,
-) -> Option<JsCompletion> {
+pub fn interpret(ctx: &mut InterpretCtx, instruction: &Instruction) -> Option<JsCompletion> {
     let normal_completion = match instruction {
-        BasicBlockInstruction::LitNumber(n) => JsType::new_number(*n),
-        BasicBlockInstruction::LitBool(b) => JsType::TheBoolean(*b),
-        BasicBlockInstruction::LitString(s) => JsType::TheString(s.clone()),
-        BasicBlockInstruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
-        BasicBlockInstruction::UnaryOp(op, operand) => {
+        Instruction::LitNumber(n) => JsType::new_number(*n),
+        Instruction::LitBool(b) => JsType::TheBoolean(*b),
+        Instruction::LitString(s) => JsType::TheString(s.clone()),
+        Instruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
+        Instruction::UnaryOp(op, operand) => {
             let operand = ctx.get_variable(*operand)?;
 
             match op {
@@ -39,10 +36,10 @@ pub fn interpret(
                 | swc_ecma_ast::UnaryOp::Delete => unreachable!(),
             }
         }
-        BasicBlockInstruction::BinOp(op, l, r) => {
+        Instruction::BinOp(op, l, r) => {
             return interp_math_ops(ctx, *l, *r, op);
         }
-        BasicBlockInstruction::IncrDecr(lhs, incr) => match ctx.get_lhs(lhs)? {
+        Instruction::IncrDecr(lhs, incr) => match ctx.get_lhs(lhs)? {
             JsType::Number => JsType::Number,
             JsType::TheNumber(n) => {
                 let n = JsType::new_number(n.into_inner() + incr.as_float_incr());
@@ -51,7 +48,7 @@ pub fn interpret(
             }
             _ => return None,
         },
-        BasicBlockInstruction::IncrDecrPostfix(lhs, incr) => match ctx.get_lhs(lhs)? {
+        Instruction::IncrDecrPostfix(lhs, incr) => match ctx.get_lhs(lhs)? {
             JsType::Number => JsType::Number,
             JsType::TheNumber(old_n) => {
                 let old_n = *old_n;
@@ -62,14 +59,14 @@ pub fn interpret(
             }
             _ => return None,
         },
-        BasicBlockInstruction::Undefined => JsType::Undefined,
-        BasicBlockInstruction::Null => JsType::Null,
-        BasicBlockInstruction::This => JsType::Any, // TODO: grab from context?
-        BasicBlockInstruction::TypeOf(t) => ctx.get_variable(*t)?.typeof_string(),
-        BasicBlockInstruction::TypeOfGlobal(_) => JsType::String,
-        BasicBlockInstruction::ForInOfValue => JsType::Any, // TODO: grab from context?
-        BasicBlockInstruction::CaughtError => JsType::Any,  // TODO: grab from context?
-        BasicBlockInstruction::Array(elements) => {
+        Instruction::Undefined => JsType::Undefined,
+        Instruction::Null => JsType::Null,
+        Instruction::This => JsType::Any, // TODO: grab from context?
+        Instruction::TypeOf(t) => ctx.get_variable(*t)?.typeof_string(),
+        Instruction::TypeOfGlobal(_) => JsType::String,
+        Instruction::ForInOfValue => JsType::Any, // TODO: grab from context?
+        Instruction::CaughtError => JsType::Any,  // TODO: grab from context?
+        Instruction::Array(elements) => {
             let plain_items = elements
                 .iter()
                 .all(|elem| matches!(elem, ArrayElement::Item(_)));
@@ -93,7 +90,7 @@ pub fn interpret(
                 JsType::Array
             }
         }
-        BasicBlockInstruction::Object(proto, props) => {
+        Instruction::Object(proto, props) => {
             if proto.is_some() || props.len() > ARRAY_MAX_ELEMENTS {
                 JsType::Object
             } else {
@@ -143,9 +140,9 @@ pub fn interpret(
                 }
             }
         }
-        BasicBlockInstruction::Super => JsType::Any, // TODO: grab from context?
-        BasicBlockInstruction::CreateClass(_) => JsType::Any, // TODO: class type
-        BasicBlockInstruction::ArrayPattern(from_arr, pieces) => {
+        Instruction::Super => JsType::Any, // TODO: grab from context?
+        Instruction::CreateClass(_) => JsType::Any, // TODO: class type
+        Instruction::ArrayPattern(from_arr, pieces) => {
             let from_arr = ctx.get_variable(*from_arr)?.as_array()?;
 
             let mut pattern_contents: Vec<JsType> = Vec::new();
@@ -170,7 +167,7 @@ pub fn interpret(
 
             JsType::Pattern(pattern_contents)
         }
-        BasicBlockInstruction::ObjectPattern(inp_obj, pattern_props) => {
+        Instruction::ObjectPattern(inp_obj, pattern_props) => {
             let obj = ctx.get_variable(*inp_obj)?.as_object()?;
 
             let mut pattern_contents: Vec<JsType> = Vec::new();
@@ -228,42 +225,42 @@ pub fn interpret(
 
             JsType::Pattern(pattern_contents)
         }
-        BasicBlockInstruction::PatternUnpack(pat, index) => {
+        Instruction::PatternUnpack(pat, index) => {
             let Some(JsType::Pattern(contents)) = ctx.get_variable(*pat) else {
                 return None;
             };
 
             contents.get(*index).cloned()?
         }
-        BasicBlockInstruction::TempExit(_, _) => None?, // TODO: yield, await
-        BasicBlockInstruction::Phi(alternatives) => {
+        Instruction::TempExit(_, _) => None?, // TODO: yield, await
+        Instruction::Phi(alternatives) => {
             let types = alternatives
                 .iter()
                 // Some variables will be missing if we eliminate a branch, so we use flat_map
                 .flat_map(|alt| ctx.get_variable(*alt));
             JsType::union_all(types)?
         }
-        BasicBlockInstruction::Function(id) => JsType::TheFunction(*id, Default::default()),
-        BasicBlockInstruction::Call(callee, args) => {
+        Instruction::Function(id) => JsType::TheFunction(*id, Default::default()),
+        Instruction::Call(callee, args) => {
             let the_function = ctx.get_variable(*callee)?.as_function_id()?;
             let args = JsArgs::from(ctx.get_variables(args));
             return ctx.get_function_return(the_function, args);
         }
-        BasicBlockInstruction::New(_constructor, _args) => {
+        Instruction::New(_constructor, _args) => {
             return None;
         }
-        BasicBlockInstruction::ArgumentRead(n) => ctx.get_argument(*n)?.clone(),
-        BasicBlockInstruction::ArgumentRest(n) => match ctx.get_spread_argument(*n) {
+        Instruction::ArgumentRead(n) => ctx.get_argument(*n)?.clone(),
+        Instruction::ArgumentRest(n) => match ctx.get_spread_argument(*n) {
             Some(rest) => JsType::TheArray(rest.into()),
             None => JsType::Array,
         },
-        BasicBlockInstruction::Read(lhs) => ctx.get_lhs(lhs)?.clone(),
-        BasicBlockInstruction::Write(lhs, new_val) => {
+        Instruction::Read(lhs) => ctx.get_lhs(lhs)?.clone(),
+        Instruction::Write(lhs, new_val) => {
             let val = ctx.get_variable(*new_val)?.clone();
             ctx.set_lhs(lhs, val.clone())?;
             val
         }
-        BasicBlockInstruction::Delete(lhs) => {
+        Instruction::Delete(lhs) => {
             ctx.delete_lhs(lhs)?;
             JsType::Boolean
         }
@@ -278,12 +275,12 @@ mod tests {
 
     use crate::{
         basic_blocks::FunctionId,
-        interpret::{interpret_block_group, interpret_module, JsType},
+        interpret::{interpret_blocks, interpret_module, JsType},
         testutils::*,
     };
 
     fn test_interp_block(source: &str) -> Option<JsCompletion> {
-        let module = parse_instructions_module(vec![source]);
+        let module = parse_test_module(vec![source]).into();
         let mut ctx = InterpretCtx::from_module(&module);
         ctx.start_function(
             true,
@@ -293,14 +290,17 @@ mod tests {
         ctx.assign_variable(1, JsType::new_number(1.0));
         ctx.assign_variable(2, JsType::new_number(2.0));
         ctx.assign_variable(123, JsType::Number);
-        interpret_block_group(&mut ctx, &module.get_function(FunctionId(0)).unwrap())
+        interpret_blocks(
+            &mut ctx,
+            &module.get_function(FunctionId(0)).unwrap().blocks,
+        )
     }
 
     fn test_interp(source: &str) -> Option<JsCompletion> {
         test_interp_block(&format!(
-            "@0: {{
+            "{{
                 $0 = {source}
-                exit = return $0
+                Return $0
             }}"
         ))
     }
@@ -358,17 +358,15 @@ mod tests {
     #[test]
     fn interp_cond_mutations_1() {
         let num = test_interp_block(
-            "@0: {
+            "{
                 $0 = 5
-                exit = cond $123 ? @1..@1 : @2..@2 }
-            @1: {
-                $1 = $0++
-                exit = jump @3 }
-            @2: {
-                $2 = --$0
-                exit = jump @3 }
-            @3: {
-                exit = return $0 }",
+                if ($123) {
+                    $1 = $0++
+                } else {
+                    $2 = --$0
+                }
+                Return $0
+            }",
         );
         insta::assert_debug_snapshot!(num, @"None"); // Mutations are not supported
     }
@@ -376,21 +374,19 @@ mod tests {
     #[test]
     fn interp_cond_mutations_2() {
         let num = test_interp_block(
-            "@0: {
+            "{
                 $0 = [$2]
-                exit = cond $123 ? @1..@1 : @2..@2 }
-            @1: {
-                $1 = 0
-                $2 = $0[$1]++
-                exit = jump @3 }
-            @2: {
-                $3 = 0
-                $4 = --$0[$3]
-                exit = jump @3 }
-            @3: {
+                if ($123) {
+                    $1 = 0
+                    $2 = $0[$1]++
+                } else {
+                    $3 = 0
+                    $4 = --$0[$3]
+                }
                 $5 = 0
                 $6 = $0[$5]
-                exit = return $6 }",
+                Return $6
+            }",
         );
         insta::assert_debug_snapshot!(num, @"None"); // Mutations are not supported
     }

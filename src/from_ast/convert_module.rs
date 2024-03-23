@@ -3,9 +3,9 @@ use swc_ecma_ast::{
 };
 
 use super::{block_to_basic_blocks, find_module_nonlocals, FromAstCtx};
-use crate::basic_blocks::{BasicBlockModule, Export, Import, ModuleSummary};
+use crate::basic_blocks::{Export, Import, ModuleSummary, StructuredModule};
 
-pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<BasicBlockModule, String> {
+pub fn module_to_basic_blocks(filename: &str, module: &Module) -> Result<StructuredModule, String> {
     let mut ctx = FromAstCtx::new();
     let summary = find_importexport(&mut ctx, filename, &module);
 
@@ -110,15 +110,16 @@ mod tests {
         let module = module_to_basic_blocks("index.js", &swc_parse("1 + 1"));
         insta::assert_debug_snapshot!(module, @r###"
         Ok(
-            BasicBlockModule {
+            StructuredModule {
                 summary: ModuleSummary {
                     filename: "index.js",
                 },
-                top_level_stats: @0: {
+                top_level_stats: {
                     $0 = 1
                     $1 = 1
                     $2 = $0 + $1
-                },
+                }
+                ,
             },
         )
         "###);
@@ -139,26 +140,27 @@ mod tests {
         )
         .unwrap();
         insta::assert_debug_snapshot!(module, @r###"
-        BasicBlockModule {
+        StructuredModule {
             summary: ModuleSummary {
                 filename: "index.js",
             },
-            top_level_stats: @0: {
-                $0 = FunctionId(1)
-            },
+            top_level_stats: $0 = FunctionId(1)
+            ,
             functions: [
                 function():
-                @0: {
+                {
                     $1 = FunctionId(2)
                     $3 = $1
                     $4 = call $3()
-                    exit = return $4
-                },
+                    Return $4
+                }
+                ,
                 function():
-                @0: {
+                {
                     $2 = 2
-                    exit = return $2
-                },
+                    Return $2
+                }
+                ,
             ],
         }
         "###);
@@ -180,21 +182,23 @@ mod tests {
         .unwrap();
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
-        @0: {
+        {
             $1 = undefined
             $3 = write_non_local $$2 $1
             $4 = 1
             $5 = write_non_local $$2 $4
             $6 = FunctionId(2)
-            exit = return $6
+            Return $6
         }
+
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(2)).unwrap(), @r###"
         function():
-        @0: {
+        {
             $7 = read_non_local $$2
-            exit = return $7
+            Return $7
         }
+
         "###);
     }
 
@@ -209,7 +213,7 @@ mod tests {
         )
         .unwrap();
         insta::assert_debug_snapshot!(module.get_function(FunctionId(0)).unwrap(), @r###"
-        @0: {
+        {
             $0 = undefined
             $2 = write_non_local $$1 $0
             $3 = 1
@@ -219,15 +223,17 @@ mod tests {
             $8 = FunctionId(1)
             $9 = write_non_local $$6 $8
         }
+
         "###);
         insta::assert_debug_snapshot!(module.get_function(FunctionId(1)).unwrap(), @r###"
         function():
-        @0: {
+        {
             $10 = read_non_local $$6
             $11 = 9
             $12 = write_non_local $$1 $11
             $13 = $11
         }
+
         "###);
     }
 
@@ -249,7 +255,7 @@ mod tests {
         .unwrap();
         insta::assert_debug_snapshot!(module.functions, @r###"
         {
-            FunctionId(0): @0: {
+            FunctionId(0): {
                 $0 = undefined
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
@@ -263,9 +269,10 @@ mod tests {
                 $26 = $20
                 $27 = call $26()
                 $28 = $25 + $27
-            },
+            }
+            ,
             FunctionId(1): function():
-            @0: {
+            {
                 $5 = read_non_local $$1
                 $6 = undefined
                 $8 = write_non_local $$7 $6
@@ -274,21 +281,24 @@ mod tests {
                 $14 = $9
                 $15 = 123
                 $16 = call $14($15)
-                exit = return $16
-            },
+                Return $16
+            }
+            ,
             FunctionId(2): function():
-            @0: {
+            {
                 $11 = arguments[0]
                 $12 = read_non_local $$7
                 $13 = $11
-                exit = return $13
-            },
+                Return $13
+            }
+            ,
             FunctionId(3): function():
-            @0: {
+            {
                 $22 = read_non_local $$18
                 $23 = 456
-                exit = return $23
-            },
+                Return $23
+            }
+            ,
         }
         "###);
     }
@@ -306,7 +316,7 @@ mod tests {
         .unwrap();
         insta::assert_debug_snapshot!(module.functions, @r###"
         {
-            FunctionId(0): @0: {
+            FunctionId(0): {
                 $0 = undefined
                 $2 = write_non_local $$1 $0
                 $3 = FunctionId(1)
@@ -315,22 +325,25 @@ mod tests {
                 $12 = $3
                 $13 = 1
                 $14 = call $12($13)
-                exit = return $14
-            },
+                Return $14
+            }
+            ,
             FunctionId(1): function():
-            @0: {
+            {
                 $4 = arguments[0]
                 $5 = $4
                 $6 = read_non_local $$1
                 $7 = call $6()
                 $8 = $5 + $7
-                exit = return $8
-            },
+                Return $8
+            }
+            ,
             FunctionId(2): function():
-            @0: {
+            {
                 $10 = 100
-                exit = return $10
-            },
+                Return $10
+            }
+            ,
         }
         "###);
     }
@@ -346,12 +359,13 @@ mod tests {
         );
         insta::assert_debug_snapshot!(module, @r###"
         Ok(
-            BasicBlockModule {
+            StructuredModule {
                 summary: ModuleSummary {
                     filename: "index.js",
                 },
-                top_level_stats: @0: {
-                },
+                top_level_stats: {
+                }
+                ,
                 imports: [
                     Name(
                         "foo#0",

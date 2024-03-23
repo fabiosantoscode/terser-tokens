@@ -8,8 +8,8 @@ use swc_ecma_ast::{
 
 use crate::{
     basic_blocks::{
-        identifier_needs_quotes, ArrayElement, BasicBlockInstruction, BasicBlockModule, ExitType,
-        ForInOfKind, IncrDecr, MethodKind, ObjectProperty, StructuredFlow, TempExitType, LHS,
+        identifier_needs_quotes, ArrayElement, ExitType, ForInOfKind, IncrDecr, Instruction,
+        MethodKind, ObjectProperty, StructuredFlow, StructuredModule, TempExitType, LHS,
     },
     to_ast::{
         build_block, build_empty_var_decl, build_multivar_decl, build_var_assign, build_var_decl,
@@ -23,8 +23,8 @@ use super::{
     pattern_to_statement, ToAstContext,
 };
 
-pub fn module_to_ast(mut block_module: BasicBlockModule) -> Module {
-    let (mut ctx, tree) = ToAstContext::new(&mut block_module);
+pub fn module_to_ast(block_module: StructuredModule) -> Module {
+    let (mut ctx, tree) = ToAstContext::new(block_module);
 
     Module {
         span: Default::default(),
@@ -77,7 +77,7 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
             }
         }
         StructuredFlow::Instruction(varname, ins) => match ins {
-            BasicBlockInstruction::CreateClass(extends) => {
+            Instruction::CreateClass(extends) => {
                 class_to_ast_prepare(ctx, *varname, extends.clone());
                 vec![]
             }
@@ -256,9 +256,9 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
 /// Emit a single instruction. If it will be inlined somewhere else, emit nothing.
 /// If a name is necessary, we emit a variable declaration or assignment.
 fn instruction_to_statement(
-    ctx: &mut ToAstContext<'_>,
+    ctx: &mut ToAstContext,
     variable: usize,
-    instruction: &BasicBlockInstruction,
+    instruction: &Instruction,
 ) -> Vec<Stmt> {
     if let Some(instruction_as_stat) = pattern_to_statement(ctx, instruction, variable) {
         vec![instruction_as_stat]
@@ -280,7 +280,7 @@ fn instruction_to_statement(
             .collect()
     } else {
         let (expression, variable) =
-            if let BasicBlockInstruction::Write(LHS::NonLocal(id), value_of) = instruction {
+            if let Instruction::Write(LHS::NonLocal(id), value_of) = instruction {
                 let expression = ref_or_inlined_expr(ctx, *value_of);
                 (expression, id.0)
             } else {
@@ -313,18 +313,16 @@ pub fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
     }
 }
 
-fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
+fn to_expression(ctx: &mut ToAstContext, expr: &Instruction) -> Expr {
     match expr {
-        BasicBlockInstruction::LitNumber(num) => (*num).into(),
-        BasicBlockInstruction::LitBool(s) => (*s).into(),
-        BasicBlockInstruction::LitString(s) => Expr::Lit(Lit::Str(Str::from(&s[..]))),
-        BasicBlockInstruction::Undefined => {
-            Expr::Ident(Ident::new("undefined".into(), Default::default()))
-        }
-        BasicBlockInstruction::Null => Expr::Lit(Lit::Null(Null {
+        Instruction::LitNumber(num) => (*num).into(),
+        Instruction::LitBool(s) => (*s).into(),
+        Instruction::LitString(s) => Expr::Lit(Lit::Str(Str::from(&s[..]))),
+        Instruction::Undefined => Expr::Ident(Ident::new("undefined".into(), Default::default())),
+        Instruction::Null => Expr::Lit(Lit::Null(Null {
             span: Default::default(),
         })),
-        BasicBlockInstruction::UnaryOp(op, operand) => {
+        Instruction::UnaryOp(op, operand) => {
             let operand = ref_or_inlined_expr(ctx, *operand);
 
             Expr::Unary(UnaryExpr {
@@ -333,7 +331,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 arg: Box::new(operand),
             })
         }
-        BasicBlockInstruction::BinOp(op, left, right) => {
+        Instruction::BinOp(op, left, right) => {
             let left = ref_or_inlined_expr(ctx, *left);
             let right = ref_or_inlined_expr(ctx, *right);
 
@@ -344,8 +342,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 right: Box::new(right),
             })
         }
-        BasicBlockInstruction::IncrDecr(lhs, is_incr)
-        | BasicBlockInstruction::IncrDecrPostfix(lhs, is_incr) => {
+        Instruction::IncrDecr(lhs, is_incr) | Instruction::IncrDecrPostfix(lhs, is_incr) => {
             let op = match is_incr {
                 IncrDecr::Incr => UpdateOp::PlusPlus,
                 IncrDecr::Decr => UpdateOp::MinusMinus,
@@ -354,13 +351,13 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             Expr::Update(UpdateExpr {
                 op,
                 arg: Box::new(lhs_to_ast_expr(ctx, lhs)),
-                prefix: matches!(expr, BasicBlockInstruction::IncrDecr(..)),
+                prefix: matches!(expr, Instruction::IncrDecr(..)),
                 span: Default::default(),
             })
         }
-        BasicBlockInstruction::Ref(var_idx) => ref_or_inlined_expr(ctx, *var_idx),
-        BasicBlockInstruction::This => Expr::Ident(Ident::new("this".into(), Default::default())),
-        BasicBlockInstruction::TypeOf(var_idx) => {
+        Instruction::Ref(var_idx) => ref_or_inlined_expr(ctx, *var_idx),
+        Instruction::This => Expr::Ident(Ident::new("this".into(), Default::default())),
+        Instruction::TypeOf(var_idx) => {
             let var = ref_or_inlined_expr(ctx, *var_idx);
 
             Expr::Unary(UnaryExpr {
@@ -369,12 +366,12 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 arg: Box::new(var),
             })
         }
-        BasicBlockInstruction::TypeOfGlobal(varname) => Expr::Unary(UnaryExpr {
+        Instruction::TypeOfGlobal(varname) => Expr::Unary(UnaryExpr {
             span: Default::default(),
             op: UnaryOp::TypeOf,
             arg: Box::new(build_identifier_str(varname.as_str())),
         }),
-        BasicBlockInstruction::Array(items) => {
+        Instruction::Array(items) => {
             let items = items
                 .iter()
                 .map(|item| match item {
@@ -395,7 +392,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 elems: items,
             })
         }
-        BasicBlockInstruction::Object(proto, props) => Expr::Object(ObjectLit {
+        Instruction::Object(proto, props) => Expr::Object(ObjectLit {
             span: Default::default(),
             props: proto
                 .map(|proto| {
@@ -441,7 +438,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                                 })
                             }
                             crate::basic_blocks::ObjectValue::Method(kind, fn_id) => {
-                                let function = ctx.module.take_function(*fn_id).unwrap();
+                                let function = ctx.take_function(*fn_id);
                                 let function = function_to_ast(ctx, function);
 
                                 match kind {
@@ -476,25 +473,24 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 }))
                 .collect::<Vec<PropOrSpread>>(),
         }),
-        BasicBlockInstruction::Super => {
+        Instruction::Super => {
             // Cannot appear on its own, but an optimizer may lead us here.
             Expr::Lit(Lit::Null(Null {
                 span: Default::default(),
             }))
         }
-        BasicBlockInstruction::ArrayPattern(_, _) => unreachable!(),
-        BasicBlockInstruction::ObjectPattern(_, _) => unreachable!(),
-        BasicBlockInstruction::PatternUnpack(pat_var, idx) => {
+        Instruction::ArrayPattern(_, _) => unreachable!(),
+        Instruction::ObjectPattern(_, _) => unreachable!(),
+        Instruction::PatternUnpack(pat_var, idx) => {
             build_identifier(ctx.get_varname_for_pattern(*pat_var, *idx))
         }
-        BasicBlockInstruction::Function(id) => {
-            let func = ctx.module.take_function(*id).unwrap();
-
-            function_expr_to_ast(ctx, func)
+        Instruction::Function(id) => {
+            let function = ctx.take_function(*id);
+            function_expr_to_ast(ctx, function)
         }
-        BasicBlockInstruction::Call(func_idx, args) => {
+        Instruction::Call(func_idx, args) => {
             let callee = match ctx.peek_inlined_expression(*func_idx) {
-                Some(BasicBlockInstruction::Super) => {
+                Some(Instruction::Super) => {
                     // Super call!
                     Callee::Super(Super {
                         span: Default::default(),
@@ -514,7 +510,7 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
                 type_args: None,
             })
         }
-        BasicBlockInstruction::New(func_idx, args) => {
+        Instruction::New(func_idx, args) => {
             let callee = ref_or_inlined_expr(ctx, *func_idx);
             let args: Vec<ExprOrSpread> = args
                 .iter()
@@ -530,10 +526,10 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             })
         }
 
-        BasicBlockInstruction::ArgumentRead(_) => unreachable!("handled in function_to_ast"),
-        BasicBlockInstruction::ArgumentRest(_) => unreachable!("handled in function_to_ast"),
+        Instruction::ArgumentRead(_) => unreachable!("handled in function_to_ast"),
+        Instruction::ArgumentRest(_) => unreachable!("handled in function_to_ast"),
 
-        BasicBlockInstruction::TempExit(typ, arg) => match typ {
+        Instruction::TempExit(typ, arg) => match typ {
             TempExitType::Yield => Expr::Yield(YieldExpr {
                 span: Default::default(),
                 delegate: false,
@@ -550,29 +546,29 @@ fn to_expression(ctx: &mut ToAstContext, expr: &BasicBlockInstruction) -> Expr {
             }),
         },
 
-        BasicBlockInstruction::CaughtError => Expr::Ident(Ident::new(
+        Instruction::CaughtError => Expr::Ident(Ident::new(
             ctx.get_caught_error().into(),
             Default::default(),
         )),
-        BasicBlockInstruction::ForInOfValue => Expr::Ident(Ident::new(
+        Instruction::ForInOfValue => Expr::Ident(Ident::new(
             ctx.get_for_in_of_value().into(),
             Default::default(),
         )),
-        BasicBlockInstruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
-        BasicBlockInstruction::Read(lhs) => lhs_to_ast_expr(ctx, lhs),
-        BasicBlockInstruction::Write(lhs, assignee) => Expr::Assign(AssignExpr {
+        Instruction::Phi(_) => unreachable!("phi should be removed by remove_phi()"),
+        Instruction::Read(lhs) => lhs_to_ast_expr(ctx, lhs),
+        Instruction::Write(lhs, assignee) => Expr::Assign(AssignExpr {
             span: Default::default(),
             op: AssignOp::Assign,
             left: PatOrExpr::Expr(Box::new(lhs_to_ast_expr(ctx, lhs))),
             right: Box::new(ref_or_inlined_expr(ctx, *assignee)),
         }),
-        BasicBlockInstruction::Delete(lhs) => Expr::Unary(UnaryExpr {
+        Instruction::Delete(lhs) => Expr::Unary(UnaryExpr {
             span: Default::default(),
             op: UnaryOp::Delete,
             arg: Box::new(lhs_to_ast_expr(ctx, lhs)),
         }),
 
-        BasicBlockInstruction::CreateClass(_optional_extends) => {
+        Instruction::CreateClass(_optional_extends) => {
             unreachable!("handled in function_to_ast")
         }
     }
@@ -857,8 +853,8 @@ mod tests {
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
         for(var a in {}){
-            a();
-            continue;
+            var b = a;
+            b();
         }
         "###);
     }
