@@ -135,7 +135,9 @@ fn generate_phi_nodes_inner(
 
                 let phi_block = ctx.leave_conditional();
 
-                out_recursive.push(StructuredFlow::LogicalCond(kind, left, cond_on, right, then_take));
+                out_recursive.push(StructuredFlow::LogicalCond(
+                    kind, left, cond_on, right, then_take,
+                ));
                 out_recursive.extend(phi_block.into_iter());
             }
             StructuredFlow::Switch(brk, expression, mut cases) => {

@@ -805,7 +805,6 @@ mod tests {
                 if (456) {
                     break;
                 }
-                continue;
             } else {
                 break;
             }
@@ -851,12 +850,10 @@ mod tests {
                         if (1234) {
                             break;
                         }
-                        continue;
                     } else {
                         break;
                     }
                 }
-                continue;
             } else {
                 break;
             }
@@ -889,12 +886,10 @@ mod tests {
                         } else {
                             break;
                         }
-                        continue;
                     } else {
                         break;
                     }
                 }
-                continue;
             } else {
                 break;
             }

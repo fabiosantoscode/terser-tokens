@@ -133,8 +133,6 @@ fn stat_to_basic_blocks_inner(
             let body = stat_to_basic_blocks_inner(ctx, BreakableId(None), body)?;
             loop_body.extend(body);
 
-            loop_body.push(StructuredFlow::Continue(brk_id));
-
             let after_loop = ctx.leave_conditional_branch();
 
             return Ok(vec![
@@ -170,8 +168,6 @@ fn stat_to_basic_blocks_inner(
                 loop_inner_body.extend(expr_to_basic_blocks(ctx, update)?.0);
             }
 
-            loop_inner_body.push(StructuredFlow::Continue(brk_id));
-
             loop_body.push(StructuredFlow::Cond(
                 BreakableId(None),
                 test,
@@ -201,7 +197,7 @@ fn stat_to_basic_blocks_inner(
             loop_body.push(StructuredFlow::Cond(
                 BreakableId(None),
                 test,
-                vec![StructuredFlow::Continue(brk_id)],
+                vec![],
                 vec![StructuredFlow::Break(brk_id)],
             ));
 
@@ -222,7 +218,6 @@ fn stat_to_basic_blocks_inner(
 
             let mut loop_inner_body = vec![];
             loop_inner_body.extend(stat_to_basic_blocks(ctx, &whil.body)?);
-            loop_inner_body.push(StructuredFlow::Continue(brk_id));
 
             loop_body.push(StructuredFlow::Cond(
                 BreakableId(None),
@@ -1251,7 +1246,6 @@ mod tests {
                 $1 = 123
                 if ($1) {
                     $2 = 456
-                    Continue (@0)
                 } else {
                     Break (@0)
                 }
@@ -1312,7 +1306,6 @@ mod tests {
                         $13 = either($0, $1, $5, $7, $11)
                     }
                     $14 = either($0, $1, $5, $7, $13)
-                    Continue (@0)
                 } else {
                     Break (@0)
                 }
@@ -1337,7 +1330,6 @@ mod tests {
             $0 = 123
             $1 = 456
             if ($1) {
-                Continue (@0)
             } else {
                 Break (@0)
             }
@@ -1368,7 +1360,6 @@ mod tests {
                     $7 = 1
                     $8 = $6 + $7
                     $9 = $8
-                    Continue (@0)
                 } else {
                     Break (@0)
                 }
@@ -1517,7 +1508,6 @@ mod tests {
                         Break (@1)
                     }
                 }
-                Continue (@0)
             } else {
                 Break (@0)
             }
