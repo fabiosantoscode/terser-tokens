@@ -12,8 +12,6 @@ pub fn normalize_module(module: &mut StructuredModule) {
         block_group.blocks = vec![blocks];
     }
 
-    // TODO: normalize function IDs
-
     remove_phi_module(module);
     generate_phi_nodes(module);
 }
@@ -44,6 +42,11 @@ fn normalize_flow_inner(flow: &mut StructuredFlow, brk_targets: &mut BTreeMap<Br
             } else if cons == alt {
                 *flow = StructuredFlow::Block(*brk, std::mem::take(cons));
             }
+        }
+        StructuredFlow::LogicalCond(_, left, _, right, _) => {
+            let mut no_brk = BreakableId(None);
+            normalize_flow_vec(&mut no_brk, left, brk_targets, false);
+            normalize_flow_vec(&mut no_brk, right, brk_targets, false);
         }
         StructuredFlow::Switch(brk, _, cases) => {
             for c in cases.iter_mut() {

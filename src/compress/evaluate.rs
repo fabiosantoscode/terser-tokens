@@ -1,5 +1,5 @@
 use crate::{
-    basic_blocks::{StructuredFlow, StructuredModule},
+    basic_blocks::{LogicalCondKind, StructuredFlow, StructuredModule},
     block_ops::normalize_module,
     interpret::{interpret_module, InterpretCtx, JsType},
 };
@@ -12,14 +12,37 @@ pub fn compress_step_evaluate(module: &mut StructuredModule) {
 
     module.for_each_flow_mut(
         |_func_id, block| match  block {
-            StructuredFlow::Cond(brk, test, cons, alt) => {
+            StructuredFlow::Cond(_brk, test, cons, alt) => {
                 let is_truthy = types.get(&test).and_then(JsType::is_truthy);
 
                 // statically-analyzable conditions
                 match is_truthy {
-                    Some(true) => *block = StructuredFlow::Block(brk.clone(), std::mem::take(cons)),
-                    Some(false) => *block = StructuredFlow::Block(brk.clone(), std::mem::take(alt)),
+                    Some(true) => *block = StructuredFlow::from_vec(std::mem::take(cons)),
+                    Some(false) => *block = StructuredFlow::from_vec(std::mem::take(alt)),
                     None => {},
+                };
+            }
+            StructuredFlow::LogicalCond(kind, left, cond_on, _right, _then_take) => {
+                let eval_left = types.get(&cond_on);
+
+                match kind {
+                    LogicalCondKind::And | LogicalCondKind::Or => {
+                        let is_truthy = eval_left.and_then(JsType::is_truthy);
+
+                        match (kind, is_truthy) {
+                            (LogicalCondKind::And, Some(false)) => *block = StructuredFlow::from_vec(std::mem::take(left)),
+                            (LogicalCondKind::Or, Some(true)) => *block = StructuredFlow::from_vec(std::mem::take(left)),
+                            _ => {},
+                        };
+                    },
+                    LogicalCondKind::NullishCoalescing => {
+                        let is_nullish = eval_left.and_then(JsType::is_nullish);
+
+                        match is_nullish {
+                            Some(false) => *block = StructuredFlow::from_vec(std::mem::take(left)),
+                            _ => {},
+                        };
+                    }
                 };
             }
             StructuredFlow::Instruction(varname, ins) => {

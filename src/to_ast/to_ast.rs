@@ -1,15 +1,16 @@
 use swc_ecma_ast::{
-    AssignExpr, AssignOp, AwaitExpr, BlockStmt, CallExpr, Callee, ComputedPropName, ContinueStmt,
-    DebuggerStmt, Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident, KeyValueProp,
-    Lit, Module, ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr, Prop, PropName, PropOrSpread,
-    ReturnStmt, SpreadElement, Stmt, Str, Super, ThrowStmt, TryStmt, UnaryExpr, UnaryOp,
-    UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
+    op, AssignExpr, AssignOp, AwaitExpr, BinExpr, BlockStmt, CallExpr, Callee, ComputedPropName,
+    ContinueStmt, DebuggerStmt, Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident,
+    KeyValueProp, Lit, Module, ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr, Prop, PropName,
+    PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, Super, ThrowStmt, TryStmt, UnaryExpr,
+    UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
 };
 
 use crate::{
     basic_blocks::{
         identifier_needs_quotes, ArrayElement, ExitType, ForInOfKind, IncrDecr, Instruction,
-        MethodKind, ObjectProperty, StructuredFlow, StructuredModule, TempExitType, LHS,
+        LogicalCondKind, MethodKind, ObjectProperty, StructuredFlow, StructuredModule,
+        TempExitType, LHS,
     },
     to_ast::{
         build_block, build_empty_var_decl, build_multivar_decl, build_var_assign, build_var_decl,
@@ -118,6 +119,24 @@ pub fn to_statements(ctx: &mut ToAstContext, node: &StructuredFlow) -> Vec<Stmt>
             });
 
             vec![if_stmt]
+        }
+        StructuredFlow::LogicalCond(kind, left, cond_on, right, then_take) => {
+            let left = statements_forced_to_expr_ast(ctx, &left, *cond_on);
+            let right = statements_forced_to_expr_ast(ctx, &right, *then_take);
+
+            vec![Stmt::Expr(ExprStmt {
+                span: Default::default(),
+                expr: Box::new(Expr::Bin(BinExpr {
+                    span: Default::default(),
+                    op: match kind {
+                        LogicalCondKind::And => op!("&&"),
+                        LogicalCondKind::Or => op!("||"),
+                        LogicalCondKind::NullishCoalescing => op!("??"),
+                    },
+                    left: Box::new(left),
+                    right: Box::new(right),
+                })),
+            })]
         }
         StructuredFlow::Switch(brk_id, test, cases) => {
             let switch_stmt = ctx.enter_breakable(brk_id, false, |ctx| {
@@ -594,79 +613,31 @@ mod tests {
         let block_group = test_basic_blocks_module("((X ?? Y) && Z) || W");
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
-        var a = X;
-        if (a == null) {
-            var b = Y;
-        } else {
-            b = a;
-        }
-        if (b) {
-            var c = Z;
-        } else {
-            c = b;
-        }
-        if (!c) {
-            W;
-        }
+        (((a = X, a) ?? (a = Y, a), a) && (a = Z, a), a) || (a = W, a);
+        var a;
         "###);
 
         let block_group = test_basic_blocks_module("X ?? (Y && (Z || W))");
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
-        var a = X;
-        if (a == null) {
-            var b = Y;
-            if (b) {
-                var c = Z;
-                if (!c) {
-                    W;
-                }
-            }
-        }
+        (a = X, a) ?? ((a = Y, a) && ((a = Z, a) || (a = W, a), a), a);
+        var a;
         "###);
 
         let block_group = test_basic_blocks_module("return ((X ?? Y) && Z) || W");
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
-        var a = X;
-        if (a == null) {
-            var b = Y;
-        } else {
-            b = a;
-        }
-        if (b) {
-            var c = Z;
-        } else {
-            c = b;
-        }
-        if (!c) {
-            var d = W;
-        } else {
-            d = c;
-        }
-        return d;
+        (((a = X, a) ?? (a = Y, a), a) && (a = Z, a), a) || (a = W, a);
+        return a;
+        var a;
         "###);
 
         let block_group = test_basic_blocks_module("return X ?? (Y && (Z || W))");
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
-        var a = X;
-        if (a == null) {
-            var b = Y;
-            if (b) {
-                var c = Z;
-                if (!c) {
-                    var d = W;
-                } else {
-                    d = c;
-                }
-            } else {
-                d = b;
-            }
-        } else {
-            d = a;
-        }
-        return d;
+        (a = X, a) ?? ((a = Y, a) && ((a = Z, a) || (a = W, a), a), a);
+        return a;
+        var a;
         "###);
     }
 

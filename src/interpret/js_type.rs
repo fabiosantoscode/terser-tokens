@@ -61,6 +61,26 @@ impl JsType {
         }
     }
 
+    pub fn is_nullish(&self) -> Option<bool> {
+        match self {
+            JsType::Undefined | JsType::Null => Some(true),
+            JsType::Boolean
+            | JsType::TheBoolean(_)
+            | JsType::String
+            | JsType::TheString(_)
+            | JsType::Number
+            | JsType::TheNumber(_)
+            | JsType::Function
+            | JsType::TheFunction(_, _)
+            | JsType::Array
+            | JsType::TheArray(_)
+            | JsType::Object
+            | JsType::TheObject(_) => Some(false),
+            JsType::Pattern(_) => None,
+            JsType::Any => None,
+        }
+    }
+
     pub(crate) fn to_string(&self) -> Option<String> {
         match self {
             JsType::TheString(s) => Some(s.clone()),

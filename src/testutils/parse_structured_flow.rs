@@ -1,8 +1,8 @@
 use nom::IResult;
 
 use crate::basic_blocks::{
-    BasicBlockEnvironment, BreakableId, ExitType, FunctionId, StructuredFlow, StructuredFunction,
-    StructuredModule,
+    BasicBlockEnvironment, BreakableId, ExitType, FunctionId, LogicalCondKind, StructuredFlow,
+    StructuredFunction, StructuredModule,
 };
 
 use super::parse_test_instruction;
@@ -39,6 +39,7 @@ pub fn parse_test_flow(input: &str) -> StructuredFlow {
         let input = whitespace!(input);
 
         let (input, (the_many, _)) = many_till(cut(parse_structured_flow_root), char('}'))(input)?;
+        let input = whitespace!(input);
 
         Ok((input, the_many))
     }
@@ -78,6 +79,53 @@ pub fn parse_test_flow(input: &str) -> StructuredFlow {
         let input = whitespace!(input);
 
         Ok((input, StructuredFlow::Cond(brk, branch_var, cons, alt)))
+    }
+
+    fn parse_logical_cond(input: &str) -> IResult<&str, StructuredFlow> {
+        /* ({ ...blocks }, $0) && ({ ...blocks }, $1) */
+
+        // Left side
+
+        let (input, _) = tag("(")(input)?;
+        let input = whitespace!(input);
+
+        let (input, left_blocks) = parse_many_braced(input)?;
+        let input = whitespace!(input);
+
+        let (input, _) = tag(",")(input)?;
+        let input = whitespace!(input);
+        let (input, cond_on) = parse_ref(input)?;
+        let input = whitespace!(input);
+        let (input, _) = tag(")")(input)?;
+        let input = whitespace!(input);
+
+        // &&, ||, ??
+
+        let (input, kind) = alt((
+            map(tag("&&"), |_| LogicalCondKind::And),
+            map(tag("||"), |_| LogicalCondKind::Or),
+            map(tag("??"), |_| LogicalCondKind::NullishCoalescing),
+        ))(input)?;
+        let input = whitespace!(input);
+
+        // Right hand side
+
+        let (input, _) = tag("(")(input)?;
+        let input = whitespace!(input);
+
+        let (input, right_blocks) = parse_many_braced(input)?;
+        let input = whitespace!(input);
+
+        let (input, _) = tag(",")(input)?;
+        let input = whitespace!(input);
+        let (input, then_take) = parse_ref(input)?;
+        let input = whitespace!(input);
+        let (input, _) = tag(")")(input)?;
+
+        Ok((
+            input,
+            StructuredFlow::LogicalCond(kind, left_blocks, cond_on, right_blocks, then_take),
+        ))
     }
 
     fn parse_loop(input: &str) -> IResult<&str, StructuredFlow> {
@@ -149,6 +197,7 @@ pub fn parse_test_flow(input: &str) -> StructuredFlow {
             parse_braced_block,
             parse_jumps_exits,
             parse_cond,
+            parse_logical_cond,
             parse_loop,
             parse_try_catch,
             parse_instructions,

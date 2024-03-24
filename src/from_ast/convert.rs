@@ -6,8 +6,9 @@ use swc_ecma_ast::{
 };
 
 use crate::basic_blocks::{
-    ArrayElement, BreakableId, ExitType, ForInOfKind, IncrDecr, Instruction, MethodKind, ObjectKey,
-    ObjectProperty, ObjectValue, StructuredFlow, StructuredSwitchCase, TempExitType, LHS,
+    ArrayElement, BreakableId, ExitType, ForInOfKind, IncrDecr, Instruction, LogicalCondKind,
+    MethodKind, ObjectKey, ObjectProperty, ObjectValue, StructuredFlow, StructuredSwitchCase,
+    TempExitType, LHS,
 };
 
 use super::{
@@ -408,56 +409,36 @@ pub fn expr_to_basic_blocks(
         Expr::Bin(bin) => {
             let mut bin_flow = vec![];
 
-            let (flow, l) = expr_to_basic_blocks(ctx, &bin.left)?;
-            bin_flow.extend(flow);
-
             match &bin.op {
                 BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing => {
-                    let condition = match bin.op {
-                        BinaryOp::LogicalAnd => l,
-                        BinaryOp::LogicalOr => {
-                            let (flow, not_l) =
-                                ctx.push_instruction(Instruction::UnaryOp(UnaryOp::Bang, l));
-                            bin_flow.extend(flow);
-
-                            not_l
-                        }
-                        BinaryOp::NullishCoalescing => {
-                            let (flow, nil) = ctx.push_instruction(Instruction::Null);
-                            bin_flow.extend(flow);
-
-                            let (flow, binop) =
-                                ctx.push_instruction(Instruction::BinOp(BinaryOp::EqEq, l, nil));
-                            bin_flow.extend(flow);
-
-                            binop
-                        }
+                    let kind = match bin.op {
+                        BinaryOp::LogicalAnd => LogicalCondKind::And,
+                        BinaryOp::LogicalOr => LogicalCondKind::Or,
+                        BinaryOp::NullishCoalescing => LogicalCondKind::NullishCoalescing,
                         _ => unreachable!(),
                     };
 
+                    let (left, l) = expr_to_basic_blocks(ctx, &bin.left)?;
+
                     ctx.enter_conditional_branch();
 
-                    let (then_side, r) = expr_to_basic_blocks(ctx, &bin.right)?;
+                    let (right, r) = expr_to_basic_blocks(ctx, &bin.right)?;
 
-                    let (else_side, l) = ctx.push_instruction(Instruction::Ref(l));
-
-                    bin_flow.push(StructuredFlow::Cond(
-                        BreakableId(None),
-                        condition,
-                        then_side,
-                        else_side,
-                    ));
-
-                    let after_cond = ctx.leave_conditional_branch();
-                    bin_flow.extend(after_cond);
+                    bin_flow.push(StructuredFlow::LogicalCond(kind, left, l, right, r));
 
                     let (flow, phi) = ctx.push_instruction(Instruction::Phi(vec![l, r]));
                     bin_flow.extend(flow);
+
+                    let after_cond = ctx.leave_conditional_branch();
+                    bin_flow.extend(after_cond);
 
                     Ok((bin_flow, phi))
                 }
                 BinaryOp::In | BinaryOp::InstanceOf => todo!("in/instanceof"),
                 _ => {
+                    let (left_flow, l) = expr_to_basic_blocks(ctx, &bin.left)?;
+                    bin_flow.extend(left_flow);
+
                     let (flow, r) = expr_to_basic_blocks(ctx, &bin.right)?;
                     bin_flow.extend(flow);
 
@@ -1493,33 +1474,30 @@ mod tests {
         let s = test_basic_blocks("var x = 1 && 2; return x;");
         insta::assert_debug_snapshot!(s, @r###"
         {
-            $0 = 1
-            if ($0) {
+            ({
+                $0 = 1
+            }, $0) && ({
                 $1 = 2
-            } else {
-                $2 = $0
-            }
-            $3 = either($1, $2)
-            $4 = $3
-            Return $4
+            }, $1)
+            $2 = either($0, $1)
+            $3 = $2
+            Return $3
         }
         "###);
 
         let s = test_basic_blocks("var x = y() || z(); return x;");
         insta::assert_debug_snapshot!(s, @r###"
         {
-            $0 = global "y"
-            $1 = call $0()
-            $2 = !$1
-            if ($2) {
-                $3 = global "z"
-                $4 = call $3()
-            } else {
-                $5 = $1
-            }
-            $6 = either($4, $5)
-            $7 = $6
-            Return $7
+            ({
+                $0 = global "y"
+                $1 = call $0()
+            }, $1) || ({
+                $2 = global "z"
+                $3 = call $2()
+            }, $3)
+            $4 = either($1, $3)
+            $5 = $4
+            Return $5
         }
         "###);
     }

@@ -124,6 +124,20 @@ fn generate_phi_nodes_inner(
                 out_recursive.push(StructuredFlow::Cond(brk, cond_var, cons, alt));
                 out_recursive.extend(phi_block.into_iter());
             }
+            StructuredFlow::LogicalCond(kind, left, cond_on, right, then_take) => {
+                let left = generate_phi_nodes_inner(ctx, left);
+                let cond_on = ctx.read_name(cond_on);
+
+                ctx.enter_conditional();
+
+                let right = generate_phi_nodes_inner(ctx, right);
+                let then_take = ctx.read_name(then_take);
+
+                let phi_block = ctx.leave_conditional();
+
+                out_recursive.push(StructuredFlow::LogicalCond(kind, left, cond_on, right, then_take));
+                out_recursive.extend(phi_block.into_iter());
+            }
             StructuredFlow::Switch(brk, expression, mut cases) => {
                 let expression = ctx.read_name(expression);
 

@@ -4,7 +4,8 @@ use crate::basic_blocks::{ForInOfKind, MethodKind, ObjectKey, ObjectProperty, Ob
 
 use super::{
     ArrayElement, ArrayPatternPiece, BasicBlockEnvironment, BreakableId, FunctionId, Instruction,
-    NonLocalId, ObjectPatternPiece, StructuredFlow, StructuredFunction, StructuredModule, LHS,
+    LogicalCondKind, NonLocalId, ObjectPatternPiece, StructuredFlow, StructuredFunction,
+    StructuredModule, LHS,
 };
 
 impl Debug for LHS {
@@ -372,6 +373,23 @@ impl Debug for StructuredFlow {
                 print_vec_no_eol(f, cons)?;
                 write!(f, " else ")?;
                 print_vec(f, alt)
+            }
+            StructuredFlow::LogicalCond(kind, before, cond_on, after, then_take) => {
+                write!(f, "(")?;
+                print_vec_no_eol(f, before)?;
+                write!(
+                    f,
+                    ", ${}) {} ",
+                    cond_on,
+                    match kind {
+                        LogicalCondKind::And => "&&",
+                        LogicalCondKind::Or => "||",
+                        LogicalCondKind::NullishCoalescing => "??",
+                    }
+                )?;
+                write!(f, "(")?;
+                print_vec_no_eol(f, after)?;
+                write!(f, ", ${})", then_take)
             }
             StructuredFlow::Switch(brk, expression, cases) => {
                 writeln!(f, "switch{} (${}) {{", print_brk(brk), expression)?;

@@ -22,6 +22,13 @@ pub enum StructuredFlow {
     Loop(BreakableId, Vec<StructuredFlow>),
     ForInOfLoop(BreakableId, usize, ForInOfKind, Vec<StructuredFlow>),
     Cond(BreakableId, usize, Vec<StructuredFlow>, Vec<StructuredFlow>),
+    LogicalCond(
+        LogicalCondKind,
+        Vec<StructuredFlow>,
+        usize,
+        Vec<StructuredFlow>,
+        usize,
+    ),
     /// (breakable_id, condition, structured_switch_cases)
     Switch(BreakableId, usize, Vec<StructuredSwitchCase>),
     TryCatch(
@@ -89,11 +96,20 @@ pub enum ForInOfKind {
     ForAwaitOf,
 }
 
+#[repr(u8)]
+#[derive(Clone, PartialEq, Copy)]
+pub enum LogicalCondKind {
+    And,
+    Or,
+    NullishCoalescing,
+}
+
 impl StructuredFlow {
     #[cfg(test)]
     fn str_head(&self) -> String {
         match self {
             StructuredFlow::Cond(_, _, _, _) => "Cond".to_string(),
+            StructuredFlow::LogicalCond(_, _, _, _, _) => "LogicalCond".to_string(),
             StructuredFlow::Switch(_, _, _) => "Switch".to_string(),
             StructuredFlow::Break(_) => "Break".to_string(),
             StructuredFlow::Continue(_) => "Continue".to_string(),
@@ -151,6 +167,15 @@ impl StructuredFlow {
                 }
             }
             Cond(id, cond, cons, alt) => vec![Cond(id, cond, map(cons), map(alt))],
+            LogicalCond(kind, before, cond_on, after, then_take) => {
+                vec![LogicalCond(
+                    kind,
+                    map(before),
+                    cond_on,
+                    map(after),
+                    then_take,
+                )]
+            }
             TryCatch(id, try_, catch, finally) => {
                 vec![TryCatch(id, map(try_), map(catch), map(finally))]
             }
@@ -209,8 +234,11 @@ impl StructuredFlow {
 
     pub fn children(&self) -> Vec<Vec<&StructuredFlow>> {
         match self {
-            StructuredFlow::Cond(_id, _x /* who cares */, y, z) => {
-                vec![y.iter().collect(), z.iter().collect()]
+            StructuredFlow::Cond(_, _, cons, alt) => {
+                vec![cons.iter().collect(), alt.iter().collect()]
+            }
+            StructuredFlow::LogicalCond(_, left, _, right, _) => {
+                vec![left.iter().collect(), right.iter().collect()]
             }
             StructuredFlow::Switch(_, _, cases) => cases
                 .iter()
@@ -246,8 +274,11 @@ impl StructuredFlow {
 
     pub fn children_mut(&mut self) -> Vec<&mut Vec<StructuredFlow>> {
         match self {
-            StructuredFlow::Cond(_id, _x /* who cares */, y, z) => {
-                vec![y, z]
+            StructuredFlow::Cond(_, _, cons, alt) => {
+                vec![cons, alt]
+            }
+            StructuredFlow::LogicalCond(_, left, _, right, _) => {
+                vec![left, right]
             }
             StructuredFlow::Switch(_id, _var, cases) => cases
                 .iter_mut()
@@ -285,6 +316,7 @@ impl StructuredFlow {
             | StructuredFlow::Loop(_, _)
             | StructuredFlow::ForInOfLoop(_, _, _, _)
             | StructuredFlow::Cond(_, _, _, _)
+            | StructuredFlow::LogicalCond(_, _, _, _, _)
             | StructuredFlow::Switch(_, _, _)
             | StructuredFlow::TryCatch(_, _, _, _)
             | StructuredFlow::Instruction(_, _)
@@ -398,6 +430,7 @@ impl StructuredFlow {
             | StructuredFlow::Switch(id, _, _)
             | StructuredFlow::TryCatch(id, _, _, _) => *id = BreakableId(None),
             StructuredFlow::Break(_)
+            | StructuredFlow::LogicalCond(_, _, _, _, _)
             | StructuredFlow::Continue(_)
             | StructuredFlow::Return(_, _)
             | StructuredFlow::Instruction(_, _)
@@ -418,16 +451,19 @@ impl StructuredFlow {
             | StructuredFlow::TryCatch(id, _, _, _) => Some(*id),
             StructuredFlow::Return(_, _)
             | StructuredFlow::Instruction(_, _)
+            | StructuredFlow::LogicalCond(_, _, _, _, _)
             | StructuredFlow::Class(_, _)
             | StructuredFlow::Debugger => None,
         }
     }
 
     /// Retrieves what variables this block reads, not including instructions.
-    /// Careful: classes and switch statements will return vars that may be defined inside them
+    /// Careful: classes, switch statements and logical conditions will return vars
+    /// that may be defined inside them
     pub(crate) fn used_vars(&self) -> Vec<usize> {
         match self {
-            StructuredFlow::Cond(_, x, _, _) => vec![*x],
+            StructuredFlow::Cond(_, cond_on, _, _) => vec![*cond_on],
+            StructuredFlow::LogicalCond(_, _, cond_on, _, then_take) => vec![*cond_on, *then_take],
             StructuredFlow::Switch(_, exp, cases) => {
                 let mut vars = vec![*exp];
                 for case in cases {
@@ -465,6 +501,7 @@ impl StructuredFlow {
     pub(crate) fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
             StructuredFlow::Cond(_, x, _, _) => vec![x],
+            StructuredFlow::LogicalCond(_, _, cond_on, _, then_take) => vec![cond_on, then_take],
             StructuredFlow::Switch(_, exp, cases) => {
                 let mut vars = vec![exp];
                 for case in cases {

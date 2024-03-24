@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
+
 use crate::{
-    basic_blocks::{BreakableId, ExitType, StructuredFlow, StructuredFunction},
+    basic_blocks::{BreakableId, ExitType, LogicalCondKind, StructuredFlow, StructuredFunction},
     interpret::JsType,
 };
 
@@ -102,6 +104,50 @@ fn interp_flow(ctx: &mut InterpretCtx, flow: &StructuredFlow) -> Option<JsComple
                 JsCompletion::Normal(_) => return Some(branch_completion),
                 JsCompletion::Return(_) => return Some(branch_completion),
                 _ => return None,
+            }
+        }
+        StructuredFlow::LogicalCond(kind, left, cond_on, right, _then_take) => {
+            let left = match interp_vec(ctx, left, BreakableId(None))? {
+                JsCompletion::Normal(t) => t,
+                compl @ (JsCompletion::Break(_)
+                | JsCompletion::Continue(_)
+                | JsCompletion::Return(_)) => {
+                    return Some(compl);
+                }
+            };
+            let cond_on = ctx.get_variable(*cond_on)?.clone();
+
+            let does_pass = match kind {
+                LogicalCondKind::And => cond_on.is_truthy(),
+                LogicalCondKind::Or => cond_on.is_truthy().map(|truthy| !truthy),
+                LogicalCondKind::NullishCoalescing => cond_on.is_nullish(),
+            };
+
+            let branch_completion = match does_pass {
+                Some(true) => interp_vec(ctx, right, BreakableId(None))?,
+                Some(false) => {
+                    return Some(JsCompletion::Normal(left));
+                }
+                None => {
+                    ctx.start_branch();
+
+                    let a = interp_vec(ctx, right, BreakableId(None));
+                    let a_vars = ctx.end_branch();
+
+                    // merge the two realities
+                    ctx.merge_branch_mutations(a_vars, BTreeMap::new());
+
+                    a?
+                }
+            };
+
+            match branch_completion {
+                JsCompletion::Normal(_) => {
+                    return Some(branch_completion);
+                }
+                JsCompletion::Return(_) | JsCompletion::Break(_) | JsCompletion::Continue(_) => {
+                    return None; // should never happen, since this is an expression
+                }
             }
         }
         // do not interpret loops, try..catch, etc.
@@ -290,6 +336,40 @@ mod tests {
                 }"
             ),
             @"None"
+        );
+    }
+
+    #[test]
+    fn interp_logical_ops() {
+        // could be one or the other
+        insta::assert_debug_snapshot!(
+            test_interp_ret("
+                {
+                    ({
+                        $0 = 1
+                    }, $0) && ({
+                        $1 = 2
+                    }, $1)
+                    $2 = either($0, $1)
+                    Return $2
+                }
+            "),
+            @"Number"
+        );
+
+        insta::assert_debug_snapshot!(
+            test_interp_ret("
+                {
+                    ({
+                        $0 = 0
+                    }, $0) && ({
+                        $1 = 1
+                    }, $1)
+                    $2 = either($0, $1)
+                    Return $2
+                }
+            "),
+            @"TheNumber(0)"
         );
     }
 
