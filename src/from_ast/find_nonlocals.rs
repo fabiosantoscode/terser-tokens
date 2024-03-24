@@ -578,8 +578,7 @@ mod tests {
     #[test]
     fn test_find_nonlocals() {
         let func = swc_parse(
-            "
-            function x(x_arg, ...x_rest) {
+            "function x(x_arg, ...x_rest) {
                 let a = 1;
                 let absent_inside = 0;
                 let overwritten = 0;
@@ -598,8 +597,7 @@ mod tests {
                 }
                 let defined_after = 0;
                 return y();
-            }
-        ",
+            }",
         );
         let func = func.body[0]
             .clone()

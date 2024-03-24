@@ -37,8 +37,8 @@ impl Instruction {
             Instruction::ArrayPattern(_, _) => true,
             // may throw due to unspreadable object items
             Instruction::ObjectPattern(_, _) => true,
-            // just unpacking what's conceptually already there
-            Instruction::PatternUnpack(_, _) => false,
+            // we shouldn't move this around
+            Instruction::PatternUnpack(_, _) => true,
             Instruction::TempExit(_, _) => true,
             // don't mess with phi
             Instruction::Phi(_) => true,

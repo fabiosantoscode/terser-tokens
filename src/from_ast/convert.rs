@@ -82,10 +82,7 @@ fn stat_to_basic_blocks_inner(
         | Stmt::ForIn(ForInStmt {
             left, right, body, ..
         }) => {
-            let mut before_loop = vec![];
-            let (looped_value_flow, looped_value) = expr_to_basic_blocks(ctx, &right)?;
-
-            before_loop.extend(looped_value_flow);
+            let (before_loop, looped_value) = expr_to_basic_blocks(ctx, &right)?;
 
             ctx.enter_conditional_branch();
 
@@ -336,10 +333,7 @@ fn stat_to_basic_blocks_inner(
 
             let try_flow = block_to_basic_blocks(ctx, stmt.block.stmts.iter())?;
 
-            ctx.enter_conditional_branch();
-
             let mut catch_flow = vec![];
-            catch_flow.extend(ctx.leave_conditional_branch());
 
             if let Some(ref handler) = stmt.handler {
                 if let Some(p) = &handler.param {

@@ -111,12 +111,14 @@ mod tests {
             }
         };
         var d = b;
+        c;
         if (d === undefined) {
             var e = {};
         } else {
             e = d;
         }
         var { a: f, c: g } = e;
+        f;
         var h = g;
         if (h === undefined) {
             var i = a;
