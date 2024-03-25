@@ -276,7 +276,10 @@ fn stat_to_basic_blocks_inner(
             let brk_id = ctx.label_to_break_id(&br.label);
             return Ok(vec![StructuredFlow::Break(brk_id)]);
         }
-        Stmt::Continue(_cont) => todo!("ctx.register_continue(cont.label)"),
+        Stmt::Continue(cont) => {
+            let cont_id = ctx.label_to_break_id(&cont.label);
+            return Ok(vec![StructuredFlow::Continue(cont_id)]);
+        }
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
         Stmt::Debugger(_) => Ok(vec![StructuredFlow::Debugger]),
         Stmt::With(_) => todo!(),
@@ -1261,6 +1264,25 @@ mod tests {
         loop (@0) {
             $0 = 123
             {
+                Break (@0)
+            }
+        }
+        "###);
+    }
+
+    #[test]
+    fn a_loop_continue() {
+        let s = test_basic_blocks("while (123) { if (456) continue; }");
+        insta::assert_debug_snapshot!(s, @r###"
+        loop (@0) {
+            $0 = 123
+            if ($0) {
+                $1 = 456
+                if ($1) {
+                    Continue (@0)
+                } else {
+                }
+            } else {
                 Break (@0)
             }
         }
