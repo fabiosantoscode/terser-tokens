@@ -29,6 +29,9 @@ mod ops;
 mod real_world;
 
 #[cfg(test)]
+mod scopes;
+
+#[cfg(test)]
 mod switch;
 
 #[cfg(test)]

@@ -1781,6 +1781,55 @@ mod tests {
     }
 
     #[test]
+    fn convert_for_of() {
+        let s = test_basic_blocks(
+            "for (var x of [1]) {
+                x();
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        {
+            $0 = 1
+            $1 = [$0]
+            for of ($1) {
+                $2 = for_in_of_value()
+                {
+                    $3 = $2
+                    $4 = call $3()
+                }
+            }
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_for_of_cursed() {
+        let s = test_basic_blocks(
+            "var myVar
+            for (myVar of [1]) {
+                x();
+            }",
+        );
+        insta::assert_debug_snapshot!(s, @r###"
+        {
+            $0 = undefined
+            $1 = 1
+            $2 = [$1]
+            for of ($2) {
+                $3 = either($0, $4)
+                $4 = for_in_of_value()
+                $5 = $4
+                {
+                    $6 = global "x"
+                    $7 = call $6()
+                }
+            }
+            $8 = either($0, $3, $4)
+        }
+        "###);
+    }
+
+    #[test]
     fn an_object() {
         let s = test_basic_blocks(
             "var other = {}
