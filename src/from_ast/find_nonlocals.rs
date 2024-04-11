@@ -64,11 +64,7 @@ impl<'a> NonLocalsContext<'a> {
         if funscoped && self.depth == 0 && !self.found_funscoped.contains(&name) {
             self.found_funscoped.push(name.clone());
         }
-        if funscoped {
-            self.scopes.insert_at_function(name.clone(), ());
-        } else {
-            self.scopes.insert(name.clone(), ());
-        }
+        self.scopes.insert(name.clone(), (), !funscoped);
     }
 
     fn use_name(&mut self, name: String) {

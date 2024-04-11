@@ -3,7 +3,7 @@ use std::{borrow::Borrow, collections::BTreeMap, fmt::Debug};
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ScopeTreeNode<Key = String, Of = usize> {
     pub parent: Option<ScopeTreeHandle>,
-    pub is_block: bool, // TODO there are actually two "function" scopes
+    pub is_block: bool,
     pub vars: BTreeMap<Key, Of>,
 }
 
@@ -76,7 +76,32 @@ where
         self.current_scope = self.parent().expect("Tried to leave the root scope");
     }
 
-    pub fn insert(&mut self, name: Key, value: Of) {
+    pub fn get_current_scope_handle(&self, at_block: bool) -> ScopeTreeHandle {
+        if at_block {
+            self.get_current_block_scope_handle()
+        } else {
+            self.get_current_function_scope_handle()
+        }
+    }
+
+    pub fn get_current_block_scope_handle(&self) -> ScopeTreeHandle {
+        self.current_scope
+    }
+
+    pub fn get_current_function_scope_handle(&self) -> ScopeTreeHandle {
+        self.get_closest_function_scope_at(self.current_scope)
+            .expect("no function scope available")
+    }
+
+    pub fn insert(&mut self, name: Key, value: Of, at_block: bool) {
+        if at_block {
+            self.insert_at_block(name, value);
+        } else {
+            self.insert_at_function(name, value);
+        }
+    }
+
+    pub fn insert_at_block(&mut self, name: Key, value: Of) {
         self.insert_at(self.current_scope, name, value);
     }
 
@@ -87,7 +112,7 @@ where
         self.insert_at(fscope, name, value);
     }
 
-    fn insert_at(&mut self, n: ScopeTreeHandle, name: Key, value: Of) {
+    pub fn insert_at(&mut self, n: ScopeTreeHandle, name: Key, value: Of) {
         let scope = &mut self.scopes[n.0];
         scope.vars.insert(name, value);
     }
@@ -100,7 +125,7 @@ where
         self.scopes[n.0].vars.contains_key(name)
     }
 
-    fn get_at<Q: ?Sized>(&self, n: ScopeTreeHandle, name: &Q) -> Option<&Of>
+    pub fn get_at<Q: ?Sized>(&self, n: ScopeTreeHandle, name: &Q) -> Option<&Of>
     where
         Key: Borrow<Q> + Ord,
         Q: Ord,
@@ -137,6 +162,23 @@ where
         }
     }
 
+    pub fn lookup_handled_at<Q: ?Sized>(
+        &self,
+        at: ScopeTreeHandle,
+        name: &Q,
+    ) -> Option<(ScopeTreeHandle, Of)>
+    where
+        Key: Borrow<Q> + Ord,
+        Q: Ord,
+    {
+        if let Some(v) = self.get_at(at, name) {
+            Some((at, v.clone()))
+        } else {
+            let parent = self.parent_at(at)?;
+            self.lookup_handled_at(parent, name)
+        }
+    }
+
     pub fn lookup_in_function<Q: ?Sized>(&self, name: &Q) -> Option<Of>
     where
         Key: Borrow<Q> + Ord,
@@ -157,9 +199,22 @@ where
             if self.scopes[parent.0].is_block {
                 self.lookup_in_function_at(parent, name)
             } else {
-                None
+                self.get_at(parent, name).cloned()
             }
         }
+    }
+
+    pub fn vars_at(&self, at: ScopeTreeHandle) -> impl Iterator<Item = (&Key, &Of)> {
+        self.scopes[at.0].vars.iter()
+    }
+
+    pub fn scopes_till_function(&self) -> impl Iterator<Item = ScopeTreeHandle> + '_ {
+        std::iter::successors(Some(self.current_scope), |&c| {
+            match self.scopes[c.0].is_block {
+                true => self.parent_at(c),
+                false => None,
+            }
+        })
     }
 
     pub fn lookup_scope_of<Q: ?Sized>(&self, name: &Q) -> Option<ScopeTreeHandle>

@@ -47,7 +47,7 @@ pub fn test_basic_blocks_expr(source: &str) -> StructuredFunction {
                 span: Default::default(),
                 expr: Box::new(m),
             })];
-            let blk = block_to_basic_blocks(ctx, exprs.iter()).unwrap();
+            let blk = block_to_basic_blocks(ctx, &exprs).unwrap();
 
             Ok(blk)
         },

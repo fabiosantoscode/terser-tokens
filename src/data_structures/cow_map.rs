@@ -117,7 +117,9 @@ where
     type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(ref mut map) = &mut self.map else { return None };
+        let Some(ref mut map) = &mut self.map else {
+            return None;
+        };
 
         if let Some(removed) = map.map.pop_first() {
             if self.seen.contains(&removed.0) {

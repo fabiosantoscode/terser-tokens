@@ -101,19 +101,13 @@ fn stat_to_basic_blocks_inner(
                     );
                     let only_decl = &var_decl.decls[0];
 
-                    match var_decl.kind {
-                        VarDeclKind::Var => {
-                            let (flow, _pat_var) = pat_to_basic_blocks(
-                                ctx,
-                                PatType::VarDecl,
-                                &only_decl.name,
-                                loop_value,
-                            )?;
-                            loop_body.extend(flow);
-                        }
-                        VarDeclKind::Let => todo!(),
-                        VarDeclKind::Const => todo!(),
-                    }
+                    let kind = match var_decl.kind {
+                        VarDeclKind::Var => PatType::VarDecl,
+                        VarDeclKind::Let | VarDeclKind::Const => PatType::LetDecl,
+                    };
+                    let (flow, _pat_var) =
+                        pat_to_basic_blocks(ctx, kind, &only_decl.name, loop_value)?;
+                    loop_body.extend(flow);
                 }
                 ForHead::Pat(ref pat) => {
                     let (flow, _pat_var) =
@@ -262,7 +256,7 @@ fn stat_to_basic_blocks_inner(
             ]);
         }
         Stmt::Block(block) => {
-            let contents = block_to_basic_blocks(ctx, block.stmts.iter())?;
+            let contents = block_to_basic_blocks(ctx, &block.stmts)?;
             return Ok(vec![StructuredFlow::Block(brk_id, contents)]);
         }
         Stmt::Break(br) => {
@@ -298,7 +292,7 @@ fn stat_to_basic_blocks_inner(
                     None
                 };
 
-                let body = block_to_basic_blocks(ctx, case.cons.iter())?;
+                let body = block_to_basic_blocks(ctx, &case.cons)?;
 
                 switch_cases.push(StructuredSwitchCase { condition, body });
             }
@@ -330,7 +324,7 @@ fn stat_to_basic_blocks_inner(
         Stmt::Try(ref stmt) => {
             ctx.enter_conditional_branch();
 
-            let try_flow = block_to_basic_blocks(ctx, stmt.block.stmts.iter())?;
+            let try_flow = block_to_basic_blocks(ctx, &stmt.block.stmts)?;
 
             let mut catch_flow = vec![];
 
@@ -343,14 +337,14 @@ fn stat_to_basic_blocks_inner(
                     catch_flow.extend(pat_flow);
                 }
 
-                catch_flow.extend(block_to_basic_blocks(ctx, handler.body.stmts.iter())?);
+                catch_flow.extend(block_to_basic_blocks(ctx, &handler.body.stmts)?);
             }
 
             let mut finally_flow = vec![];
             finally_flow.extend(ctx.leave_conditional_branch());
 
             if let Some(ref finalizer) = stmt.finalizer {
-                finally_flow.extend(block_to_basic_blocks(ctx, finalizer.stmts.iter())?);
+                finally_flow.extend(block_to_basic_blocks(ctx, &finalizer.stmts)?);
             };
 
             return Ok(vec![StructuredFlow::TryCatch(
@@ -380,7 +374,11 @@ fn var_decl_to_basic_blocks(
             None => ctx.push_instruction(Instruction::Undefined),
         };
         var_flow.extend(flow);
-        let (flow, _) = pat_to_basic_blocks(ctx, PatType::VarDecl, &decl.name, init)?;
+        let kind = match var.kind {
+            VarDeclKind::Const | VarDeclKind::Let => PatType::LetDecl,
+            VarDeclKind::Var => PatType::VarDecl,
+        };
+        let (flow, _) = pat_to_basic_blocks(ctx, kind, &decl.name, init)?;
         var_flow.extend(flow);
     }
 
@@ -1783,7 +1781,7 @@ mod tests {
     #[test]
     fn convert_for_of() {
         let s = test_basic_blocks(
-            "for (var x of [1]) {
+            "for (const x of [1]) {
                 x();
             }",
         );

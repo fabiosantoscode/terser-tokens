@@ -119,13 +119,13 @@ pub fn function_to_basic_blocks<'a, 'decl>(
             let (flow, nloc) = ctx.push_instruction(Instruction::Read(LHS::NonLocal(nloc)));
             func_body.extend(flow);
 
-            let (flow, _) = ctx.declare_name(&name, nloc);
+            let flow = ctx.declare_name(&name, nloc, false);
             func_body.extend(flow);
         }
 
         match function.get_body() {
             FuncBlockOrRetExpr::Block(block) => {
-                let flow = block_to_basic_blocks(ctx, block.stmts.iter())?;
+                let flow = block_to_basic_blocks(ctx, &block.stmts)?;
                 func_body.extend(flow);
             }
             FuncBlockOrRetExpr::RetExpr(expr) => {

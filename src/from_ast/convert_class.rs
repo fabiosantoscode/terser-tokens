@@ -32,7 +32,7 @@ pub fn class_to_basic_blocks(
     before_class.extend(flow);
 
     if let Some(optional_name) = optional_name {
-        let (flow, _) = ctx.declare_name(&optional_name, created_class);
+        let flow = ctx.declare_name(&optional_name, created_class, true);
         before_class.extend(flow);
     }
 
@@ -88,7 +88,7 @@ pub fn class_to_basic_blocks(
                 }
             }
             ClassMember::StaticBlock(StaticBlock { body, .. }) => {
-                let body_flow = block_to_basic_blocks(ctx, body.stmts.iter())?;
+                let body_flow = block_to_basic_blocks(ctx, &body.stmts)?;
 
                 members.push(StructuredClassMember::StaticBlock(body_flow));
             }

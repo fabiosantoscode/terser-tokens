@@ -9,10 +9,11 @@ use crate::basic_blocks::{
 
 use super::{expr_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PatType {
     Assign,
     VarDecl,
+    LetDecl,
     FunArg,
 }
 
@@ -243,15 +244,15 @@ fn ident_pat(
     use PatType::*;
 
     match pat_type {
-        VarDecl | FunArg => {
-            let (flow, _) = ctx.declare_name(name, input);
+        VarDecl | FunArg | LetDecl => {
+            let flow = ctx.declare_name(name, input, pat_type == LetDecl);
 
             Ok((flow, input))
         }
         Assign => {
             let mut ret_flow = Vec::new();
 
-            let (flow, input) = ctx.assign_name(name, input);
+            let flow = ctx.assign_name(name, input);
             ret_flow.extend(flow);
 
             let (flow, input) = ctx.push_instruction(Instruction::Ref(input));

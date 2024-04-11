@@ -16,7 +16,7 @@ pub struct FromAstCtx {
     pub current_function_index: FunctionId,
     pub function_index: FunctionId,
     pub var_index: usize,
-    pub conditionals: Vec<BTreeMap<String, Vec<usize>>>,
+    pub conditionals_depth: u32,
     pub scope_tree: ScopeTree<String, NonLocalOrLocal>,
     pub label_tracking: Vec<(NestedIntoStatement, BreakableId)>,
     pub break_index: usize,
@@ -32,7 +32,7 @@ impl FromAstCtx {
             current_function_index: FunctionId(0),
             function_index: FunctionId(0),
             var_index: 0,
-            conditionals: vec![],
+            conditionals_depth: Default::default(),
             scope_tree: ScopeTree::new(),
             label_tracking: vec![],
             break_index: 0,
@@ -146,7 +146,7 @@ impl FromAstCtx {
             current_function_index: function_index,
             function_index: self.function_index,
             var_index: self.var_index,
-            conditionals: vec![],
+            conditionals_depth: Default::default(),
             scope_tree,
             label_tracking: vec![],
             break_index: 0,
@@ -195,14 +195,14 @@ pub enum NestedIntoStatement {
 #[derive(PartialEq, Eq, Clone)]
 pub enum NonLocalOrLocal {
     NonLocal(NonLocalId),
-    Local(usize),
+    Local(Vec<usize>),
 }
 
 impl NonLocalOrLocal {
-    pub fn unwrap_local(&self) -> usize {
+    pub fn unwrap_local(&self) -> &Vec<usize> {
         match self {
             NonLocalOrLocal::NonLocal(_) => panic!("unwrap_local called on a nonlocal variable"),
-            NonLocalOrLocal::Local(id) => *id,
+            NonLocalOrLocal::Local(id) => id,
         }
     }
 }
@@ -211,7 +211,7 @@ impl std::fmt::Debug for NonLocalOrLocal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             NonLocalOrLocal::NonLocal(id) => write!(f, "NonLocal({})", id.0),
-            NonLocalOrLocal::Local(id) => write!(f, "Local({})", id),
+            NonLocalOrLocal::Local(id) => write!(f, "Local({:?})", id),
         }
     }
 }
