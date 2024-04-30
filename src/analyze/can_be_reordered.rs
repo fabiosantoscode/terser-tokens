@@ -16,7 +16,10 @@ impl Instruction {
             | Instruction::Ref(_)
             | Instruction::Undefined
             | Instruction::LitNumber(_)
+            | Instruction::LitBigInt(_)
             | Instruction::LitBool(_)
+            | Instruction::LitString(_)
+            | Instruction::LitRegExp(_, _)
             | Instruction::PatternUnpack(_, _) => true,
             _ => false,
         }

@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use num_bigint::BigInt;
 use ordered_float::NotNan;
 
 use crate::basic_blocks::{FunctionId, Instruction};
@@ -10,10 +11,13 @@ pub enum JsType {
     Null,
     Boolean,
     TheBoolean(bool),
-    String,
-    TheString(String),
     Number,
     TheNumber(NotNan<f64>),
+    BigInt,
+    TheBigInt(BigInt),
+    String,
+    TheString(String),
+    RegExp,
     Function,
     /// (function_id, properties) an instance of a function.
     TheFunction(FunctionId, BTreeMap<String, JsType>),
@@ -46,10 +50,13 @@ impl JsType {
             JsType::Null => Some(false),
             JsType::Boolean => None,
             JsType::TheBoolean(b) => Some(*b),
-            JsType::String => None,
-            JsType::TheString(s) => Some(s.len() > 0),
             JsType::Number => None,
             JsType::TheNumber(n) => Some(n != &NotNan::new(0.0).unwrap()),
+            JsType::BigInt => None,
+            JsType::TheBigInt(n) => Some(n != &BigInt::from(0)),
+            JsType::String => None,
+            JsType::TheString(s) => Some(s.len() > 0),
+            JsType::RegExp => Some(true),
             JsType::Function => Some(true),
             JsType::TheFunction { .. } => Some(true),
             JsType::Array => Some(true),
@@ -66,10 +73,13 @@ impl JsType {
             JsType::Undefined | JsType::Null => Some(true),
             JsType::Boolean
             | JsType::TheBoolean(_)
-            | JsType::String
-            | JsType::TheString(_)
             | JsType::Number
             | JsType::TheNumber(_)
+            | JsType::BigInt
+            | JsType::TheBigInt(_)
+            | JsType::String
+            | JsType::TheString(_)
+            | JsType::RegExp
             | JsType::Function
             | JsType::TheFunction(_, _)
             | JsType::Array
@@ -89,9 +99,23 @@ impl JsType {
                 let mut buf = ryu_js::Buffer::new();
                 Some(buf.format(num.into_inner()).to_string())
             }
+            JsType::TheBigInt(big_int) => Some(big_int.to_str_radix(10)),
+            JsType::RegExp => None,
             JsType::Undefined => Some("undefined".to_string()),
             JsType::Null => Some("null".to_string()),
-            _ => None,
+            JsType::Boolean => None,
+            JsType::String => None,
+            JsType::Number => None,
+            JsType::BigInt => None,
+            JsType::RegExp => None,
+            JsType::Function => None,
+            JsType::TheFunction(_, _) => None,
+            JsType::Array => None,
+            JsType::TheArray(_) => None, // TODO we could convert it
+            JsType::Object => None,
+            JsType::TheObject(_) => None,
+            JsType::Pattern(_) => None,
+            JsType::Any => None,
         }
     }
 
@@ -142,6 +166,7 @@ impl JsType {
                     TheObject(out_obj)
                 }
                 (TheNumber(_) | Number, TheNumber(_) | Number) => Number,
+                (TheBigInt(_) | BigInt, TheBigInt(_) | BigInt) => BigInt,
                 (TheBoolean(_) | Boolean, TheBoolean(_) | Boolean) => Boolean,
                 (TheString(_) | String, TheString(_) | String) => String,
                 (TheFunction { .. } | Function, TheFunction { .. } | Function) => Function,
@@ -180,9 +205,11 @@ impl JsType {
             JsType::Undefined => Some(false),
             JsType::Null => Some(false),
             JsType::TheNumber(n) => Some(n.into_inner() != 0.0 && n.into_inner() != -0.0),
+            JsType::TheBigInt(n) => Some(n != &BigInt::from(0)),
             JsType::TheString(s) => Some(s.len() > 0),
             JsType::TheObject(_)
             | JsType::Object
+            | JsType::RegExp
             | JsType::Function
             | JsType::TheFunction { .. }
             | JsType::Array
@@ -193,11 +220,14 @@ impl JsType {
 
     /// https://262.ecma-international.org/#sec-tonumeric
     /// Note: can't return BigInt yet
-    pub fn to_numeric(&self) -> Option<f64> {
+    pub fn to_numeric(&self) -> Option<NumberOrBigInt> {
         match self {
-            JsType::TheNumber(n) => Some(n.into_inner()),
+            JsType::TheNumber(n) => Some(NumberOrBigInt::TheNumber(n.into_inner())),
+            JsType::TheBigInt(n) => Some(NumberOrBigInt::TheBigInt(n.clone())),
             JsType::Undefined => None, // Actually NaN, but we don't handle it in here
-            JsType::TheBoolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+            JsType::TheBoolean(b) => Some(NumberOrBigInt::TheNumber(if *b { 1.0 } else { 0.0 })),
+            JsType::Number => Some(NumberOrBigInt::Number),
+            JsType::BigInt => Some(NumberOrBigInt::BigInt),
             // Objects, strings, and arrays can be turned into numbers but we don't care
             _ => None,
         }
@@ -207,6 +237,7 @@ impl JsType {
         match self {
             JsType::TheBoolean(b) => Some(Instruction::LitBool(*b)),
             JsType::TheNumber(n) => Some(Instruction::LitNumber((*n).into())),
+            JsType::TheBigInt(b) => Some(Instruction::LitBigInt(b.clone())),
             JsType::TheString(s) => Some(Instruction::LitString(s.clone())),
             _ => None,
         }
@@ -216,12 +247,15 @@ impl JsType {
         match self {
             JsType::Undefined => JsType::TheString("undefined".to_string()),
             JsType::Null => JsType::TheString("object".to_string()),
+            JsType::Number => JsType::TheString("number".to_string()),
+            JsType::TheNumber(_) => JsType::TheString("number".to_string()),
+            JsType::BigInt => JsType::TheString("bigint".to_string()),
+            JsType::TheBigInt(_) => JsType::TheString("bigint".to_string()),
             JsType::Boolean => JsType::TheString("boolean".to_string()),
             JsType::TheBoolean(_) => JsType::TheString("boolean".to_string()),
             JsType::String => JsType::TheString("string".to_string()),
             JsType::TheString(_) => JsType::TheString("string".to_string()),
-            JsType::Number => JsType::TheString("number".to_string()),
-            JsType::TheNumber(_) => JsType::TheString("number".to_string()),
+            JsType::RegExp => JsType::TheString("object".to_string()),
             JsType::Function => JsType::TheString("function".to_string()),
             JsType::TheFunction { .. } => JsType::TheString("function".to_string()),
             JsType::Array => JsType::TheString("object".to_string()),
@@ -234,6 +268,13 @@ impl JsType {
     }
 }
 
+pub enum NumberOrBigInt {
+    TheNumber(f64),
+    TheBigInt(BigInt),
+    Number,
+    BigInt
+}
+
 impl std::fmt::Debug for JsType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -241,10 +282,13 @@ impl std::fmt::Debug for JsType {
             JsType::Null => write!(f, "Null"),
             JsType::Boolean => write!(f, "Boolean"),
             JsType::TheBoolean(b) => write!(f, "TheBoolean({})", b),
-            JsType::String => write!(f, "String"),
-            JsType::TheString(s) => write!(f, "TheString({:?})", s),
             JsType::Number => write!(f, "Number"),
             JsType::TheNumber(n) => write!(f, "TheNumber({})", n),
+            JsType::BigInt => write!(f, "BigInt"),
+            JsType::TheBigInt(n) => write!(f, "TheBigInt({})", n),
+            JsType::String => write!(f, "String"),
+            JsType::TheString(s) => write!(f, "TheString({:?})", s),
+            JsType::RegExp => write!(f, "RegExp"),
             JsType::Function => write!(f, "Function"),
             JsType::TheFunction(id, x) => {
                 if x.is_empty() {

@@ -4,27 +4,33 @@ use crate::basic_blocks::{
     ArrayElement, ArrayPatternPiece, Instruction, ObjectPatternPiece, ObjectProperty,
 };
 
-use super::{interp_math_ops, InterpretCtx, JsArgs, JsCompletion, JsType};
+use super::{interp_math_ops, InterpretCtx, JsArgs, JsCompletion, JsType, NumberOrBigInt};
 
 static ARRAY_MAX_ELEMENTS: usize = 100;
 
 pub fn interpret(ctx: &mut InterpretCtx, instruction: &Instruction) -> Option<JsCompletion> {
     let normal_completion = match instruction {
         Instruction::LitNumber(n) => JsType::new_number(*n),
+        Instruction::LitBigInt(n) => JsType::TheBigInt(n.clone()),
         Instruction::LitBool(b) => JsType::TheBoolean(*b),
         Instruction::LitString(s) => JsType::TheString(s.clone()),
+        Instruction::LitRegExp(_, _) => JsType::RegExp,
         Instruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
         Instruction::UnaryOp(op, operand) => {
             let operand = ctx.get_variable(*operand)?;
 
             match op {
-                swc_ecma_ast::UnaryOp::Minus => match operand.to_numeric() {
-                    Some(num) => JsType::new_number(-num),
-                    None => JsType::Number,
+                swc_ecma_ast::UnaryOp::Minus => match operand.to_numeric()? {
+                    NumberOrBigInt::TheNumber(num) => JsType::new_number(-num),
+                    NumberOrBigInt::TheBigInt(num) => JsType::TheBigInt(-num),
+                    NumberOrBigInt::BigInt => JsType::BigInt,
+                    NumberOrBigInt::Number => JsType::Number,
                 },
-                swc_ecma_ast::UnaryOp::Plus => match operand.to_numeric() {
-                    Some(num) => JsType::new_number(num),
-                    None => JsType::Number,
+                swc_ecma_ast::UnaryOp::Plus => match operand.to_numeric()? {
+                    NumberOrBigInt::TheNumber(num) => JsType::new_number(num),
+                    NumberOrBigInt::TheBigInt(num) => JsType::TheBigInt(num),
+                    NumberOrBigInt::BigInt => JsType::BigInt,
+                    NumberOrBigInt::Number => JsType::Number,
                 },
                 swc_ecma_ast::UnaryOp::Bang => match operand.to_boolean() {
                     Some(b) => JsType::TheBoolean(!b),
@@ -291,6 +297,9 @@ mod tests {
         ctx.assign_variable(1, JsType::new_number(1.0));
         ctx.assign_variable(2, JsType::new_number(2.0));
         ctx.assign_variable(123, JsType::Number);
+        ctx.assign_variable(1000, JsType::TheBigInt(1000.into()));
+        ctx.assign_variable(2000, JsType::TheBigInt(2000.into()));
+        ctx.assign_variable(1234, JsType::BigInt);
         interpret_blocks(
             &mut ctx,
             &module.get_function(FunctionId(0)).unwrap().blocks,
@@ -340,6 +349,16 @@ mod tests {
     }
 
     #[test]
+    fn interp_big_int() {
+        insta::assert_debug_snapshot!(test_interp_js_normal("return 1n"), @"TheBigInt(1)");
+    }
+
+    #[test]
+    fn interp_regexp() {
+        insta::assert_debug_snapshot!(test_interp_js_normal("return /a/"), @"RegExp");
+    }
+
+    #[test]
     fn interp_ref() {
         insta::assert_debug_snapshot!(test_interp_normal("$1"), @"TheNumber(1)");
     }
@@ -347,6 +366,7 @@ mod tests {
     #[test]
     fn interp_binop() {
         insta::assert_debug_snapshot!(test_interp_normal("$1 + $2"), @"TheNumber(3)");
+        insta::assert_debug_snapshot!(test_interp_js_normal("return 1n + 2n"), @"TheBigInt(3)");
     }
 
     #[test]

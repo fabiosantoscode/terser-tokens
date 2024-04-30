@@ -52,11 +52,17 @@ impl Debug for Instruction {
             Instruction::LitNumber(num) => {
                 write!(f, "{}", num)
             }
+            Instruction::LitBigInt(big_int) => {
+                write!(f, "{}n", big_int)
+            }
             Instruction::LitBool(b) => {
                 write!(f, "{:?}", b)
             }
             Instruction::LitString(s) => {
                 write!(f, "{:?}", s)
+            }
+            Instruction::LitRegExp(re, flags) => {
+                write!(f, "/{}/{}", re, flags)
             }
             Instruction::UnaryOp(op, operand) => {
                 write!(f, "{}${}", op, operand)

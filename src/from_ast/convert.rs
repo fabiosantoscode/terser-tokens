@@ -276,7 +276,7 @@ fn stat_to_basic_blocks_inner(
         }
         Stmt::Labeled(_) => unreachable!("label is handled in stat_to_basic_blocks"),
         Stmt::Debugger(_) => Ok(vec![StructuredFlow::Debugger]),
-        Stmt::With(_) => todo!(),
+        Stmt::With(_) => todo!("with statement is unsupported"),
         Stmt::Switch(switch) => {
             let (before_switch, switch_exp) = expr_to_basic_blocks(ctx, &switch.discriminant)?;
 
@@ -395,9 +395,9 @@ pub fn expr_to_basic_blocks(
                 Lit::Null(_) => Instruction::Null,
                 Lit::Bool(b) => Instruction::LitBool(b.value),
                 Lit::Num(num) => Instruction::LitNumber(num.value),
-                Lit::BigInt(_) => todo!(),
+                Lit::BigInt(num) => Instruction::LitBigInt(num.value.as_ref().clone()),
                 Lit::Str(s) => Instruction::LitString(s.value.to_string()),
-                Lit::Regex(_) => todo!(),
+                Lit::Regex(re) => Instruction::LitRegExp(re.exp.to_string(), re.flags.to_string()),
                 Lit::JSXText(_) => todo!(),
             };
             Ok(ctx.push_instruction(lit))

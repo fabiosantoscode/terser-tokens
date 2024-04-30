@@ -1,3 +1,4 @@
+use num_bigint::{BigInt, ToBigUint};
 use ordered_float::NotNan;
 
 use super::{InterpretCtx, JsCompletion, JsType};
@@ -19,9 +20,15 @@ pub fn interp_math_ops(
         (JsType::TheNumber(l), JsType::TheNumber(r)) => {
             interp_float_binops((*l).into(), (*r).into(), op)?
         }
+        (JsType::TheBigInt(l), JsType::TheBigInt(r)) => interp_big_int_binops(l, r, op)?,
         (JsType::Number, JsType::Number) => match op {
             BitAnd | BitOr | BitXor | RShift | LShift | ZeroFillRShift | Add | Sub | Mul | Div
             | Mod => JsType::Number,
+            _ => return None,
+        },
+        (JsType::BigInt, JsType::BigInt) => match op {
+            BitAnd | BitOr | BitXor | RShift | LShift | Add | Sub | Mul => JsType::BigInt,
+            ZeroFillRShift | Mod | Div => return None, // may throw
             _ => return None,
         },
         (JsType::TheString(l), JsType::TheString(r)) => match op {
@@ -40,7 +47,7 @@ pub fn interp_math_ops(
 
 fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<JsType> {
     let f = |n: f64| NotNan::new(n).ok();
-    let i = |n: f64| n as u64;
+    let i = |n: f64| n as i32;
 
     use swc_ecma_ast::BinaryOp::*;
 
@@ -63,9 +70,42 @@ fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<Js
         BitAnd => (i(l) & i(r)) as f64,
         BitOr => (i(l) | i(r)) as f64,
         BitXor => (i(l) ^ i(r)) as f64,
-        RShift => (i(l) >> i(r)) as f64,
-        LShift => (i(l) << i(r)) as f64,
-        ZeroFillRShift => (i(l) >> i(r)) as f64,
+        RShift => None?,
+        LShift => None?,
+        ZeroFillRShift => None?,
+        _ => unreachable!(),
+    }))
+}
+
+fn interp_big_int_binops(l: &BigInt, r: &BigInt, op: &swc_ecma_ast::BinaryOp) -> Option<JsType> {
+    let u = |n: &BigInt| -> Option<u32> {
+        n.try_into().ok()
+    };
+
+    use swc_ecma_ast::BinaryOp::*;
+
+    Some(JsType::TheBigInt(match op {
+        // Float ops
+        Add => l + r,
+        Sub => l - r,
+        Mul => l * r,
+        Div => l / r,
+        Mod => l % r,
+        Exp => l.pow(u(r)?),
+        // Comparison ops
+        EqEq | EqEqEq => return Some(JsType::TheBoolean(l == r)),
+        NotEq | NotEqEq => return Some(JsType::TheBoolean(l != r)),
+        Lt => return Some(JsType::TheBoolean(l < r)),
+        LtEq => return Some(JsType::TheBoolean(l <= r)),
+        Gt => return Some(JsType::TheBoolean(l > r)),
+        GtEq => return Some(JsType::TheBoolean(l >= r)),
+        // Bit ops
+        BitAnd => l & r,
+        BitOr => l | r,
+        BitXor => l ^ r,
+        RShift => None?,
+        LShift => None?,
+        ZeroFillRShift => None?,
         _ => unreachable!(),
     }))
 }

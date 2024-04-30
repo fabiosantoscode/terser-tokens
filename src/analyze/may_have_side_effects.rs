@@ -5,8 +5,10 @@ impl Instruction {
     pub fn may_have_side_effects(&self) -> bool {
         match self {
             Instruction::LitNumber(_) => false,
+            Instruction::LitBigInt(_) => false,
             Instruction::LitBool(_) => false,
             Instruction::LitString(_) => false,
+            Instruction::LitRegExp(_, _) => false,
             Instruction::Ref(_) => false,
             Instruction::UnaryOp(_, _) => false,
             // may throw due to bigint

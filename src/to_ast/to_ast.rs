@@ -2,7 +2,7 @@ use swc_ecma_ast::{
     op, AssignExpr, AssignOp, AwaitExpr, BinExpr, BinaryOp, BlockStmt, CallExpr, Callee,
     ComputedPropName, ContinueStmt, DebuggerStmt, Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt,
     ForOfStmt, Ident, KeyValueProp, Lit, Module, ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr,
-    PrivateName, Prop, PropName, PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, Super,
+    PrivateName, Prop, PropName, PropOrSpread, Regex, ReturnStmt, SpreadElement, Stmt, Str, Super,
     ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
 };
 
@@ -335,8 +335,14 @@ pub fn ref_or_inlined_expr(ctx: &mut ToAstContext, var_idx: usize) -> Expr {
 fn to_expression(ctx: &mut ToAstContext, expr: &Instruction) -> Expr {
     match expr {
         Instruction::LitNumber(num) => (*num).into(),
+        Instruction::LitBigInt(num) => num.clone().into(),
         Instruction::LitBool(s) => (*s).into(),
         Instruction::LitString(s) => Expr::Lit(Lit::Str(Str::from(&s[..]))),
+        Instruction::LitRegExp(re, flags) => Expr::Lit(Lit::Regex(Regex {
+            span: Default::default(),
+            flags: flags.clone().into(),
+            exp: re.clone().into(),
+        })),
         Instruction::Undefined => Expr::Ident(Ident::new("undefined".into(), Default::default())),
         Instruction::Null => Expr::Lit(Lit::Null(Null {
             span: Default::default(),

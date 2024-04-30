@@ -1,3 +1,5 @@
+use num_bigint::BigInt;
+
 use super::{ArrayElement, ArrayPatternPiece, ObjectKey, ObjectPatternPiece, ObjectProperty};
 
 /// A usize that uniquely points to a function.
@@ -11,8 +13,11 @@ pub struct FunctionId(pub usize);
 #[derive(Clone, PartialEq)]
 pub enum Instruction {
     LitNumber(f64),
+    LitBigInt(BigInt),
     LitBool(bool),
     LitString(String),
+    /// (expression, flags)
+    LitRegExp(String, String),
     Ref(usize),
     UnaryOp(swc_ecma_ast::UnaryOp, usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
@@ -98,8 +103,10 @@ impl Instruction {
     pub fn used_vars(&self) -> Vec<usize> {
         match self {
             Instruction::LitNumber(_) => vec![],
+            Instruction::LitBigInt(_) => vec![],
             Instruction::LitBool(_) => vec![],
             Instruction::LitString(_) => vec![],
+            Instruction::LitRegExp(_, _) => vec![],
             Instruction::Ref(id) => vec![*id],
             Instruction::UnaryOp(_, v) => vec![*v],
             Instruction::BinOp(_, l, r) => vec![*l, *r],
@@ -171,8 +178,10 @@ impl Instruction {
     pub fn used_vars_mut(&mut self) -> Vec<&mut usize> {
         match self {
             Instruction::LitNumber(_) => vec![],
+            Instruction::LitBigInt(_) => vec![],
             Instruction::LitBool(_) => vec![],
             Instruction::LitString(_) => vec![],
+            Instruction::LitRegExp(_, _) => vec![],
             Instruction::Ref(id) => vec![id],
             Instruction::UnaryOp(_, v) => vec![v],
             Instruction::BinOp(_, l, r) => vec![l, r],
