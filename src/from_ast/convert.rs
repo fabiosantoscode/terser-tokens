@@ -13,8 +13,9 @@ use crate::basic_blocks::{
 
 use super::{
     block_to_basic_blocks, class_to_basic_blocks, convert_object_propname,
-    function_to_basic_blocks, get_propname_normal_key, pat_to_basic_blocks, to_basic_blocks_lhs,
-    FromAstCtx, FunctionLike, NestedIntoStatement, PatType,
+    function_to_basic_blocks, get_propname_normal_key, pat_like_expr_to_basic_blocks,
+    pat_to_basic_blocks, to_basic_blocks_lhs, FromAstCtx, FunctionLike, NestedIntoStatement,
+    PatType,
 };
 
 /// Turn a statement into basic blocks.
@@ -456,20 +457,22 @@ pub fn expr_to_basic_blocks(
                 }
             }
         }
-        Expr::Assign(assign) => match &assign.left {
-            PatOrExpr::Pat(pat) => {
-                let mut ret_flow = vec![];
+        Expr::Assign(assign) => {
+            let mut ret_flow = vec![];
 
-                let (flow, init) = expr_to_basic_blocks(ctx, &assign.right)?;
-                ret_flow.extend(flow);
+            let (flow, init) = expr_to_basic_blocks(ctx, &assign.right)?;
+            ret_flow.extend(flow);
 
-                let (flow, ret) = pat_to_basic_blocks(ctx, PatType::Assign, pat, init)?;
-                ret_flow.extend(flow);
+            let (flow, ret) = match &assign.left {
+                PatOrExpr::Pat(pat) => pat_to_basic_blocks(ctx, PatType::Assign, pat, init)?,
+                PatOrExpr::Expr(e) => {
+                    pat_like_expr_to_basic_blocks(ctx, PatType::Assign, &e, init)?
+                }
+            };
+            ret_flow.extend(flow);
 
-                Ok((ret_flow, ret))
-            }
-            _ => todo!(),
-        },
+            Ok((ret_flow, ret))
+        }
         Expr::Paren(paren) => expr_to_basic_blocks(ctx, &paren.expr),
         Expr::Seq(seq) => {
             let mut seq_flow = vec![];
