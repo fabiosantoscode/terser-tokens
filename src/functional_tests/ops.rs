@@ -10,6 +10,8 @@ fn functional_ops() {
     insta::assert_display_snapshot!(res, @"2");
     let res = run_checks("return 1 / 2");
     insta::assert_display_snapshot!(res, @"0.5");
+    let res = run_checks("return id('a') + (1 + id(2))");
+    insta::assert_display_snapshot!(res, @"a3");
 
     let res = run_checks("return 0b1010 & 0b1100");
     insta::assert_display_snapshot!(res, @"8");

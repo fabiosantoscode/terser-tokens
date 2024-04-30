@@ -6,6 +6,13 @@ use swc_ecma_ast::{
 
 use crate::basic_blocks::identifier_needs_quotes;
 
+pub fn build_parens(expr: Expr) -> Expr {
+    Expr::Paren(ParenExpr {
+        span: Default::default(),
+        expr: Box::new(expr),
+    })
+}
+
 pub fn build_identifier(i: String) -> Expr {
     Expr::Ident(Ident::new(i.into(), Default::default()))
 }

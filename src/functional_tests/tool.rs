@@ -75,6 +75,7 @@ fn run_code_for_logs(scope: &mut v8::HandleScope<'_, ()>, s: &str) -> Option<Str
                     : JSON.stringify(s);
                 let logs = '';
                 console.log = (...args) => logs += args.map(it => __str(it)).join(' ') + '\n';
+                let id = x => x;
 
                 ;(async function () {{
                     {s}

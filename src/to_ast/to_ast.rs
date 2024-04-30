@@ -19,9 +19,9 @@ use crate::{
 };
 
 use super::{
-    build_binding_identifier, build_identifier, build_identifier_str, class_to_ast,
+    build_binding_identifier, build_identifier, build_identifier_str, build_parens, class_to_ast,
     class_to_ast_prepare, function_expr_to_ast, function_to_ast, lhs_to_ast_expr,
-    pattern_to_statement, ToAstContext,
+    pattern_to_statement, should_add_parens, ToAstContext,
 };
 
 pub fn module_to_ast(block_module: StructuredModule) -> Module {
@@ -360,6 +360,17 @@ fn to_expression(ctx: &mut ToAstContext, expr: &Instruction) -> Expr {
             let left = ref_or_inlined_expr(ctx, *left);
             let right = ref_or_inlined_expr(ctx, *right);
 
+            let left = if should_add_parens(&op, &left, false) {
+                build_parens(left)
+            } else {
+                left
+            };
+            let right = if should_add_parens(&op, &right, true) {
+                build_parens(right)
+            } else {
+                right
+            };
+
             Expr::Bin(swc_ecma_ast::BinExpr {
                 span: Default::default(),
                 op: op.clone(),
@@ -369,6 +380,12 @@ fn to_expression(ctx: &mut ToAstContext, expr: &Instruction) -> Expr {
         }
         Instruction::PrivateIn(priv_name, right) => {
             let right = ref_or_inlined_expr(ctx, *right);
+
+            let right = if should_add_parens(&BinaryOp::In, &right, true) {
+                build_parens(right)
+            } else {
+                right
+            };
 
             Expr::Bin(swc_ecma_ast::BinExpr {
                 span: Default::default(),
