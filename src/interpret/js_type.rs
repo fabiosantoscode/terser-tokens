@@ -273,7 +273,7 @@ pub enum NumberOrBigInt {
     TheNumber(f64),
     TheBigInt(BigInt),
     Number,
-    BigInt
+    BigInt,
 }
 
 impl std::fmt::Debug for JsType {

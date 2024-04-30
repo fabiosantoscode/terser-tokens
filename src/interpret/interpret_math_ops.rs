@@ -78,9 +78,7 @@ fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<Js
 }
 
 fn interp_big_int_binops(l: &BigInt, r: &BigInt, op: &swc_ecma_ast::BinaryOp) -> Option<JsType> {
-    let u = |n: &BigInt| -> Option<u32> {
-        n.try_into().ok()
-    };
+    let u = |n: &BigInt| -> Option<u32> { n.try_into().ok() };
 
     use swc_ecma_ast::BinaryOp::*;
 
