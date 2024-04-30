@@ -442,9 +442,6 @@ pub fn expr_to_basic_blocks(
 
                     Ok((bin_flow, private_in))
                 }
-                (_, BinaryOp::In | BinaryOp::InstanceOf) => {
-                    todo!("in/instanceof")
-                }
                 _ => {
                     let (left_flow, l) = expr_to_basic_blocks(ctx, &bin.left)?;
                     bin_flow.extend(left_flow);

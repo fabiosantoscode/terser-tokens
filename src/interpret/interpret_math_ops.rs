@@ -1,4 +1,4 @@
-use num_bigint::{BigInt, ToBigUint};
+use num_bigint::BigInt;
 use ordered_float::NotNan;
 
 use super::{InterpretCtx, JsCompletion, JsType};
@@ -73,6 +73,8 @@ fn interp_float_binops(l: f64, r: f64, op: &swc_ecma_ast::BinaryOp) -> Option<Js
         RShift => None?,
         LShift => None?,
         ZeroFillRShift => None?,
+        In => None?,
+        InstanceOf => None?,
         _ => unreachable!(),
     }))
 }
@@ -104,6 +106,8 @@ fn interp_big_int_binops(l: &BigInt, r: &BigInt, op: &swc_ecma_ast::BinaryOp) ->
         RShift => None?,
         LShift => None?,
         ZeroFillRShift => None?,
+        In => None?,
+        InstanceOf => None?,
         _ => unreachable!(),
     }))
 }

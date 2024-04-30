@@ -49,3 +49,24 @@ fn conditional_ops() {
     );
     insta::assert_display_snapshot!(res, @"2");
 }
+
+#[test]
+fn functional_in_ops() {
+    let res = run_checks("return 'toString' in { toString: 1 }");
+    insta::assert_display_snapshot!(res, @"true");
+
+    let res = run_checks("return 'toString' in {}");
+    insta::assert_display_snapshot!(res, @"true");
+
+    let res = run_checks("return 'xxxx' in {}");
+    insta::assert_display_snapshot!(res, @"false");
+}
+
+#[test]
+fn functional_instanceof_ops() {
+    let res = run_checks("return {} instanceof Object");
+    insta::assert_display_snapshot!(res, @"true");
+
+    let res = run_checks("return {} instanceof Array");
+    insta::assert_display_snapshot!(res, @"false");
+}
