@@ -3,7 +3,7 @@ use swc_ecma_ast::{
     ComputedPropName, ContinueStmt, DebuggerStmt, Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt,
     ForOfStmt, Ident, KeyValueProp, Lit, Module, ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr,
     PrivateName, Prop, PropName, PropOrSpread, Regex, ReturnStmt, SpreadElement, Stmt, Str, Super,
-    ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
+    ThrowStmt, TplElement, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
 };
 
 use crate::{
@@ -343,6 +343,44 @@ fn to_expression(ctx: &mut ToAstContext, expr: &Instruction) -> Expr {
             flags: flags.clone().into(),
             exp: re.clone().into(),
         })),
+        Instruction::TemplateString(tag, strings_exps) => {
+            let tag = tag.map(|tag| ref_or_inlined_expr(ctx, tag));
+
+            let mut quasis = vec![];
+            let mut exprs = vec![];
+
+            for (string, exp) in strings_exps.iter() {
+                quasis.push(TplElement {
+                    span: Default::default(),
+                    cooked: None, // unused by SWC
+                    tail: exp.is_none(),
+                    raw: string.clone().into(),
+                });
+
+                if let Some(exp) = exp {
+                    let exp = ref_or_inlined_expr(ctx, *exp);
+                    exprs.push(Box::new(exp));
+                } else {
+                    break; // exp is None at the end
+                }
+            }
+
+            let tpl = swc_ecma_ast::Tpl {
+                span: Default::default(),
+                exprs,
+                quasis,
+            };
+
+            match tag {
+                Some(tag) => Expr::TaggedTpl(swc_ecma_ast::TaggedTpl {
+                    span: Default::default(),
+                    tag: Box::new(tag),
+                    tpl: Box::new(tpl),
+                    type_params: None,
+                }),
+                None => Expr::Tpl(tpl),
+            }
+        }
         Instruction::Undefined => Expr::Ident(Ident::new("undefined".into(), Default::default())),
         Instruction::Null => Expr::Lit(Lit::Null(Null {
             span: Default::default(),
@@ -641,6 +679,16 @@ mod tests {
         let tree = module_to_ast(block_group);
         insta::assert_snapshot!(module_to_string(&tree), @r###"
         1 + 2 + 3;
+        "###);
+    }
+
+    #[test]
+    fn to_ast_tpl_string() {
+        let block_group = test_basic_blocks_module("tplString`a${1 + 2}`");
+
+        let tree = module_to_ast(block_group);
+        insta::assert_snapshot!(module_to_string(&tree), @r###"
+        tplString`a${1 + 2}`;
         "###);
     }
 

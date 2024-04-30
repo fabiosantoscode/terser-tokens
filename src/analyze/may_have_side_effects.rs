@@ -9,6 +9,7 @@ impl Instruction {
             Instruction::LitBool(_) => false,
             Instruction::LitString(_) => false,
             Instruction::LitRegExp(_, _) => false,
+            Instruction::TemplateString(tag, _) => tag.is_some(),
             Instruction::Ref(_) => false,
             Instruction::UnaryOp(_, _) => false,
             // may throw due to bigint

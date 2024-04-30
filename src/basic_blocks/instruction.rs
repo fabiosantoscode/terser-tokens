@@ -18,6 +18,8 @@ pub enum Instruction {
     LitString(String),
     /// (expression, flags)
     LitRegExp(String, String),
+    /// (optional_tag, strings_and_exps) where the strings are RAW
+    TemplateString(Option<usize>, Vec<(String, Option<usize>)>),
     Ref(usize),
     UnaryOp(swc_ecma_ast::UnaryOp, usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
@@ -107,6 +109,18 @@ impl Instruction {
             Instruction::LitBool(_) => vec![],
             Instruction::LitString(_) => vec![],
             Instruction::LitRegExp(_, _) => vec![],
+            Instruction::TemplateString(tag, contents) => {
+                let mut ret = vec![];
+                if let Some(tag) = tag {
+                    ret.push(*tag);
+                }
+                for (_, exp) in contents {
+                    if let Some(exp) = exp {
+                        ret.push(*exp);
+                    }
+                }
+                ret
+            }
             Instruction::Ref(id) => vec![*id],
             Instruction::UnaryOp(_, v) => vec![*v],
             Instruction::BinOp(_, l, r) => vec![*l, *r],
@@ -182,6 +196,18 @@ impl Instruction {
             Instruction::LitBool(_) => vec![],
             Instruction::LitString(_) => vec![],
             Instruction::LitRegExp(_, _) => vec![],
+            Instruction::TemplateString(tag, contents) => {
+                let mut ret = vec![];
+                if let Some(tag) = tag {
+                    ret.push(tag);
+                }
+                for (_, exp) in contents {
+                    if let Some(exp) = exp {
+                        ret.push(exp);
+                    }
+                }
+                ret
+            }
             Instruction::Ref(id) => vec![id],
             Instruction::UnaryOp(_, v) => vec![v],
             Instruction::BinOp(_, l, r) => vec![l, r],

@@ -91,6 +91,7 @@ impl JsType {
         }
     }
 
+    /// https://262.ecma-international.org/#sec-tostring
     pub(crate) fn to_string(&self) -> Option<String> {
         match self {
             JsType::TheString(s) => Some(s.clone()),

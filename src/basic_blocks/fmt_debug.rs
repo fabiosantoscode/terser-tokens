@@ -64,6 +64,22 @@ impl Debug for Instruction {
             Instruction::LitRegExp(re, flags) => {
                 write!(f, "/{}/{}", re, flags)
             }
+            Instruction::TemplateString(tag, contents) => {
+                if let Some(tag) = tag {
+                    write!(f, "${}`", tag)?;
+                } else {
+                    write!(f, "`")?;
+                }
+
+                for (str, expr) in contents {
+                    write!(f, "{}", str)?;
+                    if let Some(expr) = expr {
+                        write!(f, "${{${}}}", expr);
+                    }
+                }
+
+                write!(f, "`")
+            }
             Instruction::UnaryOp(op, operand) => {
                 write!(f, "{}${}", op, operand)
             }

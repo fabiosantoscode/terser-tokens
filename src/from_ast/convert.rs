@@ -847,8 +847,43 @@ pub fn expr_to_basic_blocks(
 
             Ok((new_flow, new))
         }
-        Expr::Tpl(_) => todo!(),
-        Expr::TaggedTpl(_) => todo!(),
+        Expr::Tpl(_) | Expr::TaggedTpl(_) => {
+            let mut tpl_flow = vec![];
+
+            let (tag, tpl) = match exp {
+                Expr::Tpl(tpl) => (None, tpl),
+                Expr::TaggedTpl(tpl) => (Some(tpl.tag.as_ref()), tpl.tpl.as_ref()),
+                _ => unreachable!(),
+            };
+
+            let tag = match tag {
+                Some(tag) => {
+                    let (flow, tag) = expr_to_basic_blocks(ctx, tag)?;
+                    tpl_flow.extend(flow);
+
+                    Some(tag)
+                }
+                None => None,
+            };
+
+            assert_eq!(tpl.quasis.len(), tpl.exprs.len() + 1);
+
+            let mut elements = vec![];
+
+            for (expr, quasi) in tpl.exprs.iter().zip(tpl.quasis.iter()) {
+                let (flow, e) = expr_to_basic_blocks(ctx, expr.as_ref())?;
+                tpl_flow.extend(flow);
+
+                elements.push((quasi.raw.to_string(), Some(e)));
+            }
+
+            elements.push((tpl.quasis.last().unwrap().raw.to_string(), None));
+
+            let (flow, tpl) = ctx.push_instruction(Instruction::TemplateString(tag, elements));
+            tpl_flow.extend(flow);
+
+            Ok((tpl_flow, tpl))
+        }
         Expr::Class(class) => {
             let class_name = class.ident.as_ref().map(|id| id.sym.to_string());
             class_to_basic_blocks(ctx, class.class.as_ref(), class_name)
@@ -999,6 +1034,18 @@ mod tests {
             $3 = typeof $2
             $4 = $0
             $5 = undefined
+        }
+        "###);
+    }
+
+    #[test]
+    fn convert_tpl_string() {
+        let s = test_basic_blocks("var a = tplTag`abc${1}`;");
+        insta::assert_debug_snapshot!(s, @r###"
+        {
+            $0 = global "tplTag"
+            $1 = 1
+            $2 = $0`abc${$1}`
         }
         "###);
     }

@@ -15,6 +15,41 @@ pub fn interpret(ctx: &mut InterpretCtx, instruction: &Instruction) -> Option<Js
         Instruction::LitBool(b) => JsType::TheBoolean(*b),
         Instruction::LitString(s) => JsType::TheString(s.clone()),
         Instruction::LitRegExp(_, _) => JsType::RegExp,
+        Instruction::TemplateString(tag, contents) => {
+            match tag {
+                Some(_) => return None, // TODO call template string tags
+                _ => {
+                    let mut len = 0;
+                    let mut expr_strs = vec![];
+
+                    for (raw_str, exp) in contents {
+                        len += raw_str.len();
+                        if let Some(exp) = exp {
+                            let exp = ctx.get_variable(*exp)?.to_string()?;
+                            len += exp.len();
+                            expr_strs.push(exp);
+                        } else {
+                            expr_strs.push(String::new());
+                        }
+                    }
+
+                    assert_eq!(contents.len(), expr_strs.len()); // we pushed an empty string at the end above
+
+                    let mut s = String::with_capacity(len);
+                    for ((raw_str, _), exp) in contents.iter().zip(expr_strs.into_iter()) {
+                        let baked_str = if raw_str.contains('\\') {
+                            return None; // TODO bake template strings
+                        } else {
+                            raw_str
+                        };
+                        s.push_str(baked_str);
+                        s.push_str(&exp);
+                    }
+
+                    JsType::TheString(s)
+                }
+            }
+        }
         Instruction::Ref(var_idx) => ctx.get_variable(*var_idx)?.clone(),
         Instruction::UnaryOp(op, operand) => {
             let operand = ctx.get_variable(*operand)?;

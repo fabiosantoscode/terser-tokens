@@ -38,4 +38,7 @@ mod switch;
 mod tool;
 
 #[cfg(test)]
+mod template_strings;
+
+#[cfg(test)]
 use tool::*;
