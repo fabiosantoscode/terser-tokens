@@ -16,6 +16,7 @@ pub enum Instruction {
     Ref(usize),
     UnaryOp(swc_ecma_ast::UnaryOp, usize),
     BinOp(swc_ecma_ast::BinaryOp, usize, usize),
+    PrivateIn(String, usize),
     /// (varname, is_incr)
     IncrDecr(LHS, IncrDecr),
     /// (varname, is_incr)
@@ -102,6 +103,7 @@ impl Instruction {
             Instruction::Ref(id) => vec![*id],
             Instruction::UnaryOp(_, v) => vec![*v],
             Instruction::BinOp(_, l, r) => vec![*l, *r],
+            Instruction::PrivateIn(_, r) => vec![*r],
             Instruction::IncrDecr(v, _) => v.used_vars(),
             Instruction::IncrDecrPostfix(v, _) => v.used_vars(),
             Instruction::Phi(vars) => vars.iter().cloned().collect(),
@@ -174,6 +176,7 @@ impl Instruction {
             Instruction::Ref(id) => vec![id],
             Instruction::UnaryOp(_, v) => vec![v],
             Instruction::BinOp(_, l, r) => vec![l, r],
+            Instruction::PrivateIn(_, r) => vec![r],
             Instruction::IncrDecr(v, _) => v.used_vars_mut(),
             Instruction::IncrDecrPostfix(v, _) => v.used_vars_mut(),
             Instruction::Phi(vars) => vars.iter_mut().collect(),

@@ -405,8 +405,8 @@ pub fn expr_to_basic_blocks(
         Expr::Bin(bin) => {
             let mut bin_flow = vec![];
 
-            match &bin.op {
-                BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing => {
+            match (&bin.left.as_ref(), &bin.op) {
+                (_, BinaryOp::LogicalAnd | BinaryOp::LogicalOr | BinaryOp::NullishCoalescing) => {
                     let kind = match bin.op {
                         BinaryOp::LogicalAnd => LogicalCondKind::And,
                         BinaryOp::LogicalOr => LogicalCondKind::Or,
@@ -430,7 +430,21 @@ pub fn expr_to_basic_blocks(
 
                     Ok((bin_flow, phi))
                 }
-                BinaryOp::In | BinaryOp::InstanceOf => todo!("in/instanceof"),
+                (Expr::PrivateName(priv_name), BinaryOp::In) => {
+                    // #private in x
+
+                    let (flow, r) = expr_to_basic_blocks(ctx, &bin.right)?;
+                    bin_flow.extend(flow);
+
+                    let (flow, private_in) = ctx
+                        .push_instruction(Instruction::PrivateIn(priv_name.id.sym.to_string(), r));
+                    bin_flow.extend(flow);
+
+                    Ok((bin_flow, private_in))
+                }
+                (_, BinaryOp::In | BinaryOp::InstanceOf) => {
+                    todo!("in/instanceof")
+                }
                 _ => {
                     let (left_flow, l) = expr_to_basic_blocks(ctx, &bin.left)?;
                     bin_flow.extend(left_flow);
@@ -872,7 +886,9 @@ pub fn expr_to_basic_blocks(
             Ok((await_flow, exit))
         }
         Expr::OptChain(_) => todo!(),
-        Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
+        Expr::PrivateName(_) => {
+            unreachable!("Expr::PrivateName is only valid in `#private in` expression")
+        }
         Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
         Expr::JSXMember(_)
         | Expr::JSXNamespacedName(_)

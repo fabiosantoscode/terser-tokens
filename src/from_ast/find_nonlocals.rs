@@ -494,7 +494,7 @@ fn expr_nonlocals<'a>(ctx: &mut NonLocalsContext<'a>, exp: &'a Expr) {
             expr_nonlocals(ctx, arg);
         }
         Expr::OptChain(_) => todo!(),
-        Expr::PrivateName(_) => todo!("handle this in the binary op and member op"),
+        Expr::PrivateName(_) => {}
         Expr::Invalid(_) => unreachable!("Expr::Invalid from SWC should be impossible"),
         Expr::JSXMember(_)
         | Expr::JSXNamespacedName(_)

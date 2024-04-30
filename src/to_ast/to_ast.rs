@@ -1,9 +1,9 @@
 use swc_ecma_ast::{
-    op, AssignExpr, AssignOp, AwaitExpr, BinExpr, BlockStmt, CallExpr, Callee, ComputedPropName,
-    ContinueStmt, DebuggerStmt, Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt, ForOfStmt, Ident,
-    KeyValueProp, Lit, Module, ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr, Prop, PropName,
-    PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, Super, ThrowStmt, TryStmt, UnaryExpr,
-    UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
+    op, AssignExpr, AssignOp, AwaitExpr, BinExpr, BinaryOp, BlockStmt, CallExpr, Callee,
+    ComputedPropName, ContinueStmt, DebuggerStmt, Expr, ExprOrSpread, ExprStmt, ForHead, ForInStmt,
+    ForOfStmt, Ident, KeyValueProp, Lit, Module, ModuleItem, NewExpr, Null, ObjectLit, PatOrExpr,
+    PrivateName, Prop, PropName, PropOrSpread, ReturnStmt, SpreadElement, Stmt, Str, Super,
+    ThrowStmt, TryStmt, UnaryExpr, UnaryOp, UpdateExpr, UpdateOp, WhileStmt, YieldExpr,
 };
 
 use crate::{
@@ -358,6 +358,19 @@ fn to_expression(ctx: &mut ToAstContext, expr: &Instruction) -> Expr {
                 span: Default::default(),
                 op: op.clone(),
                 left: Box::new(left),
+                right: Box::new(right),
+            })
+        }
+        Instruction::PrivateIn(priv_name, right) => {
+            let right = ref_or_inlined_expr(ctx, *right);
+
+            Expr::Bin(swc_ecma_ast::BinExpr {
+                span: Default::default(),
+                op: BinaryOp::In,
+                left: Box::new(Expr::PrivateName(PrivateName {
+                    span: Default::default(),
+                    id: Ident::new(priv_name.clone().into(), Default::default()),
+                })),
                 right: Box::new(right),
             })
         }

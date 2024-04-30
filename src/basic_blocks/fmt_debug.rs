@@ -64,6 +64,9 @@ impl Debug for Instruction {
             Instruction::BinOp(op, l, r) => {
                 write!(f, "${} {} ${}", l, op, r)
             }
+            Instruction::PrivateIn(priv_name, expr) => {
+                write!(f, "#{} in ${}", priv_name, expr)
+            }
             Instruction::IncrDecr(lhs, op) => {
                 write!(f, "{}{:?}", op.op_string(), lhs)
             }

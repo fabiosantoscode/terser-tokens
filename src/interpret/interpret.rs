@@ -39,6 +39,7 @@ pub fn interpret(ctx: &mut InterpretCtx, instruction: &Instruction) -> Option<Js
         Instruction::BinOp(op, l, r) => {
             return interp_math_ops(ctx, *l, *r, op);
         }
+        Instruction::PrivateIn(_, _) => JsType::Boolean,
         Instruction::IncrDecr(lhs, incr) => match ctx.get_lhs(lhs)? {
             JsType::Number => JsType::Number,
             JsType::TheNumber(n) => {

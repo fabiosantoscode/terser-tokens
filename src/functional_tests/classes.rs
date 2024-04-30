@@ -54,6 +54,18 @@ fn class_private_props() {
 }
 
 #[test]
+fn class_private_in() {
+    let res = run_checks(
+        "class X {
+            #prop = 1;
+            getProp() { return #prop in this; }
+        };
+        return new X().getProp()",
+    );
+    insta::assert_display_snapshot!(res, @"true");
+}
+
+#[test]
 fn class_computed_members() {
     let res = run_checks(
         "let x = 1;

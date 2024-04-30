@@ -11,6 +11,7 @@ impl Instruction {
             Instruction::UnaryOp(_, _) => false,
             // may throw due to bigint
             Instruction::BinOp(_, _, _) => true,
+            Instruction::PrivateIn(_, _) => false,
             // Can throw a conversion error (some_symbol++)
             Instruction::IncrDecr(_, _) => true,
             Instruction::IncrDecrPostfix(_, _) => true,
